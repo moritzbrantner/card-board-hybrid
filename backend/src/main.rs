@@ -18,7 +18,6 @@ type SharedState = Arc<AppState>;
 
 struct AppState {
     store: Mutex<SqliteMatchStore>,
-    active_match: Mutex<Option<StoredMatch>>,
 }
 
 #[derive(Serialize)]
@@ -43,7 +42,6 @@ async fn main() {
 fn create_app(store: SqliteMatchStore) -> Router {
     let state = Arc::new(AppState {
         store: Mutex::new(store),
-        active_match: Mutex::new(None),
     });
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -54,10 +52,7 @@ fn create_app(store: SqliteMatchStore) -> Router {
         .route("/api/health", get(health))
         .route("/api/matches", post(create_match))
         .route("/api/matches/{match_id}", get(load_match))
-        .route("/api/match", get(get_match))
-        .route("/api/match/new", post(new_match))
-        .route("/api/match/action", post(apply_action))
-        .route("/api/match/resolve", post(resolve_turn))
+        .route("/api/matches/{match_id}/actions", post(apply_match_action))
         .layer(cors)
         .with_state(state)
 }
@@ -88,7 +83,6 @@ async fn create_match(State(state): State<SharedState>) -> impl IntoResponse {
         }
     };
 
-    set_active_match(&state, created.clone());
     Json(MatchResponse::from(created)).into_response()
 }
 
@@ -116,108 +110,51 @@ async fn load_match(
         }
     };
 
-    set_active_match(&state, loaded.clone());
     Json(MatchResponse::from(loaded)).into_response()
 }
 
-async fn get_match(State(state): State<SharedState>) -> impl IntoResponse {
-    let active = active_or_create_match(&state);
-
-    match active {
-        Ok(active) => Json(active.state).into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn new_match(State(state): State<SharedState>) -> impl IntoResponse {
-    let created = {
+async fn apply_match_action(
+    State(state): State<SharedState>,
+    Path(match_id): Path<String>,
+    Json(request): Json<MatchActionRequest>,
+) -> impl IntoResponse {
+    let saved = {
         let mut store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        match store.create_match() {
-            Ok(created) => created,
+        let mut stored_match = match store.load_match(&match_id) {
+            Ok(Some(stored_match)) => stored_match,
+            Ok(None) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(ApiError {
+                        message: format!("Match {match_id} was not found"),
+                    }),
+                )
+                    .into_response();
+            }
             Err(error) => return store_error_response(error),
+        };
+
+        if let Err(error) = stored_match.state.apply_action(request) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiError {
+                    message: error.to_string(),
+                }),
+            )
+                .into_response();
         }
+
+        if let Err(error) = store.save_match(&stored_match.id, &stored_match.state) {
+            return store_error_response(error);
+        }
+
+        stored_match
     };
 
-    set_active_match(&state, created.clone());
-    Json(created.state).into_response()
-}
-
-async fn apply_action(
-    State(state): State<SharedState>,
-    Json(request): Json<MatchActionRequest>,
-) -> impl IntoResponse {
-    let mut active_match = state
-        .active_match
-        .lock()
-        .expect("active match lock should not be poisoned");
-    let Some(active_match) = active_match.as_mut() else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ApiError {
-                message: "No match is loaded".to_string(),
-            }),
-        )
-            .into_response();
-    };
-
-    match active_match.state.apply_action(request) {
-        Ok(()) => Json(active_match.state.clone()).into_response(),
-        Err(error) => (
-            StatusCode::BAD_REQUEST,
-            Json(ApiError {
-                message: error.to_string(),
-            }),
-        )
-            .into_response(),
-    }
-}
-
-async fn resolve_turn(State(state): State<SharedState>) -> impl IntoResponse {
-    let mut active_match = state
-        .active_match
-        .lock()
-        .expect("active match lock should not be poisoned");
-    let Some(active_match) = active_match.as_mut() else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ApiError {
-                message: "No match is loaded".to_string(),
-            }),
-        )
-            .into_response();
-    };
-
-    let _ = active_match.state.apply_action(MatchActionRequest::EndTurn);
-    Json(active_match.state.clone()).into_response()
-}
-
-fn set_active_match(state: &SharedState, active: StoredMatch) {
-    *state
-        .active_match
-        .lock()
-        .expect("active match lock should not be poisoned") = Some(active);
-}
-
-fn active_or_create_match(state: &SharedState) -> Result<StoredMatch, MatchStoreError> {
-    if let Some(active) = state
-        .active_match
-        .lock()
-        .expect("active match lock should not be poisoned")
-        .clone()
-    {
-        return Ok(active);
-    }
-
-    let created = state
-        .store
-        .lock()
-        .expect("store lock should not be poisoned")
-        .create_match()?;
-    set_active_match(state, created.clone());
-    Ok(created)
+    Json(MatchResponse::from(saved)).into_response()
 }
 
 fn store_error_response(error: MatchStoreError) -> axum::response::Response {
@@ -316,6 +253,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn match_actions_persist_and_reload_by_match_id() {
+        let path = test_db_path("action-persist");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, created) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let match_id = created["matchId"].as_str().expect("match id should exist");
+
+        let (status, acted) = json_request(
+            app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/matches/{match_id}/actions"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"type":"endTurn"}"#))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(acted["matchId"], match_id);
+        assert_eq!(acted["matchState"]["round"], 2);
+        assert_eq!(
+            acted["matchState"]["player"]["hand"]
+                .as_array()
+                .unwrap()
+                .len(),
+            5
+        );
+        assert!(acted["matchState"]["player"].get("deck").is_none());
+        assert!(acted["matchState"]["player"].get("discard").is_none());
+        assert!(acted["matchState"]["opponent"].get("hand").is_none());
+
+        let reopened = create_app(SqliteMatchStore::new(&path).expect("store should reopen"));
+        let (status, loaded) = json_request(
+            reopened,
+            Request::builder()
+                .uri(format!("/api/matches/{match_id}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(loaded["matchState"], acted["matchState"]);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
     async fn missing_match_returns_json_404() {
         let path = test_db_path("missing");
         let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
@@ -325,6 +319,28 @@ mod tests {
             Request::builder()
                 .uri("/api/matches/rl-unknown")
                 .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["message"], "Match rl-unknown was not found");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn missing_match_action_returns_json_404() {
+        let path = test_db_path("missing-action");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, body) = json_request(
+            app,
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches/rl-unknown/actions")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"type":"endTurn"}"#))
                 .expect("request should build"),
         )
         .await;

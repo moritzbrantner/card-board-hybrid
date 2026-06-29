@@ -262,7 +262,7 @@ function MatchPage({
           selectedCard.kind.type === "unit"
             ? { type: "hex" as const, coord: tile.coord }
             : { type: "piece" as const, pieceId: piece?.id ?? "" };
-        void runAction(() => playCard(selectedCard.id, target));
+        void runAction(() => playCard(matchId, selectedCard.id, target));
       } else {
         setNotice("That card cannot target this hex.");
       }
@@ -271,11 +271,11 @@ function MatchPage({
 
     if (selectedPiece) {
       if (!piece && isLegalMove(match, selectedPiece, tile.coord)) {
-        void runAction(() => movePiece(selectedPiece.id, tile.coord));
+        void runAction(() => movePiece(matchId, selectedPiece.id, tile.coord));
         return;
       }
       if (piece && isLegalAttack(selectedPiece, piece)) {
-        void runAction(() => attack(selectedPiece.id, piece.id));
+        void runAction(() => attack(matchId, selectedPiece.id, piece.id));
         return;
       }
     }
@@ -311,7 +311,7 @@ function MatchPage({
             <button
               className="primary-button"
               type="button"
-              onClick={() => void runAction(endTurn)}
+              onClick={() => void runAction(() => endTurn(matchId))}
               disabled={busy || match.phase === "matchOver"}
             >
               <Play size={18} />
