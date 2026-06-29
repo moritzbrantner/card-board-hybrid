@@ -80,6 +80,7 @@ export type Unit = {
   id: string;
   side: Side;
   name: string;
+  templateId?: string;
   attack: number;
   armor: number;
   maxArmor: number;
@@ -127,6 +128,22 @@ export type MatchResponse = {
   matchState: MatchState;
 };
 
+export type ReplayVisibility = "public" | "revealed";
+
+export type MatchSummary = {
+  matchId: string;
+  createdAt: number;
+  updatedAt: number;
+  round: number;
+  phase: Phase;
+  winner: Side | null;
+  frameCount: number;
+};
+
+export type MatchArchiveResponse = {
+  matches: MatchSummary[];
+};
+
 export type ActionTarget =
   | {
       type: "hex";
@@ -156,3 +173,107 @@ export type MatchActionRequest =
   | {
       type: "endTurn";
     };
+
+export type CardSummary = {
+  templateId: string;
+  name: string;
+  rarity: Rarity;
+  cost: number;
+  kind: CardKind;
+};
+
+export type ReplayEvent =
+  | {
+      type: "matchCreated";
+    }
+  | {
+      type: "turnStarted";
+      side: Side;
+      round: number;
+    }
+  | {
+      type: "turnEnded";
+      side: Side;
+      round: number;
+    }
+  | {
+      type: "roundStarted";
+      round: number;
+    }
+  | {
+      type: "cardDrawn";
+      side: Side;
+      card: CardSummary | null;
+      hidden: boolean;
+    }
+  | {
+      type: "cardPlayed";
+      side: Side;
+      card: CardSummary;
+      target: ActionTarget;
+    }
+  | {
+      type: "unitSummoned";
+      side: Side;
+      unitId: string;
+      name: string;
+      position: HexCoord;
+    }
+  | {
+      type: "pieceMoved";
+      side: Side;
+      pieceId: string;
+      from: HexCoord;
+      to: HexCoord;
+    }
+  | {
+      type: "pieceAttacked";
+      side: Side;
+      attackerId: string;
+      targetId: string;
+      damageToTarget: number;
+      counterDamageToAttacker: number;
+    }
+  | {
+      type: "pieceHealed";
+      side: Side;
+      pieceId: string;
+      amount: number;
+    }
+  | {
+      type: "pieceBuffed";
+      side: Side;
+      pieceId: string;
+      attackDelta: number;
+      armorDelta: number;
+    }
+  | {
+      type: "pieceDamaged";
+      side: Side;
+      pieceId: string;
+      amount: number;
+    }
+  | {
+      type: "unitDestroyed";
+      side: Side;
+      unitId: string;
+      name: string;
+    }
+  | {
+      type: "matchEnded";
+      winner: Side;
+    };
+
+export type ReplayFrame = {
+  frameIndex: number;
+  actionIndex: number | null;
+  event: ReplayEvent;
+  matchState: MatchState;
+};
+
+export type MatchReplayResponse = {
+  matchId: string;
+  visibility: ReplayVisibility;
+  summary: MatchSummary;
+  frames: ReplayFrame[];
+};

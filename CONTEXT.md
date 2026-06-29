@@ -55,3 +55,19 @@ _Avoid_: uncommon card
 **Rare card**:
 A starter deck card with only one copy in the deck.
 _Avoid_: legendary card
+
+**Match archive**:
+The list of replay-capable matches stored by the backend.
+_Avoid_: match picker, database browser
+
+**Replay event**:
+A durable record of one meaningful match occurrence, such as a turn start, draw, card play, movement, attack, unit destruction, or match end.
+_Avoid_: text log line
+
+**Replay frame**:
+The match state captured immediately after a replay event.
+_Avoid_: screenshot, animation frame
+
+**Replay visibility**:
+The rule that decides whether hidden card information is redacted or revealed in replay responses.
+_Avoid_: debug mode

@@ -1,7 +1,9 @@
 import type {
   ActionTarget,
   CatalogResponse,
+  MatchArchiveResponse,
   MatchActionRequest,
+  MatchReplayResponse,
   MatchResponse,
   MatchState,
   HexCoord,
@@ -41,6 +43,14 @@ export function createMatch() {
 
 export function loadMatch(matchId: string) {
   return request<MatchResponse>(`/api/matches/${encodeURIComponent(matchId)}`);
+}
+
+export function loadMatches() {
+  return request<MatchArchiveResponse>("/api/matches");
+}
+
+export function loadReplay(matchId: string) {
+  return request<MatchReplayResponse>(`/api/matches/${encodeURIComponent(matchId)}/replay`);
 }
 
 export function loadCatalog() {

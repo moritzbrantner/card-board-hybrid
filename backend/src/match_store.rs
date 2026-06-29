@@ -6,9 +6,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-use crate::match_session::MatchState;
+use crate::match_session::{MatchActionRequest, MatchState, RecordedReplayFrame, ReplayEvent};
 
 pub const MATCH_DATABASE_PATH_ENV: &str = "RUNE_LANES_DB_PATH";
 
@@ -16,6 +16,29 @@ pub const MATCH_DATABASE_PATH_ENV: &str = "RUNE_LANES_DB_PATH";
 pub struct StoredMatch {
     pub id: String,
     pub state: MatchState,
+}
+
+#[derive(Clone, Debug)]
+pub struct StoredMatchSummary {
+    pub id: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub frame_count: usize,
+    pub state: MatchState,
+}
+
+#[derive(Clone, Debug)]
+pub struct StoredReplayFrame {
+    pub frame_index: u32,
+    pub action_index: Option<u32>,
+    pub event: ReplayEvent,
+    pub state: MatchState,
+}
+
+#[derive(Clone, Debug)]
+pub struct StoredReplay {
+    pub summary: StoredMatchSummary,
+    pub frames: Vec<StoredReplayFrame>,
 }
 
 pub struct SqliteMatchStore {
@@ -76,11 +99,31 @@ impl SqliteMatchStore {
             CREATE TABLE IF NOT EXISTS matches (
                 id TEXT PRIMARY KEY NOT NULL,
                 snapshot_json TEXT NOT NULL,
+                initial_snapshot_json TEXT,
+                completed_at INTEGER,
                 created_at INTEGER NOT NULL DEFAULT (unixepoch()),
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())
             );
+            CREATE TABLE IF NOT EXISTS match_actions (
+                match_id TEXT NOT NULL,
+                action_index INTEGER NOT NULL,
+                request_json TEXT NOT NULL,
+                accepted_at INTEGER NOT NULL,
+                PRIMARY KEY (match_id, action_index)
+            );
+            CREATE TABLE IF NOT EXISTS match_replay_frames (
+                match_id TEXT NOT NULL,
+                frame_index INTEGER NOT NULL,
+                action_index INTEGER,
+                event_json TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (match_id, frame_index)
+            );
             ",
         )?;
+        add_column_if_missing(&connection, "matches", "initial_snapshot_json", "TEXT")?;
+        add_column_if_missing(&connection, "matches", "completed_at", "INTEGER")?;
 
         Ok(Self { connection })
     }
@@ -90,23 +133,57 @@ impl SqliteMatchStore {
             let id = readable_match_id(attempt);
             let state = MatchState::new();
             let snapshot = state.to_snapshot_json()?;
+            let initial_frame = state.initial_replay_frame();
+            let event_json = serde_json::to_string(&initial_frame.event)?;
 
-            let inserted = self.connection.execute(
+            let transaction = self.connection.transaction()?;
+            let inserted = transaction.execute(
                 "
-                INSERT OR IGNORE INTO matches (id, snapshot_json, created_at, updated_at)
-                VALUES (?1, ?2, unixepoch(), unixepoch())
+                INSERT OR IGNORE INTO matches (
+                    id,
+                    snapshot_json,
+                    initial_snapshot_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?1, ?2, ?2, unixepoch(), unixepoch())
                 ",
                 params![id, snapshot],
             )?;
 
             if inserted == 1 {
+                insert_replay_frame(&transaction, &id, 0, &initial_frame, &event_json)?;
+                transaction.commit()?;
                 return Ok(StoredMatch { id, state });
             }
+            transaction.commit()?;
         }
 
         let id = readable_match_id(99);
         let state = MatchState::new();
-        self.save_match(&id, &state)?;
+        let snapshot = state.to_snapshot_json()?;
+        let initial_frame = state.initial_replay_frame();
+        let event_json = serde_json::to_string(&initial_frame.event)?;
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
+            "
+            INSERT INTO matches (
+                id,
+                snapshot_json,
+                initial_snapshot_json,
+                created_at,
+                updated_at
+            )
+            VALUES (?1, ?2, ?2, unixepoch(), unixepoch())
+            ON CONFLICT(id) DO UPDATE SET
+                snapshot_json = excluded.snapshot_json,
+                initial_snapshot_json = excluded.initial_snapshot_json,
+                updated_at = unixepoch()
+            ",
+            params![id, snapshot],
+        )?;
+        insert_replay_frame(&transaction, &id, 0, &initial_frame, &event_json)?;
+        transaction.commit()?;
         Ok(StoredMatch { id, state })
     }
 
@@ -131,20 +208,266 @@ impl SqliteMatchStore {
             .map_err(MatchStoreError::from)
     }
 
-    pub fn save_match(&mut self, id: &str, state: &MatchState) -> Result<(), MatchStoreError> {
-        let snapshot = state.to_snapshot_json()?;
-        self.connection.execute(
+    pub fn next_action_index(&self, id: &str) -> Result<u32, MatchStoreError> {
+        let next = self.connection.query_row(
             "
-            INSERT INTO matches (id, snapshot_json, created_at, updated_at)
-            VALUES (?1, ?2, unixepoch(), unixepoch())
-            ON CONFLICT(id) DO UPDATE SET
-                snapshot_json = excluded.snapshot_json,
-                updated_at = unixepoch()
+            SELECT COALESCE(MAX(action_index) + 1, 0)
+            FROM match_actions
+            WHERE match_id = ?1
             ",
+            params![id],
+            |row| row.get::<_, i64>(0),
+        )?;
+
+        Ok(next as u32)
+    }
+
+    pub fn save_action_and_replay_frames(
+        &mut self,
+        id: &str,
+        action_index: u32,
+        action: &MatchActionRequest,
+        state: &MatchState,
+        frames: &[RecordedReplayFrame],
+    ) -> Result<(), MatchStoreError> {
+        let snapshot = state.to_snapshot_json()?;
+        let request_json = serde_json::to_string(action)?;
+        let completed_at = if state.winner.is_some() {
+            "completed_at = COALESCE(completed_at, unixepoch()),"
+        } else {
+            ""
+        };
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
+            "
+            INSERT INTO match_actions (match_id, action_index, request_json, accepted_at)
+            VALUES (?1, ?2, ?3, unixepoch())
+            ",
+            params![id, i64::from(action_index), request_json],
+        )?;
+
+        let next_frame_index = next_frame_index(&transaction, id)?;
+        for (offset, frame) in frames.iter().enumerate() {
+            let event_json = serde_json::to_string(&frame.event)?;
+            insert_replay_frame(
+                &transaction,
+                id,
+                next_frame_index + offset as u32,
+                frame,
+                &event_json,
+            )?;
+        }
+
+        transaction.execute(
+            &format!(
+                "
+                UPDATE matches
+                SET snapshot_json = ?2,
+                    {completed_at}
+                    updated_at = unixepoch()
+                WHERE id = ?1
+                "
+            ),
             params![id, snapshot],
         )?;
+        transaction.commit()?;
         Ok(())
     }
+
+    pub fn list_replayable_matches(&self) -> Result<Vec<StoredMatchSummary>, MatchStoreError> {
+        let mut statement = self.connection.prepare(
+            "
+            SELECT
+                matches.id,
+                matches.snapshot_json,
+                matches.created_at,
+                matches.updated_at,
+                COUNT(match_replay_frames.frame_index) AS frame_count
+            FROM matches
+            JOIN match_replay_frames ON match_replay_frames.match_id = matches.id
+            WHERE matches.initial_snapshot_json IS NOT NULL
+            GROUP BY matches.id
+            HAVING frame_count > 0
+            ORDER BY matches.updated_at DESC
+            ",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })?;
+
+        let mut summaries = Vec::new();
+        for row in rows {
+            let (id, snapshot, created_at, updated_at, frame_count) = row?;
+            let state = MatchState::from_snapshot_json(&snapshot)?;
+            summaries.push(StoredMatchSummary {
+                id,
+                created_at,
+                updated_at,
+                frame_count: frame_count as usize,
+                state,
+            });
+        }
+
+        Ok(summaries)
+    }
+
+    pub fn load_replay(&self, id: &str) -> Result<Option<StoredReplay>, MatchStoreError> {
+        let summary = self.load_replay_summary(id)?;
+        let Some(summary) = summary else {
+            return Ok(None);
+        };
+
+        let mut statement = self.connection.prepare(
+            "
+            SELECT frame_index, action_index, event_json, snapshot_json
+            FROM match_replay_frames
+            WHERE match_id = ?1
+            ORDER BY frame_index ASC
+            ",
+        )?;
+        let rows = statement.query_map(params![id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+
+        let mut frames = Vec::new();
+        for row in rows {
+            let (frame_index, action_index, event_json, snapshot_json) = row?;
+            let event = serde_json::from_str::<ReplayEvent>(&event_json)?;
+            let state = MatchState::from_snapshot_json(&snapshot_json)?;
+            frames.push(StoredReplayFrame {
+                frame_index: frame_index as u32,
+                action_index: action_index.map(|index| index as u32),
+                event,
+                state,
+            });
+        }
+
+        if frames.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(StoredReplay { summary, frames }))
+    }
+
+    fn load_replay_summary(&self, id: &str) -> Result<Option<StoredMatchSummary>, MatchStoreError> {
+        let row: Option<(String, String, i64, i64, i64)> = self
+            .connection
+            .query_row(
+                "
+                SELECT
+                    matches.id,
+                    matches.snapshot_json,
+                    matches.created_at,
+                    matches.updated_at,
+                    COUNT(match_replay_frames.frame_index) AS frame_count
+                FROM matches
+                LEFT JOIN match_replay_frames ON match_replay_frames.match_id = matches.id
+                WHERE matches.id = ?1
+                    AND matches.initial_snapshot_json IS NOT NULL
+                GROUP BY matches.id
+                HAVING frame_count > 0
+                ",
+                params![id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+
+        row.map(|(id, snapshot, created_at, updated_at, frame_count)| {
+            MatchState::from_snapshot_json(&snapshot).map(|state| StoredMatchSummary {
+                id,
+                created_at,
+                updated_at,
+                frame_count: frame_count as usize,
+                state,
+            })
+        })
+        .transpose()
+        .map_err(MatchStoreError::from)
+    }
+}
+
+fn add_column_if_missing(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), MatchStoreError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for existing in columns {
+        if existing? == column {
+            return Ok(());
+        }
+    }
+
+    connection.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+        [],
+    )?;
+    Ok(())
+}
+
+fn next_frame_index(transaction: &Transaction<'_>, id: &str) -> Result<u32, MatchStoreError> {
+    let next = transaction.query_row(
+        "
+        SELECT COALESCE(MAX(frame_index) + 1, 0)
+        FROM match_replay_frames
+        WHERE match_id = ?1
+        ",
+        params![id],
+        |row| row.get::<_, i64>(0),
+    )?;
+
+    Ok(next as u32)
+}
+
+fn insert_replay_frame(
+    transaction: &Transaction<'_>,
+    id: &str,
+    frame_index: u32,
+    frame: &RecordedReplayFrame,
+    event_json: &str,
+) -> Result<(), MatchStoreError> {
+    transaction.execute(
+        "
+        INSERT INTO match_replay_frames (
+            match_id,
+            frame_index,
+            action_index,
+            event_json,
+            snapshot_json,
+            created_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, unixepoch())
+        ",
+        params![
+            id,
+            i64::from(frame_index),
+            frame.action_index.map(i64::from),
+            event_json,
+            frame.snapshot_json
+        ],
+    )?;
+    Ok(())
 }
 
 pub fn database_path_from_environment() -> PathBuf {
@@ -239,6 +562,41 @@ mod tests {
             .expect("lookup should succeed");
 
         assert!(missing.is_none());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn legacy_matches_without_replay_metadata_are_excluded_from_replays() {
+        let path = test_db_path("legacy");
+        let store = SqliteMatchStore::new(&path).expect("store should open");
+        let legacy_state = MatchState::new();
+        let snapshot = legacy_state
+            .to_snapshot_json()
+            .expect("snapshot should serialize");
+        store
+            .connection
+            .execute(
+                "
+                INSERT INTO matches (id, snapshot_json, created_at, updated_at)
+                VALUES (?1, ?2, unixepoch(), unixepoch())
+                ",
+                params!["rl-legacy", snapshot],
+            )
+            .expect("legacy row should insert");
+
+        assert!(
+            store
+                .list_replayable_matches()
+                .expect("archive should load")
+                .is_empty()
+        );
+        assert!(
+            store
+                .load_replay("rl-legacy")
+                .expect("replay lookup should succeed")
+                .is_none()
+        );
+
         let _ = fs::remove_file(path);
     }
 

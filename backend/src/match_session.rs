@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::card_catalog::{starter_card_templates, starter_copy_count};
 
@@ -25,6 +26,104 @@ pub struct MatchState {
     pub log: Vec<String>,
     pub winner: Option<Side>,
     next_unit_id: u32,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ReplayVisibility {
+    Public,
+    Revealed,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardSummary {
+    pub template_id: String,
+    pub name: String,
+    pub rarity: Rarity,
+    pub cost: u8,
+    pub kind: CardKind,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ReplayEvent {
+    MatchCreated,
+    TurnStarted {
+        side: Side,
+        round: u32,
+    },
+    TurnEnded {
+        side: Side,
+        round: u32,
+    },
+    RoundStarted {
+        round: u32,
+    },
+    CardDrawn {
+        side: Side,
+        card: Option<CardSummary>,
+        hidden: bool,
+    },
+    CardPlayed {
+        side: Side,
+        card: CardSummary,
+        target: ActionTarget,
+    },
+    UnitSummoned {
+        side: Side,
+        unit_id: String,
+        name: String,
+        position: HexCoord,
+    },
+    PieceMoved {
+        side: Side,
+        piece_id: String,
+        from: HexCoord,
+        to: HexCoord,
+    },
+    PieceAttacked {
+        side: Side,
+        attacker_id: String,
+        target_id: String,
+        damage_to_target: i32,
+        counter_damage_to_attacker: i32,
+    },
+    PieceHealed {
+        side: Side,
+        piece_id: String,
+        amount: i32,
+    },
+    PieceBuffed {
+        side: Side,
+        piece_id: String,
+        attack_delta: i32,
+        armor_delta: i32,
+    },
+    PieceDamaged {
+        side: Side,
+        piece_id: String,
+        amount: i32,
+    },
+    UnitDestroyed {
+        side: Side,
+        unit_id: String,
+        name: String,
+    },
+    MatchEnded {
+        winner: Side,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct RecordedReplayFrame {
+    pub action_index: Option<u32>,
+    pub event: ReplayEvent,
+    pub snapshot_json: String,
 }
 
 impl Serialize for MatchState {
@@ -152,6 +251,8 @@ pub struct Unit {
     pub id: String,
     pub side: Side,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template_id: Option<String>,
     pub attack: i32,
     pub armor: i32,
     pub max_armor: i32,
@@ -200,7 +301,7 @@ pub enum SpellEffect {
     Damage { amount: i32 },
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -222,7 +323,7 @@ pub enum MatchActionRequest {
     EndTurn,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -298,6 +399,28 @@ impl MatchState {
         serde_json::from_str::<MatchSnapshot>(snapshot).map(Self::from)
     }
 
+    pub fn initial_replay_frame(&self) -> RecordedReplayFrame {
+        RecordedReplayFrame {
+            action_index: None,
+            event: ReplayEvent::MatchCreated,
+            snapshot_json: self
+                .to_snapshot_json()
+                .expect("match snapshot should serialize for replay"),
+        }
+    }
+
+    pub fn replay_value(&self, visibility: ReplayVisibility) -> serde_json::Value {
+        json!({
+            "round": self.round,
+            "phase": self.phase,
+            "player": self.player.replay_value(true),
+            "opponent": self.opponent.replay_value(visibility == ReplayVisibility::Revealed),
+            "board": self.board,
+            "log": self.log,
+            "winner": self.winner,
+        })
+    }
+
     fn new_with_seed(seed: u64) -> Self {
         let mut game = Self {
             round: 1,
@@ -314,44 +437,103 @@ impl MatchState {
             game.player.draw();
             game.opponent.draw();
         }
-        game.start_turn(Side::Player);
+        let mut ignored_frames = Vec::new();
+        game.start_turn(Side::Player, &mut ignored_frames, None);
 
         game
     }
 
+    #[allow(dead_code, reason = "kept as the non-recording rules-engine API")]
     pub fn apply_action(&mut self, request: MatchActionRequest) -> Result<(), MatchError> {
+        self.apply_action_internal(request, None).map(|_| ())
+    }
+
+    pub fn apply_action_recording(
+        &mut self,
+        request: MatchActionRequest,
+        action_index: u32,
+    ) -> Result<Vec<RecordedReplayFrame>, MatchError> {
+        self.apply_action_internal(request, Some(action_index))
+    }
+
+    fn apply_action_internal(
+        &mut self,
+        request: MatchActionRequest,
+        action_index: Option<u32>,
+    ) -> Result<Vec<RecordedReplayFrame>, MatchError> {
         if self.phase == Phase::MatchOver {
             return Err(MatchError::MatchOver);
         }
 
+        let mut frames = Vec::new();
         match request {
             MatchActionRequest::PlayCard { card_id, target } => {
-                self.play_card_for_side(Side::Player, card_id, target)
+                self.play_card_for_side(Side::Player, card_id, target, &mut frames, action_index)
             }
             MatchActionRequest::MovePiece { piece_id, to } => {
-                self.move_piece_for_side(Side::Player, &piece_id, to)
+                self.move_piece_for_side(Side::Player, &piece_id, to, &mut frames, action_index)
             }
             MatchActionRequest::Attack {
                 attacker_id,
                 target_id,
-            } => self.attack_for_side(Side::Player, &attacker_id, &target_id),
+            } => self.attack_for_side(
+                Side::Player,
+                &attacker_id,
+                &target_id,
+                &mut frames,
+                action_index,
+            ),
             MatchActionRequest::EndTurn => {
-                self.end_player_turn();
+                self.end_player_turn(&mut frames, action_index);
                 Ok(())
             }
-        }
+        }?;
+
+        Ok(frames)
     }
 
-    fn end_player_turn(&mut self) {
+    fn record_replay_frame(
+        &self,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+        event: ReplayEvent,
+    ) {
+        frames.push(RecordedReplayFrame {
+            action_index,
+            event,
+            snapshot_json: self
+                .to_snapshot_json()
+                .expect("match snapshot should serialize for replay"),
+        });
+    }
+
+    fn end_player_turn(
+        &mut self,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
         self.log.insert(0, "You ended your turn.".to_string());
-        self.start_turn(Side::Opponent);
-        self.run_opponent_turn();
-        self.check_winner();
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::TurnEnded {
+                side: Side::Player,
+                round: self.round,
+            },
+        );
+        self.start_turn(Side::Opponent, frames, action_index);
+        self.run_opponent_turn(frames, action_index);
+        self.check_winner(frames, action_index);
 
         if self.phase == Phase::Planning {
             self.round += 1;
-            self.start_turn(Side::Player);
+            self.start_turn(Side::Player, frames, action_index);
             self.log.insert(0, format!("Round {} begins.", self.round));
+            self.record_replay_frame(
+                frames,
+                action_index,
+                ReplayEvent::RoundStarted { round: self.round },
+            );
         }
 
         self.truncate_log();
@@ -362,6 +544,8 @@ impl MatchState {
         side: Side,
         card_id: String,
         target: ActionTarget,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
     ) -> Result<(), MatchError> {
         let card = {
             let player = self.player_ref(side);
@@ -408,6 +592,7 @@ impl MatchState {
                     id: self.next_unit_id(side),
                     side,
                     name: card.name.clone(),
+                    template_id: Some(card.template_id.clone()),
                     attack: *attack,
                     armor: *armor,
                     max_armor: *armor,
@@ -416,9 +601,31 @@ impl MatchState {
                     max_ap: *max_ap,
                     has_attacked: false,
                 };
+                let unit_id = unit.id.clone();
+                let unit_name = unit.name.clone();
+                let unit_position = unit.position;
                 self.board.units.push(unit);
                 self.log
                     .insert(0, format!("{} summoned {}.", side.label(), card.name));
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::CardPlayed {
+                        side,
+                        card: CardSummary::from(&card),
+                        target: ActionTarget::Hex { coord },
+                    },
+                );
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::UnitSummoned {
+                        side,
+                        unit_id,
+                        name: unit_name,
+                        position: unit_position,
+                    },
+                );
             }
             CardKind::Spell { range, effect } => {
                 let ActionTarget::Piece { piece_id } = target else {
@@ -433,11 +640,22 @@ impl MatchState {
                 }
                 self.validate_spell_target(side, effect, &target)?;
                 self.spend_card_resources(side, &card_id, &card)?;
-                self.apply_spell(side, effect, &target.id, &card.name);
+                self.apply_spell(side, effect, &target.id, &card.name, frames, action_index);
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::CardPlayed {
+                        side,
+                        card: CardSummary::from(&card),
+                        target: ActionTarget::Piece {
+                            piece_id: target.id,
+                        },
+                    },
+                );
             }
         }
 
-        self.check_winner();
+        self.check_winner(frames, action_index);
         self.truncate_log();
         Ok(())
     }
@@ -488,13 +706,30 @@ impl MatchState {
         }
     }
 
-    fn apply_spell(&mut self, side: Side, effect: &SpellEffect, target_id: &str, card_name: &str) {
+    fn apply_spell(
+        &mut self,
+        side: Side,
+        effect: &SpellEffect,
+        target_id: &str,
+        card_name: &str,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
         match effect {
             SpellEffect::Heal { amount } => {
                 self.heal_piece(target_id, *amount);
                 self.log.insert(
                     0,
                     format!("{} cast {} to heal {}.", side.label(), card_name, target_id),
+                );
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::PieceHealed {
+                        side,
+                        piece_id: target_id.to_string(),
+                        amount: *amount,
+                    },
                 );
             }
             SpellEffect::Buff { attack, armor } => {
@@ -511,11 +746,30 @@ impl MatchState {
                         0,
                         format!("{} cast {} on {}.", side.label(), card_name, unit.name),
                     );
+                    self.record_replay_frame(
+                        frames,
+                        action_index,
+                        ReplayEvent::PieceBuffed {
+                            side,
+                            piece_id: target_id.to_string(),
+                            attack_delta: *attack,
+                            armor_delta: *armor,
+                        },
+                    );
                 }
             }
             SpellEffect::Damage { amount } => {
                 self.damage_piece(target_id, *amount);
-                self.remove_dead_units();
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::PieceDamaged {
+                        side,
+                        piece_id: target_id.to_string(),
+                        amount: *amount,
+                    },
+                );
+                self.remove_dead_units(frames, action_index);
                 self.log.insert(
                     0,
                     format!("{} cast {} at {}.", side.label(), card_name, target_id),
@@ -529,6 +783,8 @@ impl MatchState {
         side: Side,
         piece_id: &str,
         to: HexCoord,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
     ) -> Result<(), MatchError> {
         let piece = self.piece_view(piece_id).ok_or(MatchError::PieceNotFound)?;
         if piece.side != side {
@@ -560,6 +816,16 @@ impl MatchState {
 
         self.log
             .insert(0, format!("{} moved {}.", side.label(), piece_id));
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::PieceMoved {
+                side,
+                piece_id: piece_id.to_string(),
+                from: piece.position,
+                to,
+            },
+        );
         self.truncate_log();
         Ok(())
     }
@@ -569,6 +835,8 @@ impl MatchState {
         side: Side,
         attacker_id: &str,
         target_id: &str,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
     ) -> Result<(), MatchError> {
         let attacker = self
             .piece_view(attacker_id)
@@ -596,7 +864,18 @@ impl MatchState {
         self.mark_attacker_spent(attacker_id);
         self.damage_piece(target_id, attacker.attack);
         self.damage_piece(attacker_id, target.attack);
-        self.remove_dead_units();
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::PieceAttacked {
+                side,
+                attacker_id: attacker_id.to_string(),
+                target_id: target_id.to_string(),
+                damage_to_target: attacker.attack,
+                counter_damage_to_attacker: target.attack,
+            },
+        );
+        self.remove_dead_units(frames, action_index);
         self.log.insert(
             0,
             format!(
@@ -606,12 +885,16 @@ impl MatchState {
                 attacker_id
             ),
         );
-        self.check_winner();
+        self.check_winner(frames, action_index);
         self.truncate_log();
         Ok(())
     }
 
-    fn run_opponent_turn(&mut self) {
+    fn run_opponent_turn(
+        &mut self,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
         self.log
             .insert(0, "Opponent begins their turn.".to_string());
 
@@ -620,22 +903,36 @@ impl MatchState {
                 return;
             }
             if let Some((attacker_id, target_id)) = self.best_opponent_attack() {
-                let _ = self.attack_for_side(Side::Opponent, &attacker_id, &target_id);
+                let _ = self.attack_for_side(
+                    Side::Opponent,
+                    &attacker_id,
+                    &target_id,
+                    frames,
+                    action_index,
+                );
                 continue;
             }
-            if self.try_opponent_spell() {
+            if self.try_opponent_spell(frames, action_index) {
                 continue;
             }
-            if self.try_opponent_summon() {
+            if self.try_opponent_summon(frames, action_index) {
                 continue;
             }
-            if self.try_opponent_move() {
+            if self.try_opponent_move(frames, action_index) {
                 continue;
             }
             break;
         }
 
         self.log.insert(0, "Opponent ended their turn.".to_string());
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::TurnEnded {
+                side: Side::Opponent,
+                round: self.round,
+            },
+        );
         self.truncate_log();
     }
 
@@ -664,7 +961,11 @@ impl MatchState {
         None
     }
 
-    fn try_opponent_spell(&mut self) -> bool {
+    fn try_opponent_spell(
+        &mut self,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) -> bool {
         let Some((card, target)) = self.pick_opponent_spell() else {
             return false;
         };
@@ -675,6 +976,8 @@ impl MatchState {
             ActionTarget::Piece {
                 piece_id: target.id,
             },
+            frames,
+            action_index,
         )
         .is_ok()
     }
@@ -743,7 +1046,11 @@ impl MatchState {
         None
     }
 
-    fn try_opponent_summon(&mut self) -> bool {
+    fn try_opponent_summon(
+        &mut self,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) -> bool {
         let opponent = &self.opponent;
         if opponent.wizard.ap_remaining == 0 {
             return false;
@@ -764,11 +1071,21 @@ impl MatchState {
             return false;
         };
 
-        self.play_card_for_side(Side::Opponent, card.id, ActionTarget::Hex { coord })
-            .is_ok()
+        self.play_card_for_side(
+            Side::Opponent,
+            card.id,
+            ActionTarget::Hex { coord },
+            frames,
+            action_index,
+        )
+        .is_ok()
     }
 
-    fn try_opponent_move(&mut self) -> bool {
+    fn try_opponent_move(
+        &mut self,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) -> bool {
         let player_wizard = self.player.wizard.position;
         let Some((piece, destination)) = self
             .pieces_for_side(Side::Opponent)
@@ -788,7 +1105,7 @@ impl MatchState {
             return false;
         };
 
-        self.move_piece_for_side(Side::Opponent, &piece.id, destination)
+        self.move_piece_for_side(Side::Opponent, &piece.id, destination, frames, action_index)
             .is_ok()
     }
 
@@ -799,9 +1116,15 @@ impl MatchState {
             .min_by_key(|coord| coord.distance(enemy_wizard))
     }
 
-    fn start_turn(&mut self, side: Side) {
+    fn start_turn(
+        &mut self,
+        side: Side,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
         let round_mana = (STARTING_MANA + (self.round - 1) as u8).min(MAX_MANA);
         let should_draw = self.player_ref(side).has_started_first_turn;
+        let mut drawn = None;
         {
             let player = self.player_mut(side);
             player.max_mana = round_mana;
@@ -809,7 +1132,7 @@ impl MatchState {
             player.wizard.ap_remaining = player.wizard.max_ap;
             player.wizard.has_attacked = false;
             if should_draw {
-                player.draw();
+                drawn = player.draw();
             } else {
                 player.has_started_first_turn = true;
             }
@@ -817,6 +1140,25 @@ impl MatchState {
         for unit in self.board.units.iter_mut().filter(|unit| unit.side == side) {
             unit.ap_remaining = unit.max_ap;
             unit.has_attacked = false;
+        }
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::TurnStarted {
+                side,
+                round: self.round,
+            },
+        );
+        if let Some(card) = drawn {
+            self.record_replay_frame(
+                frames,
+                action_index,
+                ReplayEvent::CardDrawn {
+                    side,
+                    card: Some(CardSummary::from(&card)),
+                    hidden: side == Side::Opponent,
+                },
+            );
         }
     }
 
@@ -920,11 +1262,37 @@ impl MatchState {
             .is_some_and(|unit| unit.armor < unit.max_armor)
     }
 
-    fn remove_dead_units(&mut self) {
+    fn remove_dead_units(
+        &mut self,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        let destroyed: Vec<_> = self
+            .board
+            .units
+            .iter()
+            .filter(|unit| unit.armor <= 0)
+            .map(|unit| (unit.side, unit.id.clone(), unit.name.clone()))
+            .collect();
         self.board.units.retain(|unit| unit.armor > 0);
+        for (side, unit_id, name) in destroyed {
+            self.record_replay_frame(
+                frames,
+                action_index,
+                ReplayEvent::UnitDestroyed {
+                    side,
+                    unit_id,
+                    name,
+                },
+            );
+        }
     }
 
-    fn check_winner(&mut self) {
+    fn check_winner(&mut self, frames: &mut Vec<RecordedReplayFrame>, action_index: Option<u32>) {
+        if self.phase == Phase::MatchOver {
+            return;
+        }
+
         let winner = match (self.player.wizard.hp <= 0, self.opponent.wizard.hp <= 0) {
             (true, true) => Some(Side::Player),
             (false, true) => Some(Side::Player),
@@ -937,6 +1305,7 @@ impl MatchState {
             self.winner = Some(winner);
             self.log.insert(0, format!("{} wins.", winner.label()));
             self.truncate_log();
+            self.record_replay_frame(frames, action_index, ReplayEvent::MatchEnded { winner });
         }
     }
 
@@ -1103,17 +1472,70 @@ impl PlayerState {
         }
     }
 
-    fn draw(&mut self) {
+    fn draw(&mut self) -> Option<Card> {
         if self.deck.is_empty() && !self.discard.is_empty() {
             self.deck.append(&mut self.discard);
             shuffle(&mut self.deck, &mut self.rng_seed);
         }
 
-        if let Some(card) = self.deck.pop() {
+        let drawn = self.deck.pop();
+        if let Some(card) = drawn.clone() {
             self.hand.push(card);
         }
         self.deck_count = self.deck.len();
         self.discard_count = self.discard.len();
+        drawn
+    }
+}
+
+impl PlayerState {
+    fn replay_value(&self, expose_hand: bool) -> serde_json::Value {
+        let mut value = json!({
+            "side": self.side,
+            "mana": self.mana,
+            "maxMana": self.max_mana,
+            "wizard": self.wizard,
+            "deckCount": self.deck_count,
+            "discardCount": self.discard_count,
+        });
+
+        if expose_hand {
+            value["hand"] = json!(self.hand);
+        }
+
+        value
+    }
+}
+
+impl From<&Card> for CardSummary {
+    fn from(card: &Card) -> Self {
+        Self {
+            template_id: card.template_id.clone(),
+            name: card.name.clone(),
+            rarity: card.rarity,
+            cost: card.cost,
+            kind: card.kind.clone(),
+        }
+    }
+}
+
+impl ReplayEvent {
+    pub fn for_visibility(&self, visibility: ReplayVisibility) -> Self {
+        match (visibility, self) {
+            (
+                ReplayVisibility::Public,
+                Self::CardDrawn {
+                    side: Side::Opponent,
+                    hidden,
+                    ..
+                },
+            ) if *hidden => Self::CardDrawn {
+                side: Side::Opponent,
+                card: None,
+                hidden: true,
+            },
+            _ => self.clone(),
+        }
     }
 }
 
@@ -1369,6 +1791,7 @@ mod tests {
             id: "ally".to_string(),
             side: Side::Player,
             name: "Stoneguard".to_string(),
+            template_id: Some("stoneguard".to_string()),
             attack: 1,
             armor: 2,
             max_armor: 4,
@@ -1496,6 +1919,7 @@ mod tests {
         assert_eq!(game.player.mana, 1);
         assert_eq!(game.player.wizard.ap_remaining, 2);
         assert_eq!(unit.position, hex(0, 2));
+        assert_eq!(unit.template_id.as_deref(), Some("ember-squire"));
         assert_eq!(unit.ap_remaining, 1);
         assert_eq!(unit.max_ap, 2);
     }
@@ -1542,6 +1966,7 @@ mod tests {
             id: "player-unit".to_string(),
             side: Side::Player,
             name: "Rune Bruiser".to_string(),
+            template_id: Some("rune-bruiser".to_string()),
             attack: 2,
             armor: 2,
             max_armor: 2,
@@ -1554,6 +1979,7 @@ mod tests {
             id: "opponent-unit".to_string(),
             side: Side::Opponent,
             name: "Stoneguard".to_string(),
+            template_id: Some("stoneguard".to_string()),
             attack: 1,
             armor: 4,
             max_armor: 4,
@@ -1602,6 +2028,7 @@ mod tests {
             id: "ally".to_string(),
             side: Side::Player,
             name: "Stoneguard".to_string(),
+            template_id: Some("stoneguard".to_string()),
             attack: 1,
             armor: 2,
             max_armor: 4,
@@ -1614,6 +2041,7 @@ mod tests {
             id: "enemy".to_string(),
             side: Side::Opponent,
             name: "Swift Familiar".to_string(),
+            template_id: Some("swift-familiar".to_string()),
             attack: 1,
             armor: 4,
             max_armor: 4,
@@ -1702,6 +2130,7 @@ mod tests {
             id: "player-unit".to_string(),
             side: Side::Player,
             name: "Iron Colossus".to_string(),
+            template_id: Some("iron-colossus".to_string()),
             attack: 20,
             armor: 6,
             max_armor: 6,

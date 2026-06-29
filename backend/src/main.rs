@@ -11,8 +11,10 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use card_catalog::{CatalogResponse, starter_catalog};
-use match_session::{MatchActionRequest, MatchState};
-use match_store::{MatchStoreError, SqliteMatchStore, StoredMatch};
+use match_session::{MatchActionRequest, MatchState, ReplayEvent, ReplayVisibility};
+use match_store::{
+    MatchStoreError, SqliteMatchStore, StoredMatch, StoredMatchSummary, StoredReplayFrame,
+};
 use serde::Serialize;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -34,6 +36,42 @@ struct MatchResponse {
     match_state: MatchState,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MatchArchiveResponse {
+    matches: Vec<MatchSummary>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MatchSummary {
+    match_id: String,
+    created_at: i64,
+    updated_at: i64,
+    round: u32,
+    phase: match_session::Phase,
+    winner: Option<match_session::Side>,
+    frame_count: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MatchReplayResponse {
+    match_id: String,
+    visibility: ReplayVisibility,
+    summary: MatchSummary,
+    frames: Vec<ReplayFrameResponse>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayFrameResponse {
+    frame_index: u32,
+    action_index: Option<u32>,
+    event: ReplayEvent,
+    match_state: serde_json::Value,
+}
+
 #[tokio::main]
 async fn main() {
     let store = SqliteMatchStore::from_environment().expect("match database should open");
@@ -53,8 +91,9 @@ fn create_app(store: SqliteMatchStore) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/catalog/cards", get(catalog_cards))
-        .route("/api/matches", post(create_match))
+        .route("/api/matches", get(list_matches).post(create_match))
         .route("/api/matches/{match_id}", get(load_match))
+        .route("/api/matches/{match_id}/replay", get(load_replay))
         .route("/api/matches/{match_id}/actions", post(apply_match_action))
         .layer(cors)
         .with_state(state)
@@ -78,6 +117,24 @@ async fn catalog_cards() -> impl IntoResponse {
     Json(CatalogResponse {
         cards: starter_catalog(),
     })
+}
+
+async fn list_matches(State(state): State<SharedState>) -> impl IntoResponse {
+    let matches = {
+        let store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        match store.list_replayable_matches() {
+            Ok(matches) => matches,
+            Err(error) => return store_error_response(error),
+        }
+    };
+
+    Json(MatchArchiveResponse {
+        matches: matches.into_iter().map(MatchSummary::from).collect(),
+    })
+    .into_response()
 }
 
 async fn create_match(State(state): State<SharedState>) -> impl IntoResponse {
@@ -122,6 +179,52 @@ async fn load_match(
     Json(MatchResponse::from(loaded)).into_response()
 }
 
+async fn load_replay(
+    State(state): State<SharedState>,
+    Path(match_id): Path<String>,
+) -> impl IntoResponse {
+    let replay = {
+        let store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        match store.load_replay(&match_id) {
+            Ok(Some(replay)) => replay,
+            Ok(None) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(ApiError {
+                        message: format!("Replay for match {match_id} was not found"),
+                    }),
+                )
+                    .into_response();
+            }
+            Err(error) => return store_error_response(error),
+        }
+    };
+
+    let visibility = if replay.summary.state.winner.is_some() {
+        ReplayVisibility::Revealed
+    } else {
+        ReplayVisibility::Public
+    };
+    let match_id = replay.summary.id.clone();
+    let summary = MatchSummary::from(replay.summary);
+    let frames = replay
+        .frames
+        .into_iter()
+        .map(|frame| ReplayFrameResponse::from_stored(frame, visibility))
+        .collect();
+
+    Json(MatchReplayResponse {
+        match_id,
+        visibility,
+        summary,
+        frames,
+    })
+    .into_response()
+}
+
 async fn apply_match_action(
     State(state): State<SharedState>,
     Path(match_id): Path<String>,
@@ -146,17 +249,34 @@ async fn apply_match_action(
             Err(error) => return store_error_response(error),
         };
 
-        if let Err(error) = stored_match.state.apply_action(request) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ApiError {
-                    message: error.to_string(),
-                }),
-            )
-                .into_response();
-        }
+        let action_index = match store.next_action_index(&match_id) {
+            Ok(action_index) => action_index,
+            Err(error) => return store_error_response(error),
+        };
 
-        if let Err(error) = store.save_match(&stored_match.id, &stored_match.state) {
+        let frames = match stored_match
+            .state
+            .apply_action_recording(request.clone(), action_index)
+        {
+            Ok(frames) => frames,
+            Err(error) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiError {
+                        message: error.to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        };
+
+        if let Err(error) = store.save_action_and_replay_frames(
+            &stored_match.id,
+            action_index,
+            &request,
+            &stored_match.state,
+            &frames,
+        ) {
             return store_error_response(error);
         }
 
@@ -181,6 +301,31 @@ impl From<StoredMatch> for MatchResponse {
         Self {
             match_id: stored_match.id,
             match_state: stored_match.state,
+        }
+    }
+}
+
+impl From<StoredMatchSummary> for MatchSummary {
+    fn from(summary: StoredMatchSummary) -> Self {
+        Self {
+            match_id: summary.id,
+            created_at: summary.created_at,
+            updated_at: summary.updated_at,
+            round: summary.state.round,
+            phase: summary.state.phase,
+            winner: summary.state.winner,
+            frame_count: summary.frame_count,
+        }
+    }
+}
+
+impl ReplayFrameResponse {
+    fn from_stored(frame: StoredReplayFrame, visibility: ReplayVisibility) -> Self {
+        Self {
+            frame_index: frame.frame_index,
+            action_index: frame.action_index,
+            event: frame.event.for_visibility(visibility),
+            match_state: frame.state.replay_value(visibility),
         }
     }
 }
@@ -262,6 +407,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_match_initializes_archive_and_replay_frame() {
+        let path = test_db_path("archive-replay");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, created) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let match_id = created["matchId"].as_str().expect("match id should exist");
+
+        let (status, archive) = json_request(
+            app.clone(),
+            Request::builder()
+                .uri("/api/matches")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(archive["matches"][0]["matchId"], match_id);
+        assert_eq!(archive["matches"][0]["frameCount"], 1);
+
+        let (status, replay) = json_request(
+            app.clone(),
+            Request::builder()
+                .uri(format!("/api/matches/{match_id}/replay"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(replay["visibility"], "public");
+        assert_eq!(replay["frames"][0]["frameIndex"], 0);
+        assert_eq!(replay["frames"][0]["event"]["type"], "matchCreated");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
     async fn match_actions_persist_and_reload_by_match_id() {
         let path = test_db_path("action-persist");
         let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
@@ -314,6 +504,163 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(loaded["matchState"], acted["matchState"]);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn accepted_actions_append_action_record_and_internal_replay_frames() {
+        let path = test_db_path("action-replay");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (_, created) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        let match_id = created["matchId"].as_str().expect("match id should exist");
+
+        let (status, _) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/matches/{match_id}/actions"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"type":"endTurn"}"#))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, replay) = json_request(
+            app.clone(),
+            Request::builder()
+                .uri(format!("/api/matches/{match_id}/replay"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let frames = replay["frames"].as_array().expect("frames should exist");
+        assert!(frames.len() > 3);
+        assert!(frames.iter().any(|frame| {
+            frame["event"]["type"] == "turnStarted" && frame["event"]["side"] == "opponent"
+        }));
+        let (status, loaded) = json_request(
+            app,
+            Request::builder()
+                .uri(format!("/api/matches/{match_id}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            frames.last().expect("last frame exists")["matchState"],
+            loaded["matchState"]
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn invalid_actions_do_not_append_replay_frames() {
+        let path = test_db_path("invalid-replay");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (_, created) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        let match_id = created["matchId"].as_str().expect("match id should exist");
+
+        let (status, _) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/matches/{match_id}/actions"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"type":"movePiece","pieceId":"player-wizard","to":{"q":0,"r":0}}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let (status, replay) = json_request(
+            app,
+            Request::builder()
+                .uri(format!("/api/matches/{match_id}/replay"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(replay["frames"].as_array().unwrap().len(), 1);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn active_replay_redacts_opponent_hidden_draws() {
+        let path = test_db_path("redacted-replay");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (_, created) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        let match_id = created["matchId"].as_str().expect("match id should exist");
+
+        for _ in 0..2 {
+            let (status, _) = json_request(
+                app.clone(),
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/matches/{match_id}/actions"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"type":"endTurn"}"#))
+                    .expect("request should build"),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+
+        let (status, replay) = json_request(
+            app,
+            Request::builder()
+                .uri(format!("/api/matches/{match_id}/replay"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let hidden_draw = replay["frames"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|frame| {
+                frame["event"]["type"] == "cardDrawn"
+                    && frame["event"]["side"] == "opponent"
+                    && frame["event"]["hidden"] == true
+            })
+            .expect("opponent hidden draw should be present");
+        assert!(hidden_draw["event"]["card"].is_null());
 
         let _ = fs::remove_file(path);
     }

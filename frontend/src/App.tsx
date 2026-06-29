@@ -1,8 +1,13 @@
 import {
   Activity,
   Archive,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  EyeOff,
   Footprints,
   Heart,
+  History,
   House,
   Layers,
   LibraryBig,
@@ -14,23 +19,37 @@ import {
   Sparkles,
   Sword,
   WandSparkles,
+  X,
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { attack, createMatch, endTurn, loadCatalog, loadMatch, movePiece, playCard } from "./api";
+import {
+  attack,
+  createMatch,
+  endTurn,
+  loadCatalog,
+  loadMatch,
+  loadMatches,
+  loadReplay,
+  movePiece,
+  playCard,
+} from "./api";
 import type {
   Card,
   CatalogCard,
   HexCoord,
   HexTile,
+  MatchReplayResponse,
+  MatchSummary,
   MatchParticipantState,
   MatchState,
   Rarity,
+  ReplayEvent,
   Side,
   Unit,
   Wizard,
 } from "./types";
-import type { FormEvent, ReactNode } from "react";
+import type { FormEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 
 type LoadState =
   | { status: "loading" }
@@ -42,14 +61,35 @@ type CatalogLoadState =
   | { status: "ready"; cards: CatalogCard[] }
   | { status: "error"; message: string };
 
+type MatchArchiveLoadState =
+  | { status: "loading" }
+  | { status: "ready"; matches: MatchSummary[] }
+  | { status: "error"; message: string };
+
+type ReplayLoadState =
+  | { status: "loading" }
+  | { status: "ready"; replay: MatchReplayResponse }
+  | { status: "error"; message: string };
+
 type Selection =
   | { type: "card"; cardId: string }
   | { type: "piece"; pieceId: string }
   | null;
 
-type BoardPiece =
-  | (Wizard & { pieceType: "wizard"; name: string })
-  | (Unit & { pieceType: "unit"; hp?: never; maxHp?: never });
+type UnitContextMenu =
+  | {
+      pieceId: string;
+      x: number;
+      y: number;
+    }
+  | null;
+
+type BoardWizard = Wizard & { pieceType: "wizard"; name: string };
+type BoardUnit = Unit & { pieceType: "unit"; hp?: never; maxHp?: never };
+type BoardPiece = BoardWizard | BoardUnit;
+type CatalogUnitCard = CatalogCard & {
+  kind: Extract<CatalogCard["kind"], { type: "unit" }>;
+};
 
 export function App() {
   const [path, setPath] = useState(() => window.location.pathname);
@@ -71,6 +111,15 @@ export function App() {
 
   if (path.replace(/\/+$/, "") === "/catalog") {
     return <CatalogPage onNavigate={navigate} />;
+  }
+
+  if (path.replace(/\/+$/, "") === "/matches") {
+    return <MatchArchivePage onNavigate={navigate} />;
+  }
+
+  const replayRoute = replayRouteFromPath(path);
+  if (replayRoute) {
+    return <ReplayPage key={replayRoute} matchId={replayRoute} onNavigate={navigate} />;
   }
 
   const matchRoute = matchRouteFromPath(path);
@@ -378,6 +427,10 @@ function MatchPicker({ onNavigate }: { onNavigate: (to: string) => void }) {
             <LibraryBig size={18} />
             Card Catalog
           </button>
+          <button className="secondary-link" type="button" onClick={() => onNavigate("/matches")}>
+            <History size={18} />
+            Match Archive
+          </button>
         </div>
         <form className="open-match-form" onSubmit={handleOpenMatch}>
           <label htmlFor="match-id">Open Match by ID</label>
@@ -400,6 +453,140 @@ function MatchPicker({ onNavigate }: { onNavigate: (to: string) => void }) {
   );
 }
 
+function MatchArchivePage({ onNavigate }: { onNavigate: (to: string) => void }) {
+  const [loadState, setLoadState] = useState<MatchArchiveLoadState>({ status: "loading" });
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadMatches()
+      .then((response) => setLoadState({ status: "ready", matches: response.matches }))
+      .catch((error: unknown) =>
+        setLoadState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not load match archive",
+        }),
+      );
+  }, []);
+
+  async function handleCreateMatch() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const created = await createMatch();
+      onNavigate(`/match/${created.matchId}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not create match");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (loadState.status === "loading") {
+    return <ShellMessage title="Match Archive" message="Loading matches" />;
+  }
+
+  if (loadState.status === "error") {
+    return (
+      <ShellMessage
+        title="Match Archive"
+        message={loadState.message}
+        actions={
+          <button className="primary-button" type="button" onClick={() => onNavigate("/")}>
+            Open match picker
+          </button>
+        }
+      />
+    );
+  }
+
+  return (
+    <main className="app-shell archive-shell">
+      <section className="archive-layout" aria-label="Match archive">
+        <header className="top-bar">
+          <div>
+            <p className="eyebrow">Rune Lanes</p>
+            <h1>Match Archive</h1>
+          </div>
+          <div className="actions">
+            <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Match picker">
+              <House size={18} />
+            </button>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void handleCreateMatch()}
+              disabled={busy}
+            >
+              <Plus size={18} />
+              New Match
+            </button>
+          </div>
+        </header>
+
+        {loadState.matches.length === 0 ? (
+          <section className="archive-empty">
+            <p>No replayable matches yet.</p>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void handleCreateMatch()}
+              disabled={busy}
+            >
+              <Plus size={18} />
+              New Match
+            </button>
+          </section>
+        ) : (
+          <div className="match-list" role="list" aria-label="Replayable matches">
+            {loadState.matches.map((match) => (
+              <article className="match-row" role="listitem" key={match.matchId}>
+                <div>
+                  <strong>{match.matchId}</strong>
+                  <span>{formatMatchStatus(match)}</span>
+                </div>
+                <div className="match-row-stat">
+                  <span>Round</span>
+                  <strong>{match.round}</strong>
+                </div>
+                <div className="match-row-stat">
+                  <span>Frames</span>
+                  <strong>{match.frameCount}</strong>
+                </div>
+                <div className="match-row-date">
+                  <span>Updated</span>
+                  <strong>{formatUnixTime(match.updatedAt)}</strong>
+                </div>
+                <div className="match-row-actions">
+                  {match.phase !== "matchOver" ? (
+                    <button
+                      className="icon-button"
+                      type="button"
+                      onClick={() => onNavigate(`/match/${match.matchId}`)}
+                      title="Continue match"
+                    >
+                      <Play size={18} />
+                    </button>
+                  ) : null}
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={() => onNavigate(`/matches/${match.matchId}/replay`)}
+                  >
+                    <History size={18} />
+                    Replay
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+        {notice ? <p className="notice">{notice}</p> : null}
+      </section>
+    </main>
+  );
+}
+
 function MatchPage({
   matchId,
   onNavigate,
@@ -408,13 +595,18 @@ function MatchPage({
   onNavigate: (to: string) => void;
 }) {
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
+  const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
+  const [unitModalPieceId, setUnitModalPieceId] = useState<string | null>(null);
+  const [unitContextMenu, setUnitContextMenu] = useState<UnitContextMenu>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setLoadState({ status: "loading" });
     setSelection(null);
+    setUnitContextMenu(null);
+    setUnitModalPieceId(null);
     setNotice(null);
     loadMatch(matchId)
       .then((response) => setLoadState({ status: "ready", match: response.matchState }))
@@ -425,6 +617,12 @@ function MatchPage({
         }),
       );
   }, [matchId]);
+
+  useEffect(() => {
+    loadCatalog()
+      .then((response) => setCatalogCards(response.cards))
+      .catch(() => setCatalogCards([]));
+  }, []);
 
   const selectedCard = useMemo(() => {
     if (loadState.status !== "ready" || selection?.type !== "card") {
@@ -442,6 +640,32 @@ function MatchPage({
     return pieceById(loadState.match, selection.pieceId);
   }, [loadState, selection]);
 
+  const modalUnit = useMemo(() => {
+    if (loadState.status !== "ready" || unitModalPieceId === null) {
+      return null;
+    }
+
+    const piece = pieceById(loadState.match, unitModalPieceId);
+    return piece?.pieceType === "unit" ? piece : null;
+  }, [loadState, unitModalPieceId]);
+
+  const modalUnitCard = useMemo(() => {
+    if (!modalUnit) {
+      return null;
+    }
+
+    return findUnitCatalogCard(catalogCards, modalUnit);
+  }, [catalogCards, modalUnit]);
+
+  const contextMenuUnit = useMemo(() => {
+    if (loadState.status !== "ready" || unitContextMenu === null) {
+      return null;
+    }
+
+    const piece = pieceById(loadState.match, unitContextMenu.pieceId);
+    return piece?.pieceType === "unit" ? piece : null;
+  }, [loadState, unitContextMenu]);
+
   async function runAction(action: () => Promise<MatchState>) {
     setBusy(true);
     setNotice(null);
@@ -450,6 +674,8 @@ function MatchPage({
       const match = await action();
       setLoadState({ status: "ready", match });
       setSelection(null);
+      setUnitModalPieceId(null);
+      setUnitContextMenu(null);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Action failed");
     } finally {
@@ -505,6 +731,7 @@ function MatchPage({
       return;
     }
 
+    setUnitContextMenu(null);
     const piece = pieceAt(match, tile.coord);
 
     if (selectedCard) {
@@ -538,6 +765,19 @@ function MatchPage({
     }
 
     setSelection(null);
+    setUnitModalPieceId(null);
+  }
+
+  function handleUnitContextMenu(unit: BoardUnit, position: { x: number; y: number }) {
+    if (busy || match.phase === "matchOver") {
+      return;
+    }
+
+    setUnitContextMenu({
+      pieceId: unit.id,
+      x: position.x,
+      y: position.y,
+    });
   }
 
   return (
@@ -586,6 +826,7 @@ function MatchPage({
           selectedPiece={selectedPiece}
           disabled={busy || match.phase === "matchOver"}
           onTileClick={handleTileClick}
+          onUnitContextMenu={handleUnitContextMenu}
         />
 
         <section className="hand-and-log">
@@ -612,11 +853,13 @@ function MatchPage({
                   selected={selection?.type === "card" && card.id === selection.cardId}
                   disabled={busy || !isPlayableCard(match, card)}
                   onClick={() => {
+                    setUnitContextMenu(null);
                     setSelection(
                       selection?.type === "card" && card.id === selection.cardId
                         ? null
                         : { type: "card", cardId: card.id },
                     );
+                    setUnitModalPieceId(null);
                     setNotice(null);
                   }}
                 />
@@ -631,7 +874,294 @@ function MatchPage({
           </aside>
         </section>
       </section>
+      {modalUnit ? (
+        <UnitCardModal
+          unit={modalUnit}
+          card={modalUnitCard}
+          onClose={() => setUnitModalPieceId(null)}
+        />
+      ) : null}
+      {unitContextMenu && contextMenuUnit ? (
+        <UnitContextMenuView
+          menu={unitContextMenu}
+          unit={contextMenuUnit}
+          onClose={() => setUnitContextMenu(null)}
+          onOpenCardInfo={() => {
+            setUnitModalPieceId(contextMenuUnit.id);
+            setUnitContextMenu(null);
+          }}
+        />
+      ) : null}
     </main>
+  );
+}
+
+function ReplayPage({
+  matchId,
+  onNavigate,
+}: {
+  matchId: string;
+  onNavigate: (to: string) => void;
+}) {
+  const [loadState, setLoadState] = useState<ReplayLoadState>({ status: "loading" });
+  const [frameIndex, setFrameIndex] = useState(0);
+
+  useEffect(() => {
+    setLoadState({ status: "loading" });
+    setFrameIndex(0);
+    loadReplay(matchId)
+      .then((response) => setLoadState({ status: "ready", replay: response }))
+      .catch((error: unknown) =>
+        setLoadState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not load replay",
+        }),
+      );
+  }, [matchId]);
+
+  if (loadState.status === "loading") {
+    return <ShellMessage title={`Replay ${matchId}`} message="Loading replay" />;
+  }
+
+  if (loadState.status === "error") {
+    return (
+      <ShellMessage
+        title={`Replay ${matchId}`}
+        message={loadState.message}
+        actions={
+          <button className="primary-button" type="button" onClick={() => onNavigate("/matches")}>
+            Match Archive
+          </button>
+        }
+      />
+    );
+  }
+
+  const { replay } = loadState;
+  const frameCount = replay.frames.length;
+  const clampedFrameIndex = Math.min(frameIndex, Math.max(frameCount - 1, 0));
+  const frame = replay.frames[clampedFrameIndex];
+  const match = frame.matchState;
+
+  return (
+    <main className="app-shell replay-shell">
+      <section className="table replay-table">
+        <header className="top-bar">
+          <div>
+            <p className="eyebrow">Rune Lanes Replay</p>
+            <h1>Round {match.round}</h1>
+            <p className="match-id">Match {matchId}</p>
+          </div>
+          <div className="actions">
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => onNavigate("/matches")}
+              title="Match archive"
+            >
+              <History size={18} />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => onNavigate(`/match/${matchId}`)}
+              title="Playable match"
+            >
+              <Play size={18} />
+            </button>
+          </div>
+        </header>
+
+        <section className="score-row" aria-label="Replay score">
+          <PlayerBadge player={match.player} />
+          <div className="phase-pill">
+            {replay.visibility === "revealed" ? <Eye size={16} /> : <EyeOff size={16} />}
+            {match.phase === "matchOver" ? `${sideLabel(match.winner)} wins` : "Planning"}
+          </div>
+          <PlayerBadge player={match.opponent} />
+        </section>
+
+        <Board
+          match={match}
+          selectedCard={null}
+          selectedPiece={null}
+          disabled={false}
+          readOnly
+        />
+
+        <section className="replay-inspector" aria-label="Replay timeline">
+          <div className="replay-controls">
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => setFrameIndex(Math.max(clampedFrameIndex - 1, 0))}
+              disabled={clampedFrameIndex === 0}
+              title="Previous frame"
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <input
+              type="range"
+              min="0"
+              max={Math.max(frameCount - 1, 0)}
+              value={clampedFrameIndex}
+              onChange={(event) => setFrameIndex(Number(event.target.value))}
+              aria-label="Replay frame"
+            />
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => setFrameIndex(Math.min(clampedFrameIndex + 1, frameCount - 1))}
+              disabled={clampedFrameIndex >= frameCount - 1}
+              title="Next frame"
+            >
+              <ChevronRight size={18} />
+            </button>
+            <span className="frame-count">
+              {clampedFrameIndex + 1}/{frameCount}
+            </span>
+          </div>
+
+          <aside className="event-detail" aria-label="Replay event">
+            <p className="eyebrow">{eventSideLabel(frame.event)}</p>
+            <h2>{eventTitle(frame.event)}</h2>
+            <p>{eventDetail(frame.event)}</p>
+          </aside>
+        </section>
+      </section>
+    </main>
+  );
+}
+
+function UnitContextMenuView({
+  menu,
+  unit,
+  onClose,
+  onOpenCardInfo,
+}: {
+  menu: Exclude<UnitContextMenu, null>;
+  unit: BoardUnit;
+  onClose: () => void;
+  onOpenCardInfo: () => void;
+}) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    function handlePointerDown() {
+      onClose();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="unit-context-menu"
+      role="menu"
+      aria-label={`${unit.name} actions`}
+      style={{ left: menu.x, top: menu.y }}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <button type="button" role="menuitem" onClick={onOpenCardInfo}>
+        <LibraryBig size={15} />
+        Card info
+      </button>
+    </div>
+  );
+}
+
+function UnitCardModal({
+  unit,
+  card,
+  onClose,
+}: {
+  unit: BoardUnit;
+  card: CatalogCard | null;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const unitCard = isCatalogUnitCard(card) ? card : null;
+
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section
+        className={`unit-modal ${unitCard?.rarity ?? "basic"}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="unit-modal-title"
+      >
+        <button className="icon-button modal-close" type="button" onClick={onClose} title="Close">
+          <X size={18} />
+        </button>
+        {unitCard ? (
+          <img src={unitCard.artPath} alt="" />
+        ) : (
+          <div className="unit-modal-art-placeholder" aria-hidden="true">
+            <Sword size={46} />
+          </div>
+        )}
+        <div className="unit-modal-body">
+          <div>
+            <p className="eyebrow">
+              {unit.side === "player" ? "Your" : "Opponent"} unit
+              {unitCard ? ` · ${unitCard.rarity}` : ""}
+            </p>
+            <h2 id="unit-modal-title">{unitCard?.name ?? unit.name}</h2>
+          </div>
+
+          <div className="detail-stat-row">
+            {unitCard ? (
+              <>
+                <DetailStat label="Cost" value={unitCard.cost} />
+                <DetailStat label="Base Attack" value={unitCard.kind.attack} />
+                <DetailStat label="Base Armor" value={unitCard.kind.armor} />
+                <DetailStat label="Base AP" value={unitCard.kind.maxAp} />
+              </>
+            ) : (
+              <DetailStat label="Card" value="Unknown" />
+            )}
+          </div>
+
+          <div className="detail-stat-row live-stat-row">
+            <DetailStat label="Attack" value={unit.attack} />
+            <DetailStat label="Armor" value={`${unit.armor}/${unit.maxArmor}`} />
+            <DetailStat label="AP" value={`${unit.apRemaining}/${unit.maxAp}`} />
+            <DetailStat label="Attacked" value={unit.hasAttacked ? "Yes" : "No"} />
+          </div>
+
+          <p className="detail-rules">
+            {unitCard?.text ?? "This unit came from an older match without saved card metadata."}
+          </p>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -684,6 +1214,12 @@ function matchRouteFromPath(path: string) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function replayRouteFromPath(path: string) {
+  const normalized = path.replace(/\/+$/, "");
+  const match = normalized.match(/^\/matches\/([^/]+)\/replay$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 function PlayerBadge({ player }: { player: MatchParticipantState }) {
   return (
     <div className={`player-badge ${player.side}`}>
@@ -709,24 +1245,29 @@ function Board({
   selectedCard,
   selectedPiece,
   disabled,
+  readOnly = false,
   onTileClick,
+  onUnitContextMenu,
 }: {
   match: MatchState;
   selectedCard: Card | null;
   selectedPiece: BoardPiece | null;
   disabled: boolean;
-  onTileClick: (tile: HexTile) => void;
+  readOnly?: boolean;
+  onTileClick?: (tile: HexTile) => void;
+  onUnitContextMenu?: (unit: BoardUnit, position: { x: number; y: number }) => void;
 }) {
   const columns = groupTilesByColumn(match.board.tiles);
 
   return (
-    <section className="board" aria-label="Hex board">
+    <section className={`board ${readOnly ? "read-only" : ""}`} aria-label="Hex board">
       <div className="hex-board">
         {columns.map((column) => (
           <div className="hex-column" key={column.q}>
             {column.tiles.map((tile) => {
               const piece = pieceAt(match, tile.coord);
               const isLegal =
+                !readOnly &&
                 !disabled &&
                 ((selectedCard && isLegalCardTarget(match, selectedCard, tile.coord, piece)) ||
                   (selectedPiece &&
@@ -739,8 +1280,17 @@ function Board({
                   key={coordKey(tile.coord)}
                   className={`hex-tile ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""}`}
                   type="button"
-                  disabled={disabled}
-                  onClick={() => onTileClick(tile)}
+                  disabled={disabled && !readOnly}
+                  tabIndex={readOnly ? -1 : undefined}
+                  onClick={() => onTileClick?.(tile)}
+                  onContextMenu={(event: ReactMouseEvent<HTMLButtonElement>) => {
+                    if (readOnly || piece?.pieceType !== "unit" || !onUnitContextMenu) {
+                      return;
+                    }
+
+                    event.preventDefault();
+                    onUnitContextMenu(piece, { x: event.clientX, y: event.clientY });
+                  }}
                   title={`q ${tile.coord.q}, r ${tile.coord.r}`}
                 >
                   {piece ? <PieceToken piece={piece} /> : null}
@@ -848,6 +1398,18 @@ function pieceById(match: MatchState, pieceId: string): BoardPiece | null {
   return unit ? { ...unit, pieceType: "unit" } : null;
 }
 
+function findUnitCatalogCard(cards: CatalogCard[], unit: BoardUnit) {
+  return (
+    cards.find((card) => card.templateId === unit.templateId && card.kind.type === "unit") ??
+    cards.find((card) => card.name === unit.name && card.kind.type === "unit") ??
+    null
+  );
+}
+
+function isCatalogUnitCard(card: CatalogCard | null): card is CatalogUnitCard {
+  return card?.kind.type === "unit";
+}
+
 function isPlayableCard(match: MatchState, card: Card) {
   return (
     match.phase !== "matchOver" &&
@@ -938,6 +1500,102 @@ function spellEffectLabel(card: Card | CatalogCard) {
       return `+${card.kind.effect.attack}/+${card.kind.effect.armor}`;
     case "damage":
       return `damage ${card.kind.effect.amount}`;
+  }
+}
+
+function formatMatchStatus(match: MatchSummary) {
+  if (match.phase === "matchOver") {
+    return `${sideLabel(match.winner)} wins`;
+  }
+
+  return "Planning";
+}
+
+function formatUnixTime(value: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value * 1000));
+}
+
+function eventSideLabel(event: ReplayEvent) {
+  if ("side" in event) {
+    return sideLabel(event.side);
+  }
+  if (event.type === "matchEnded") {
+    return sideLabel(event.winner);
+  }
+
+  return "Match";
+}
+
+function eventTitle(event: ReplayEvent) {
+  switch (event.type) {
+    case "matchCreated":
+      return "Match created";
+    case "turnStarted":
+      return "Turn started";
+    case "turnEnded":
+      return "Turn ended";
+    case "roundStarted":
+      return `Round ${event.round}`;
+    case "cardDrawn":
+      return event.card ? `${event.card.name} drawn` : "Hidden card drawn";
+    case "cardPlayed":
+      return `${event.card.name} played`;
+    case "unitSummoned":
+      return `${event.name} summoned`;
+    case "pieceMoved":
+      return `${event.pieceId} moved`;
+    case "pieceAttacked":
+      return `${event.attackerId} attacked`;
+    case "pieceHealed":
+      return `${event.pieceId} healed`;
+    case "pieceBuffed":
+      return `${event.pieceId} buffed`;
+    case "pieceDamaged":
+      return `${event.pieceId} damaged`;
+    case "unitDestroyed":
+      return `${event.name} destroyed`;
+    case "matchEnded":
+      return `${sideLabel(event.winner)} wins`;
+  }
+}
+
+function eventDetail(event: ReplayEvent) {
+  switch (event.type) {
+    case "matchCreated":
+      return "The wizards enter the hex arena.";
+    case "turnStarted":
+      return `Round ${event.round} ${sideLabel(event.side).toLocaleLowerCase()} turn.`;
+    case "turnEnded":
+      return `Round ${event.round} ${sideLabel(event.side).toLocaleLowerCase()} turn ended.`;
+    case "roundStarted":
+      return `Round ${event.round} begins.`;
+    case "cardDrawn":
+      return event.card
+        ? `${sideLabel(event.side)} drew ${event.card.name}.`
+        : `${sideLabel(event.side)} drew a hidden card.`;
+    case "cardPlayed":
+      return `${sideLabel(event.side)} played ${event.card.name}.`;
+    case "unitSummoned":
+      return `${sideLabel(event.side)} summoned ${event.name} at q ${event.position.q}, r ${event.position.r}.`;
+    case "pieceMoved":
+      return `${event.pieceId} moved from q ${event.from.q}, r ${event.from.r} to q ${event.to.q}, r ${event.to.r}.`;
+    case "pieceAttacked":
+      return `${event.attackerId} dealt ${event.damageToTarget}; counterdamage was ${event.counterDamageToAttacker}.`;
+    case "pieceHealed":
+      return `${event.pieceId} healed ${event.amount}.`;
+    case "pieceBuffed":
+      return `${event.pieceId} gained +${event.attackDelta}/+${event.armorDelta}.`;
+    case "pieceDamaged":
+      return `${event.pieceId} took ${event.amount} damage.`;
+    case "unitDestroyed":
+      return `${event.name} left the board.`;
+    case "matchEnded":
+      return `${sideLabel(event.winner)} won the match.`;
   }
 }
 
