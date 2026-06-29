@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 180" role="img" aria-label="Rune lane board glyph">
+  <defs>
+    <pattern id="grid" width="64" height="60" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0v60" fill="none" stroke="#e1b757" stroke-opacity=".16" stroke-width="2"/>
+    </pattern>
+  </defs>
+  <rect width="640" height="180" fill="url(#grid)"/>
+  <g fill="none" stroke="#e1b757" stroke-linecap="round" stroke-linejoin="round" opacity=".22">
+    <path d="M92 90h456"/>
+    <path d="M160 42 92 90l68 48"/>
+    <path d="m480 42 68 48-68 48"/>
+    <circle cx="320" cy="90" r="36"/>
+    <path d="M320 54v72M284 90h72"/>
+  </g>
+</svg>
