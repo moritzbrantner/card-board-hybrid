@@ -79,7 +79,7 @@ impl Serialize for PublicPlayerState<'_> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Phase {
     Planning,
@@ -93,7 +93,7 @@ pub enum Side {
     Opponent,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerState {
     pub side: Side,
@@ -103,17 +103,13 @@ pub struct PlayerState {
     pub hand: Vec<Card>,
     pub deck_count: usize,
     pub discard_count: usize,
-    #[serde(skip)]
     deck: Vec<Card>,
-    #[serde(skip)]
     discard: Vec<Card>,
-    #[serde(skip)]
     rng_seed: u64,
-    #[serde(skip)]
     has_started_first_turn: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Wizard {
     pub id: String,
@@ -127,7 +123,7 @@ pub struct Wizard {
     pub has_attacked: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HexBoard {
     pub radius: i32,
@@ -135,7 +131,7 @@ pub struct HexBoard {
     pub units: Vec<Unit>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HexTile {
     pub coord: HexCoord,
@@ -148,7 +144,7 @@ pub struct HexCoord {
     pub r: i32,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Unit {
     pub id: String,
@@ -163,7 +159,7 @@ pub struct Unit {
     pub has_attacked: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Card {
     pub id: String,
@@ -175,7 +171,7 @@ pub struct Card {
     pub kind: CardKind,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Rarity {
     Basic,
@@ -183,7 +179,7 @@ pub enum Rarity {
     Rare,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -194,7 +190,7 @@ pub enum CardKind {
     Spell { range: u8, effect: SpellEffect },
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SpellEffect {
     Heal { amount: i32 },
@@ -290,6 +286,14 @@ impl MatchState {
             .unwrap_or(1);
 
         Self::new_with_seed(seed)
+    }
+
+    pub fn to_snapshot_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(&MatchSnapshot::from(self))
+    }
+
+    pub fn from_snapshot_json(snapshot: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str::<MatchSnapshot>(snapshot).map(Self::from)
     }
 
     fn new_with_seed(seed: u64) -> Self {
@@ -965,6 +969,49 @@ impl MatchState {
 
     fn truncate_log(&mut self) {
         self.log.truncate(12);
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MatchSnapshot {
+    round: u32,
+    phase: Phase,
+    player: PlayerState,
+    opponent: PlayerState,
+    board: HexBoard,
+    log: Vec<String>,
+    winner: Option<Side>,
+    next_unit_id: u32,
+}
+
+impl From<&MatchState> for MatchSnapshot {
+    fn from(match_state: &MatchState) -> Self {
+        Self {
+            round: match_state.round,
+            phase: match_state.phase.clone(),
+            player: match_state.player.clone(),
+            opponent: match_state.opponent.clone(),
+            board: match_state.board.clone(),
+            log: match_state.log.clone(),
+            winner: match_state.winner,
+            next_unit_id: match_state.next_unit_id,
+        }
+    }
+}
+
+impl From<MatchSnapshot> for MatchState {
+    fn from(snapshot: MatchSnapshot) -> Self {
+        Self {
+            round: snapshot.round,
+            phase: snapshot.phase,
+            player: snapshot.player,
+            opponent: snapshot.opponent,
+            board: snapshot.board,
+            log: snapshot.log,
+            winner: snapshot.winner,
+            next_unit_id: snapshot.next_unit_id,
+        }
     }
 }
 

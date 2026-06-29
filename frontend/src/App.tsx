@@ -4,7 +4,9 @@ import {
   Footprints,
   Heart,
   Layers,
+  LibraryBig,
   Play,
+  Plus,
   RotateCcw,
   Shield,
   Sparkles,
@@ -13,7 +15,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { attack, endTurn, getMatch, movePiece, newMatch, playCard } from "./api";
+import { attack, createMatch, endTurn, loadMatch, movePiece, playCard } from "./api";
 import type {
   Card,
   HexCoord,
@@ -24,7 +26,7 @@ import type {
   Unit,
   Wizard,
 } from "./types";
-import type { ReactNode } from "react";
+import type { FormEvent, ReactNode } from "react";
 
 type LoadState =
   | { status: "loading" }
@@ -41,21 +43,137 @@ type BoardPiece =
   | (Unit & { pieceType: "unit"; hp?: never; maxHp?: never });
 
 export function App() {
+  const [path, setPath] = useState(() => window.location.pathname);
+
+  useEffect(() => {
+    const handlePopState = () => setPath(window.location.pathname);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  function navigate(to: string) {
+    window.history.pushState(null, "", to);
+    setPath(window.location.pathname);
+  }
+
+  if (path === "/" || path === "") {
+    return <MatchPicker onNavigate={navigate} />;
+  }
+
+  const matchRoute = matchRouteFromPath(path);
+  if (matchRoute) {
+    return <MatchPage key={matchRoute} matchId={matchRoute} onNavigate={navigate} />;
+  }
+
+  return (
+    <ShellMessage
+      title="Rune Lanes"
+      message="Route not found"
+      actions={
+        <button className="primary-button" type="button" onClick={() => navigate("/")}>
+          Open match picker
+        </button>
+      }
+    />
+  );
+}
+
+function MatchPicker({ onNavigate }: { onNavigate: (to: string) => void }) {
+  const [matchId, setMatchId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function handleCreateMatch() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const created = await createMatch();
+      onNavigate(`/match/${created.matchId}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not create match");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleOpenMatch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalized = matchId.trim();
+    if (!normalized) {
+      setNotice("Enter a match ID.");
+      return;
+    }
+    onNavigate(`/match/${encodeURIComponent(normalized)}`);
+  }
+
+  return (
+    <main className="app-shell picker-shell">
+      <section className="match-picker" aria-label="Match picker">
+        <div>
+          <p className="eyebrow">Rune Lanes</p>
+          <h1>Open a Match</h1>
+        </div>
+        <div className="picker-actions">
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => void handleCreateMatch()}
+            disabled={busy}
+          >
+            <Plus size={18} />
+            New Match
+          </button>
+          <a className="secondary-link" href="/catalog/">
+            <LibraryBig size={18} />
+            Card Catalog
+          </a>
+        </div>
+        <form className="open-match-form" onSubmit={handleOpenMatch}>
+          <label htmlFor="match-id">Open Match by ID</label>
+          <div>
+            <input
+              id="match-id"
+              value={matchId}
+              onChange={(event) => setMatchId(event.target.value)}
+              placeholder="rl-lx5n2w"
+              autoComplete="off"
+            />
+            <button className="primary-button" type="submit">
+              Open
+            </button>
+          </div>
+        </form>
+        {notice ? <p className="notice">{notice}</p> : null}
+      </section>
+    </main>
+  );
+}
+
+function MatchPage({
+  matchId,
+  onNavigate,
+}: {
+  matchId: string;
+  onNavigate: (to: string) => void;
+}) {
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [selection, setSelection] = useState<Selection>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    getMatch()
-      .then((match) => setLoadState({ status: "ready", match }))
+    setLoadState({ status: "loading" });
+    setSelection(null);
+    setNotice(null);
+    loadMatch(matchId)
+      .then((response) => setLoadState({ status: "ready", match: response.matchState }))
       .catch((error: unknown) =>
         setLoadState({
           status: "error",
           message: error instanceof Error ? error.message : "Could not load match",
         }),
       );
-  }, []);
+  }, [matchId]);
 
   const selectedCard = useMemo(() => {
     if (loadState.status !== "ready" || selection?.type !== "card") {
@@ -88,12 +206,45 @@ export function App() {
     }
   }
 
+  async function handleCreateSeparateMatch() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const created = await createMatch();
+      onNavigate(`/match/${created.matchId}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not create match");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (loadState.status === "loading") {
-    return <ShellMessage title="Rune Lanes" message="Loading board" />;
+    return <ShellMessage title={`Match ${matchId}`} message="Loading board" />;
   }
 
   if (loadState.status === "error") {
-    return <ShellMessage title="Rune Lanes" message={loadState.message} />;
+    return (
+      <ShellMessage
+        title={`Match ${matchId}`}
+        message={loadState.message}
+        actions={
+          <>
+            <button className="primary-button" type="button" onClick={() => onNavigate("/")}>
+              Open another
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => void handleCreateSeparateMatch()}
+              title="New match"
+            >
+              <Plus size={18} />
+            </button>
+          </>
+        }
+      />
+    );
   }
 
   const { match } = loadState;
@@ -145,12 +296,13 @@ export function App() {
           <div>
             <p className="eyebrow">Rune Lanes</p>
             <h1>Round {match.round}</h1>
+            <p className="match-id">Match {matchId}</p>
           </div>
           <div className="actions">
             <button
               className="icon-button"
               type="button"
-              onClick={() => void runAction(newMatch)}
+              onClick={() => void handleCreateSeparateMatch()}
               disabled={busy}
               title="New match"
             >
@@ -255,15 +407,30 @@ function PileDisplay({
   );
 }
 
-function ShellMessage({ title, message }: { title: string; message: string }) {
+function ShellMessage({
+  title,
+  message,
+  actions,
+}: {
+  title: string;
+  message: string;
+  actions?: ReactNode;
+}) {
   return (
     <main className="app-shell centered">
       <div className="shell-message">
         <p className="eyebrow">{title}</p>
         <h1>{message}</h1>
+        {actions ? <div className="actions shell-actions">{actions}</div> : null}
       </div>
     </main>
   );
+}
+
+function matchRouteFromPath(path: string) {
+  const normalized = path.replace(/\/+$/, "");
+  const match = normalized.match(/^\/match\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 function PlayerBadge({ player }: { player: MatchParticipantState }) {
