@@ -1,7 +1,9 @@
 import {
   Activity,
+  Archive,
   Footprints,
   Heart,
+  Layers,
   Play,
   RotateCcw,
   Shield,
@@ -13,6 +15,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { attack, endTurn, getGame, movePiece, newGame, playCard } from "./api";
 import type { Card, GameState, HexCoord, HexTile, Side, Unit, Wizard } from "./types";
+import type { ReactNode } from "react";
 
 type LoadState =
   | { status: "loading" }
@@ -174,23 +177,39 @@ export function App() {
         />
 
         <section className="hand-and-log">
-          <div className="hand" aria-label="Hand">
-            {game.player.hand.map((card) => (
-              <CardButton
-                key={card.id}
-                card={card}
-                selected={selection?.type === "card" && card.id === selection.cardId}
-                disabled={busy || !isPlayableCard(game, card)}
-                onClick={() => {
-                  setSelection(
-                    selection?.type === "card" && card.id === selection.cardId
-                      ? null
-                      : { type: "card", cardId: card.id },
-                  );
-                  setNotice(null);
-                }}
+          <div className="player-zone">
+            <section className="pile-row" aria-label="Player card piles">
+              <PileDisplay
+                icon={<Layers size={19} />}
+                label="Deck"
+                count={game.player.deckCount}
+                status="Remaining"
               />
-            ))}
+              <PileDisplay
+                icon={<Archive size={19} />}
+                label="Discard"
+                count={game.player.discardCount}
+                status={game.player.discardCount === 0 ? "Empty" : "In pile"}
+              />
+            </section>
+            <div className="hand" aria-label="Hand">
+              {game.player.hand.map((card) => (
+                <CardButton
+                  key={card.id}
+                  card={card}
+                  selected={selection?.type === "card" && card.id === selection.cardId}
+                  disabled={busy || !isPlayableCard(game, card)}
+                  onClick={() => {
+                    setSelection(
+                      selection?.type === "card" && card.id === selection.cardId
+                        ? null
+                        : { type: "card", cardId: card.id },
+                    );
+                    setNotice(null);
+                  }}
+                />
+              ))}
+            </div>
           </div>
           <aside className="log" aria-label="Game log">
             {notice ? <p className="notice">{notice}</p> : null}
@@ -201,6 +220,29 @@ export function App() {
         </section>
       </section>
     </main>
+  );
+}
+
+function PileDisplay({
+  icon,
+  label,
+  count,
+  status,
+}: {
+  icon: ReactNode;
+  label: string;
+  count: number;
+  status: string;
+}) {
+  return (
+    <div className="pile-display">
+      <span className="pile-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="pile-label">{label}</span>
+      <strong>{count}</strong>
+      <span className="pile-status">{status}</span>
+    </div>
   );
 }
 

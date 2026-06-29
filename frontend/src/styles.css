@@ -271,11 +271,75 @@ h1 {
   margin-top: 16px;
 }
 
+.player-zone {
+  display: grid;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pile-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(150px, 220px));
+  gap: 10px;
+}
+
+.pile-display {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  grid-template-areas:
+    "icon label count"
+    "icon status count";
+  align-items: center;
+  min-height: 74px;
+  padding: 12px;
+  border: 1px solid rgba(217, 184, 79, 0.3);
+  border-radius: 8px;
+  background:
+    linear-gradient(160deg, rgba(122, 167, 217, 0.12), transparent 54%),
+    var(--panel);
+}
+
+.pile-icon {
+  grid-area: icon;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--gold);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.pile-label {
+  grid-area: label;
+  color: #fffaf0;
+  font-size: 0.82rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.pile-display strong {
+  grid-area: count;
+  min-width: 3ch;
+  color: #fffaf0;
+  font-size: 1.9rem;
+  line-height: 1;
+  text-align: right;
+}
+
+.pile-status {
+  grid-area: status;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .hand {
   display: grid;
   grid-template-columns: repeat(4, minmax(128px, 1fr));
   gap: 10px;
-  flex: 1;
 }
 
 .card-button {
@@ -398,6 +462,10 @@ h1 {
     justify-items: start;
   }
 
+  .player-zone {
+    width: 100%;
+  }
+
   .hand {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
@@ -409,6 +477,10 @@ h1 {
 }
 
 @media (max-width: 520px) {
+  .pile-row {
+    grid-template-columns: 1fr;
+  }
+
   .hand {
     grid-template-columns: 1fr;
   }

@@ -49,6 +49,7 @@ pub struct PlayerState {
     pub wizard: Wizard,
     pub hand: Vec<Card>,
     pub deck_count: usize,
+    pub discard_count: usize,
     #[serde(skip)]
     deck: Vec<Card>,
     #[serde(skip)]
@@ -404,6 +405,7 @@ impl GameState {
         player.wizard.ap_remaining -= 1;
         let card = player.hand.remove(hand_index);
         player.discard.push(card);
+        player.discard_count = player.discard.len();
         Ok(())
     }
 
@@ -988,6 +990,7 @@ impl PlayerState {
             wizard: Wizard::new(side),
             hand: Vec::new(),
             deck_count: deck.len(),
+            discard_count: 0,
             deck,
             discard: Vec::new(),
             rng_seed,
@@ -1005,6 +1008,7 @@ impl PlayerState {
             self.hand.push(card);
         }
         self.deck_count = self.deck.len();
+        self.discard_count = self.discard.len();
     }
 }
 
@@ -1360,6 +1364,58 @@ mod tests {
 
         assert!(value["kind"].get("maxAp").is_some());
         assert!(value["kind"].get("max_ap").is_none());
+    }
+
+    #[test]
+    fn public_player_state_serializes_discard_count_after_unit_play() {
+        let mut game = GameState::new_with_seed(7);
+        let value = serde_json::to_value(&game).expect("game should serialize");
+        assert_eq!(value["player"]["discardCount"], 0);
+
+        let card = player_unit_card(&game, "ember-squire");
+        let card_id = put_card_in_hand(&mut game, card);
+
+        game.apply_action(GameActionRequest::PlayCard {
+            card_id,
+            target: ActionTarget::Hex { coord: hex(0, 2) },
+        })
+        .expect("unit should be playable next to wizard");
+
+        let value = serde_json::to_value(&game).expect("game should serialize");
+        assert_eq!(value["player"]["discardCount"], 1);
+    }
+
+    #[test]
+    fn public_player_state_serializes_discard_count_after_spell_play() {
+        let mut game = GameState::new_with_seed(7);
+        game.board.units.push(Unit {
+            id: "ally".to_string(),
+            side: Side::Player,
+            name: "Stoneguard".to_string(),
+            attack: 1,
+            armor: 2,
+            max_armor: 4,
+            position: hex(0, 2),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+        });
+        let card = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "mending-rune")
+            .expect("heal exists");
+        let card_id = put_card_in_hand(&mut game, card);
+
+        game.apply_action(GameActionRequest::PlayCard {
+            card_id,
+            target: ActionTarget::Piece {
+                piece_id: "ally".to_string(),
+            },
+        })
+        .expect("spell should be playable on damaged ally");
+
+        let value = serde_json::to_value(&game).expect("game should serialize");
+        assert_eq!(value["player"]["discardCount"], 1);
     }
 
     #[test]
