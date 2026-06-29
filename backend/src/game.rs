@@ -645,8 +645,7 @@ impl GameState {
                         .or_else(|| {
                             self.pieces_for_side(Side::Player)
                                 .into_iter()
-                                .filter(in_range)
-                                .next()
+                                .find(in_range)
                         });
                     if let Some(target) = target {
                         return Some((card.clone(), target));
@@ -1112,9 +1111,11 @@ fn starter_card_templates() -> Vec<Card> {
             Rarity::Basic,
             1,
             "1 attack / 2 armor / 2 AP.",
-            1,
-            2,
-            2,
+            UnitStats {
+                attack: 1,
+                armor: 2,
+                max_ap: 2,
+            },
         ),
         unit_card(
             "swift-familiar",
@@ -1122,9 +1123,11 @@ fn starter_card_templates() -> Vec<Card> {
             Rarity::Basic,
             1,
             "1 attack / 1 armor / 3 AP.",
-            1,
-            1,
-            3,
+            UnitStats {
+                attack: 1,
+                armor: 1,
+                max_ap: 3,
+            },
         ),
         unit_card(
             "stoneguard",
@@ -1132,9 +1135,11 @@ fn starter_card_templates() -> Vec<Card> {
             Rarity::Basic,
             2,
             "1 attack / 4 armor / 2 AP.",
-            1,
-            4,
-            2,
+            UnitStats {
+                attack: 1,
+                armor: 4,
+                max_ap: 2,
+            },
         ),
         unit_card(
             "rune-bruiser",
@@ -1142,9 +1147,11 @@ fn starter_card_templates() -> Vec<Card> {
             Rarity::Basic,
             2,
             "2 attack / 2 armor / 2 AP.",
-            2,
-            2,
-            2,
+            UnitStats {
+                attack: 2,
+                armor: 2,
+                max_ap: 2,
+            },
         ),
         unit_card(
             "blade-dancer",
@@ -1152,9 +1159,11 @@ fn starter_card_templates() -> Vec<Card> {
             Rarity::Advanced,
             3,
             "2 attack / 2 armor / 3 AP.",
-            2,
-            2,
-            3,
+            UnitStats {
+                attack: 2,
+                armor: 2,
+                max_ap: 3,
+            },
         ),
         unit_card(
             "shield-adept",
@@ -1162,9 +1171,11 @@ fn starter_card_templates() -> Vec<Card> {
             Rarity::Advanced,
             3,
             "1 attack / 5 armor / 2 AP.",
-            1,
-            5,
-            2,
+            UnitStats {
+                attack: 1,
+                armor: 5,
+                max_ap: 2,
+            },
         ),
         spell_card(
             "mending-rune",
@@ -1193,9 +1204,11 @@ fn starter_card_templates() -> Vec<Card> {
             Rarity::Rare,
             6,
             "4 attack / 6 armor / 1 AP.",
-            4,
-            6,
-            1,
+            UnitStats {
+                attack: 4,
+                armor: 6,
+                max_ap: 1,
+            },
         ),
         spell_card(
             "starfire-bolt",
@@ -1209,15 +1222,19 @@ fn starter_card_templates() -> Vec<Card> {
     ]
 }
 
+struct UnitStats {
+    attack: i32,
+    armor: i32,
+    max_ap: u8,
+}
+
 fn unit_card(
     template_id: &str,
     name: &str,
     rarity: Rarity,
     cost: u8,
     text: &str,
-    attack: i32,
-    armor: i32,
-    max_ap: u8,
+    stats: UnitStats,
 ) -> Card {
     Card {
         id: template_id.to_string(),
@@ -1227,9 +1244,9 @@ fn unit_card(
         cost,
         text: text.to_string(),
         kind: CardKind::Unit {
-            attack,
-            armor,
-            max_ap,
+            attack: stats.attack,
+            armor: stats.armor,
+            max_ap: stats.max_ap,
         },
     }
 }

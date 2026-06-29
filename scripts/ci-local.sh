@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+
+cd "$REPO_ROOT"
+
+echo "==> Checking Rust formatting"
+cargo fmt --all --check
+
+echo "==> Running Rust clippy"
+cargo clippy --workspace --all-targets -- -D warnings
+
+echo "==> Running Rust tests"
+cargo test --workspace
+
+echo "==> Building frontend"
+bun run --cwd frontend build
+
+echo "==> Local CI checks passed"

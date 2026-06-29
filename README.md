@@ -35,5 +35,10 @@ The frontend proxies `/api` to `http://localhost:4000`.
 ## Checks
 
 ```sh
-bun run test
+bun run ci:local
 ```
+
+`bun install` configures Git to run `.githooks/pre-push`, which executes the
+same local CI script before a push reaches GitHub. If GitHub Actions cannot run
+because of a billing or spending limit, a passing `bun run ci:local` is the
+project's local signal that the shared CI workflow would have passed.
