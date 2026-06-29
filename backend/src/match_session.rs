@@ -1566,6 +1566,43 @@ mod tests {
     }
 
     #[test]
+    fn match_snapshot_restores_hidden_piles_rng_unit_ids_and_first_turn_flags() {
+        let mut game = MatchState::new_with_seed(7);
+        let card = player_unit_card(&game, "ember-squire");
+        let card_id = put_card_in_hand(&mut game, card);
+
+        game.apply_action(MatchActionRequest::PlayCard {
+            card_id,
+            target: ActionTarget::Hex { coord: hex(0, 2) },
+        })
+        .expect("unit should be playable next to wizard");
+
+        let snapshot = game.to_snapshot_json().expect("snapshot should serialize");
+        let mut restored =
+            MatchState::from_snapshot_json(&snapshot).expect("snapshot should deserialize");
+
+        assert_eq!(restored.player.deck.len(), game.player.deck.len());
+        assert_eq!(restored.player.discard.len(), game.player.discard.len());
+        assert_eq!(restored.player.rng_seed, game.player.rng_seed);
+        assert_eq!(
+            restored.player.has_started_first_turn,
+            game.player.has_started_first_turn
+        );
+        assert_eq!(restored.next_unit_id, game.next_unit_id);
+
+        game.apply_action(MatchActionRequest::EndTurn)
+            .expect("end turn should apply");
+        restored
+            .apply_action(MatchActionRequest::EndTurn)
+            .expect("end turn should apply after restore");
+
+        assert_eq!(
+            serde_json::to_value(&restored).expect("restored match should serialize"),
+            serde_json::to_value(&game).expect("match should serialize")
+        );
+    }
+
+    #[test]
     fn wizards_start_on_opposite_centered_edges() {
         let game = MatchState::new_with_seed(7);
 

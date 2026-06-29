@@ -40,9 +40,11 @@ The frontend proxies `/api` to `http://localhost:4000`.
 
 ## Match persistence
 
-The backend creates matches through `POST /api/matches` and loads them through
-`GET /api/matches/:matchId`. New matches receive short readable IDs such as
-`rl-lx5n2w`, and the initial full match snapshot is stored in SQLite.
+The backend creates matches through `POST /api/matches`, loads them through
+`GET /api/matches/:matchId`, and applies playable actions through
+`POST /api/matches/:matchId/actions`. New matches receive short readable IDs
+such as `rl-lx5n2w`, and the full match snapshot is stored in SQLite after
+creation and after each successful action.
 
 SQLite data defaults to `data/rune-lanes.sqlite3`, which is ignored by git. Set
 `RUNE_LANES_DB_PATH=/path/to/rune-lanes.sqlite3` to use a different database,

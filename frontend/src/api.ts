@@ -27,19 +27,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-function matchAction(action: MatchActionRequest) {
-  return request<MatchState>("/api/match/action", {
+function matchAction(matchId: string, action: MatchActionRequest) {
+  return request<MatchResponse>(`/api/matches/${encodeURIComponent(matchId)}/actions`, {
     method: "POST",
     body: JSON.stringify(action),
-  });
-}
-
-export function getMatch() {
-  return request<MatchState>("/api/match");
-}
-
-export function newMatch() {
-  return request<MatchState>("/api/match/new", { method: "POST" });
+  }).then((response) => response.matchState);
 }
 
 export function createMatch() {
@@ -50,18 +42,18 @@ export function loadMatch(matchId: string) {
   return request<MatchResponse>(`/api/matches/${encodeURIComponent(matchId)}`);
 }
 
-export function playCard(cardId: string, target: ActionTarget) {
-  return matchAction({ type: "playCard", cardId, target });
+export function playCard(matchId: string, cardId: string, target: ActionTarget) {
+  return matchAction(matchId, { type: "playCard", cardId, target });
 }
 
-export function movePiece(pieceId: string, to: HexCoord) {
-  return matchAction({ type: "movePiece", pieceId, to });
+export function movePiece(matchId: string, pieceId: string, to: HexCoord) {
+  return matchAction(matchId, { type: "movePiece", pieceId, to });
 }
 
-export function attack(attackerId: string, targetId: string) {
-  return matchAction({ type: "attack", attackerId, targetId });
+export function attack(matchId: string, attackerId: string, targetId: string) {
+  return matchAction(matchId, { type: "attack", attackerId, targetId });
 }
 
-export function endTurn() {
-  return matchAction({ type: "endTurn" });
+export function endTurn(matchId: string) {
+  return matchAction(matchId, { type: "endTurn" });
 }
