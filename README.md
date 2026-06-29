@@ -2,7 +2,7 @@
 
 Rune Lanes is a small vertical slice for a card game / board game hybrid.
 
-Players spend energy to play cards into one of three lanes on a five-column board. Units advance toward the opponent edge when the turn resolves, fight blockers in their path, and score damage when they break through.
+Players control wizards on a radius-3 hex arena. Cards cost mana and wizard action points to summon units or cast spells; units then spend their own action points to move across adjacent hexes and attack neighboring enemies.
 
 ## Stack
 
@@ -37,4 +37,3 @@ The frontend proxies `/api` to `http://localhost:4000`.
 ```sh
 bun run test
 ```
-

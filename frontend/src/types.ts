@@ -2,24 +2,61 @@ export type Side = "player" | "opponent";
 
 export type Phase = "planning" | "gameOver";
 
+export type Rarity = "basic" | "advanced" | "rare";
+
+export type HexCoord = {
+  q: number;
+  r: number;
+};
+
+export type SpellEffect =
+  | {
+      type: "heal";
+      amount: number;
+    }
+  | {
+      type: "buff";
+      attack: number;
+      armor: number;
+    }
+  | {
+      type: "damage";
+      amount: number;
+    };
+
 export type CardKind =
   | {
       type: "unit";
       attack: number;
       armor: number;
-      movement: number;
+      maxAp: number;
     }
   | {
-      type: "tactic";
-      effect: "rally";
+      type: "spell";
+      range: number;
+      effect: SpellEffect;
     };
 
 export type Card = {
   id: string;
+  templateId: string;
   name: string;
+  rarity: Rarity;
   cost: number;
   text: string;
   kind: CardKind;
+};
+
+export type Wizard = {
+  id: string;
+  side: Side;
+  hp: number;
+  maxHp: number;
+  attack: number;
+  position: HexCoord;
+  apRemaining: number;
+  maxAp: number;
+  hasAttacked: boolean;
 };
 
 export type Unit = {
@@ -28,30 +65,68 @@ export type Unit = {
   name: string;
   attack: number;
   armor: number;
-  movement: number;
+  maxArmor: number;
+  position: HexCoord;
+  apRemaining: number;
+  maxAp: number;
+  hasAttacked: boolean;
 };
 
-export type Lane = {
-  index: number;
-  cells: Array<Unit | null>;
+export type HexTile = {
+  coord: HexCoord;
+};
+
+export type HexBoard = {
+  radius: number;
+  tiles: HexTile[];
+  units: Unit[];
 };
 
 export type PlayerState = {
   side: Side;
-  health: number;
-  energy: number;
-  maxEnergy: number;
+  mana: number;
+  maxMana: number;
+  wizard: Wizard;
   hand: Card[];
   deckCount: number;
 };
 
 export type GameState = {
-  turn: number;
+  round: number;
   phase: Phase;
   player: PlayerState;
   opponent: PlayerState;
-  lanes: Lane[];
+  board: HexBoard;
   log: string[];
   winner: Side | null;
 };
 
+export type ActionTarget =
+  | {
+      type: "hex";
+      coord: HexCoord;
+    }
+  | {
+      type: "piece";
+      pieceId: string;
+    };
+
+export type GameActionRequest =
+  | {
+      type: "playCard";
+      cardId: string;
+      target: ActionTarget;
+    }
+  | {
+      type: "movePiece";
+      pieceId: string;
+      to: HexCoord;
+    }
+  | {
+      type: "attack";
+      attackerId: string;
+      targetId: string;
+    }
+  | {
+      type: "endTurn";
+    };

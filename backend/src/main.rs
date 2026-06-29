@@ -8,7 +8,7 @@ use axum::http::{Method, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use game::{GameState, PlayCardRequest};
+use game::{GameActionRequest, GameState};
 use serde::Serialize;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -31,7 +31,7 @@ async fn main() {
         .route("/api/health", get(health))
         .route("/api/game", get(get_game))
         .route("/api/game/new", post(new_game))
-        .route("/api/game/action", post(play_card))
+        .route("/api/game/action", post(apply_action))
         .route("/api/game/resolve", post(resolve_turn))
         .layer(cors)
         .with_state(game);
@@ -63,13 +63,13 @@ async fn new_game(State(game): State<SharedGame>) -> Json<GameState> {
     Json(game.clone())
 }
 
-async fn play_card(
+async fn apply_action(
     State(game): State<SharedGame>,
-    Json(request): Json<PlayCardRequest>,
+    Json(request): Json<GameActionRequest>,
 ) -> impl IntoResponse {
     let mut game = game.lock().expect("game lock should not be poisoned");
 
-    match game.play_card(request) {
+    match game.apply_action(request) {
         Ok(()) => Json(game.clone()).into_response(),
         Err(error) => (
             StatusCode::BAD_REQUEST,
@@ -83,6 +83,6 @@ async fn play_card(
 
 async fn resolve_turn(State(game): State<SharedGame>) -> Json<GameState> {
     let mut game = game.lock().expect("game lock should not be poisoned");
-    game.resolve_turn();
+    let _ = game.apply_action(GameActionRequest::EndTurn);
     Json(game.clone())
 }
