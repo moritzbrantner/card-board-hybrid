@@ -105,6 +105,11 @@ export type MatchState = {
   winner: Side | null;
 };
 
+export type MatchResponse = {
+  matchId: string;
+  matchState: MatchState;
+};
+
 export type ActionTarget =
   | {
       type: "hex";

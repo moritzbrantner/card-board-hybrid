@@ -57,9 +57,60 @@ button {
   width: min(520px, 100%);
 }
 
+.shell-actions {
+  margin-top: 18px;
+}
+
 .table {
   width: min(1320px, 100%);
   margin: 0 auto;
+}
+
+.picker-shell {
+  display: grid;
+  align-items: center;
+}
+
+.match-picker {
+  display: grid;
+  gap: 22px;
+  width: min(620px, 100%);
+  margin: 0 auto;
+}
+
+.picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.open-match-form {
+  display: grid;
+  gap: 8px;
+}
+
+.open-match-form label {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.open-match-form div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.open-match-form input {
+  min-height: 42px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: #fffaf0;
+  background: var(--panel);
+  font: inherit;
 }
 
 .top-bar,
@@ -90,13 +141,21 @@ h1 {
   line-height: 0.95;
 }
 
+.match-id {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
 .actions {
   display: flex;
   gap: 8px;
 }
 
 .icon-button,
-.primary-button {
+.primary-button,
+.secondary-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -106,6 +165,7 @@ h1 {
   color: #fffaf0;
   background: rgba(255, 255, 255, 0.08);
   cursor: pointer;
+  text-decoration: none;
 }
 
 .icon-button {
@@ -120,8 +180,15 @@ h1 {
   font-weight: 800;
 }
 
+.secondary-link {
+  gap: 8px;
+  padding: 0 16px;
+  font-weight: 800;
+}
+
 .icon-button:disabled,
 .primary-button:disabled,
+.secondary-link:disabled,
 .hex-tile:disabled,
 .card-button:disabled {
   cursor: not-allowed;
@@ -497,5 +564,9 @@ h1 {
 
   .player-badge {
     justify-content: space-between;
+  }
+
+  .open-match-form div {
+    grid-template-columns: 1fr;
   }
 }

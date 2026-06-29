@@ -1,4 +1,10 @@
-import type { ActionTarget, MatchActionRequest, MatchState, HexCoord } from "./types";
+import type {
+  ActionTarget,
+  MatchActionRequest,
+  MatchResponse,
+  MatchState,
+  HexCoord,
+} from "./types";
 
 type ApiError = {
   message?: string;
@@ -34,6 +40,14 @@ export function getMatch() {
 
 export function newMatch() {
   return request<MatchState>("/api/match/new", { method: "POST" });
+}
+
+export function createMatch() {
+  return request<MatchResponse>("/api/matches", { method: "POST" });
+}
+
+export function loadMatch(matchId: string) {
+  return request<MatchResponse>(`/api/matches/${encodeURIComponent(matchId)}`);
 }
 
 export function playCard(cardId: string, target: ActionTarget) {
