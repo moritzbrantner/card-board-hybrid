@@ -1,0 +1,21 @@
+{
+  "baselineEstimatedTokens": 319,
+  "diagnosticsFailures": 0,
+  "estimatedSavingsPercent": 8.78,
+  "estimatedTokensObserved": 291,
+  "estimatedTokensSaved": 28,
+  "eventsLogged": 15,
+  "lastCycle": 1,
+  "lastEventId": "0371bfe0-f6a6-486a-a1c5-d60a3a531990",
+  "lastEventType": "diagnostic_summary_written",
+  "lastStatus": "blocked",
+  "latestReportPath": "/home/moenarch/moritzbrantner/card-board-hybrid/.agent-loop/diagnostics/reports/20260629-115453-moritzbrantner-card-board-hybrid-summary-last-80.md",
+  "ok": true,
+  "path": "/home/moenarch/moritzbrantner/card-board-hybrid/.agent-loop/diagnostics/runs/20260629-115453-moritzbrantner-card-board-hybrid.jsonl",
+  "repo": "moritzbrantner/card-board-hybrid",
+  "resumed": false,
+  "runId": "20260629-115453-moritzbrantner-card-board-hybrid",
+  "startedAt": "2026-06-29T11:54:53Z",
+  "tokenEstimatesLogged": 2,
+  "updatedAt": "2026-06-29T12:04:31Z"
+}
