@@ -18,9 +18,9 @@
   --muted: #c9cec5;
   --hex-width: clamp(96px, 8vw, 112px);
   --hex-height: clamp(87px, 7.3vw, 102px);
-  --hex-row-overlap: -9px;
-  --hex-side-overlap: -3px;
-  --hex-board-min-width: clamp(706px, 58.8vw, 824px);
+  --hex-column-overlap: calc(var(--hex-width) * -0.25);
+  --hex-vertical-overlap: -3px;
+  --hex-board-min-width: clamp(528px, 45vw, 616px);
   --token-size: clamp(64px, 5.25vw, 72px);
 }
 
@@ -264,22 +264,24 @@ h1 {
 }
 
 .hex-board {
-  display: grid;
-  justify-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: max-content;
   min-width: var(--hex-board-min-width);
   padding: 16px 0;
 }
 
-.hex-row {
+.hex-column {
   display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
-  height: var(--hex-height);
-  margin-top: var(--hex-row-overlap);
+  margin-left: var(--hex-column-overlap);
 }
 
-.hex-row:first-child {
-  margin-top: 0;
+.hex-column:first-child {
+  margin-left: 0;
 }
 
 .hex-tile {
@@ -288,7 +290,7 @@ h1 {
   place-items: center;
   width: var(--hex-width);
   height: var(--hex-height);
-  margin: 0 var(--hex-side-overlap);
+  margin: var(--hex-vertical-overlap) 0;
   border: 1px solid rgba(247, 243, 234, 0.18);
   color: inherit;
   background:

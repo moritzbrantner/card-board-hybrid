@@ -717,14 +717,14 @@ function Board({
   disabled: boolean;
   onTileClick: (tile: HexTile) => void;
 }) {
-  const rows = groupTilesByRow(match.board.tiles);
+  const columns = groupTilesByColumn(match.board.tiles);
 
   return (
     <section className="board" aria-label="Hex board">
       <div className="hex-board">
-        {rows.map((row) => (
-          <div className="hex-row" key={row.r}>
-            {row.tiles.map((tile) => {
+        {columns.map((column) => (
+          <div className="hex-column" key={column.q}>
+            {column.tiles.map((tile) => {
               const piece = pieceAt(match, tile.coord);
               const isLegal =
                 !disabled &&
@@ -810,17 +810,17 @@ function CardButton({
   );
 }
 
-function groupTilesByRow(tiles: HexTile[]) {
-  const rows = new Map<number, HexTile[]>();
+function groupTilesByColumn(tiles: HexTile[]) {
+  const columns = new Map<number, HexTile[]>();
   for (const tile of tiles) {
-    rows.set(tile.coord.r, [...(rows.get(tile.coord.r) ?? []), tile]);
+    columns.set(tile.coord.q, [...(columns.get(tile.coord.q) ?? []), tile]);
   }
 
-  return [...rows.entries()]
+  return [...columns.entries()]
     .sort(([a], [b]) => a - b)
-    .map(([r, rowTiles]) => ({
-      r,
-      tiles: rowTiles.sort((a, b) => a.coord.q - b.coord.q),
+    .map(([q, columnTiles]) => ({
+      q,
+      tiles: columnTiles.sort((a, b) => a.coord.r - b.coord.r),
     }));
 }
 
