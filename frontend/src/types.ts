@@ -47,6 +47,23 @@ export type Card = {
   kind: CardKind;
 };
 
+export type CatalogCard = {
+  id: string;
+  templateId: string;
+  name: string;
+  rarity: Rarity;
+  cost: number;
+  text: string;
+  kind: CardKind;
+  copyCount: number;
+  artKey: string;
+  artPath: string;
+};
+
+export type CatalogResponse = {
+  cards: CatalogCard[];
+};
+
 export type Wizard = {
   id: string;
   side: Side;

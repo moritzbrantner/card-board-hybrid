@@ -5,6 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 
+use crate::card_catalog::{starter_card_templates, starter_copy_count};
+
 const BOARD_RADIUS: i32 = 3;
 const STARTING_WIZARD_HP: i32 = 20;
 const WIZARD_ATTACK: i32 = 1;
@@ -1193,11 +1195,7 @@ impl Side {
 fn starter_deck(side: Side) -> Vec<Card> {
     let mut cards = Vec::new();
     for template in starter_card_templates() {
-        let copy_count = match template.rarity {
-            Rarity::Basic => 8,
-            Rarity::Advanced => 4,
-            Rarity::Rare => 1,
-        };
+        let copy_count = starter_copy_count(template.rarity);
         for copy in 0..copy_count {
             let mut card = template.clone();
             card.id = format!("{}-{copy}-{}", side.card_prefix(), card.template_id);
@@ -1205,174 +1203,6 @@ fn starter_deck(side: Side) -> Vec<Card> {
         }
     }
     cards
-}
-
-fn starter_card_templates() -> Vec<Card> {
-    vec![
-        unit_card(
-            "ember-squire",
-            "Ember Squire",
-            Rarity::Basic,
-            1,
-            "1 attack / 2 armor / 2 AP.",
-            UnitStats {
-                attack: 1,
-                armor: 2,
-                max_ap: 2,
-            },
-        ),
-        unit_card(
-            "swift-familiar",
-            "Swift Familiar",
-            Rarity::Basic,
-            1,
-            "1 attack / 1 armor / 3 AP.",
-            UnitStats {
-                attack: 1,
-                armor: 1,
-                max_ap: 3,
-            },
-        ),
-        unit_card(
-            "stoneguard",
-            "Stoneguard",
-            Rarity::Basic,
-            2,
-            "1 attack / 4 armor / 2 AP.",
-            UnitStats {
-                attack: 1,
-                armor: 4,
-                max_ap: 2,
-            },
-        ),
-        unit_card(
-            "rune-bruiser",
-            "Rune Bruiser",
-            Rarity::Basic,
-            2,
-            "2 attack / 2 armor / 2 AP.",
-            UnitStats {
-                attack: 2,
-                armor: 2,
-                max_ap: 2,
-            },
-        ),
-        unit_card(
-            "blade-dancer",
-            "Blade Dancer",
-            Rarity::Advanced,
-            3,
-            "2 attack / 2 armor / 3 AP.",
-            UnitStats {
-                attack: 2,
-                armor: 2,
-                max_ap: 3,
-            },
-        ),
-        unit_card(
-            "shield-adept",
-            "Shield Adept",
-            Rarity::Advanced,
-            3,
-            "1 attack / 5 armor / 2 AP.",
-            UnitStats {
-                attack: 1,
-                armor: 5,
-                max_ap: 2,
-            },
-        ),
-        spell_card(
-            "mending-rune",
-            "Mending Rune",
-            Rarity::Advanced,
-            2,
-            "Range 2. Heal 3 to an allied unit or wizard.",
-            2,
-            SpellEffect::Heal { amount: 3 },
-        ),
-        spell_card(
-            "war-chant",
-            "War Chant",
-            Rarity::Advanced,
-            3,
-            "Range 2. An allied unit gains +1 attack and +1 armor.",
-            2,
-            SpellEffect::Buff {
-                attack: 1,
-                armor: 1,
-            },
-        ),
-        unit_card(
-            "iron-colossus",
-            "Iron Colossus",
-            Rarity::Rare,
-            6,
-            "4 attack / 6 armor / 1 AP.",
-            UnitStats {
-                attack: 4,
-                armor: 6,
-                max_ap: 1,
-            },
-        ),
-        spell_card(
-            "starfire-bolt",
-            "Starfire Bolt",
-            Rarity::Rare,
-            5,
-            "Range 3. Deal 4 damage to an enemy unit or wizard.",
-            3,
-            SpellEffect::Damage { amount: 4 },
-        ),
-    ]
-}
-
-struct UnitStats {
-    attack: i32,
-    armor: i32,
-    max_ap: u8,
-}
-
-fn unit_card(
-    template_id: &str,
-    name: &str,
-    rarity: Rarity,
-    cost: u8,
-    text: &str,
-    stats: UnitStats,
-) -> Card {
-    Card {
-        id: template_id.to_string(),
-        template_id: template_id.to_string(),
-        name: name.to_string(),
-        rarity,
-        cost,
-        text: text.to_string(),
-        kind: CardKind::Unit {
-            attack: stats.attack,
-            armor: stats.armor,
-            max_ap: stats.max_ap,
-        },
-    }
-}
-
-fn spell_card(
-    template_id: &str,
-    name: &str,
-    rarity: Rarity,
-    cost: u8,
-    text: &str,
-    range: u8,
-    effect: SpellEffect,
-) -> Card {
-    Card {
-        id: template_id.to_string(),
-        template_id: template_id.to_string(),
-        name: name.to_string(),
-        rarity,
-        cost,
-        text: text.to_string(),
-        kind: CardKind::Spell { range, effect },
-    }
 }
 
 impl Side {

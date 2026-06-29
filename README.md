@@ -36,7 +36,7 @@ The frontend proxies `/api` to `http://localhost:4000`.
 
 - `/` opens the match picker. It can create a new match, open a match by ID, or link to `/catalog/`.
 - `/match/<match-id>` opens the playable Rune Lanes board for a persisted match.
-- `/catalog/` is reserved for the card catalog route.
+- `/catalog/` opens the backend-driven starter card catalog.
 
 ## Match persistence
 

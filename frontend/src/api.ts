@@ -1,5 +1,6 @@
 import type {
   ActionTarget,
+  CatalogResponse,
   MatchActionRequest,
   MatchResponse,
   MatchState,
@@ -40,6 +41,10 @@ export function createMatch() {
 
 export function loadMatch(matchId: string) {
   return request<MatchResponse>(`/api/matches/${encodeURIComponent(matchId)}`);
+}
+
+export function loadCatalog() {
+  return request<CatalogResponse>("/api/catalog/cards");
 }
 
 export function playCard(matchId: string, cardId: string, target: ActionTarget) {
