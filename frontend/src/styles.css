@@ -16,6 +16,12 @@
   --green: #77b36f;
   --ink: #151817;
   --muted: #c9cec5;
+  --hex-width: clamp(96px, 8vw, 112px);
+  --hex-height: clamp(87px, 7.3vw, 102px);
+  --hex-row-overlap: -9px;
+  --hex-side-overlap: -3px;
+  --hex-board-min-width: clamp(706px, 58.8vw, 824px);
+  --token-size: clamp(64px, 5.25vw, 72px);
 }
 
 * {
@@ -52,7 +58,7 @@ button {
 }
 
 .table {
-  width: min(1200px, 100%);
+  width: min(1320px, 100%);
   margin: 0 auto;
 }
 
@@ -168,28 +174,32 @@ h1 {
 .board {
   display: grid;
   justify-items: center;
+  max-width: 100%;
   overflow: auto;
-  padding: 18px;
+  padding: 20px;
   border: 1px solid rgba(217, 184, 79, 0.32);
   border-radius: 8px;
   background:
     linear-gradient(90deg, rgba(88, 183, 161, 0.12), transparent 35%, rgba(209, 102, 90, 0.12)),
     var(--panel-strong);
   box-shadow: 0 24px 90px rgba(0, 0, 0, 0.34);
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable both-edges;
 }
 
 .hex-board {
   display: grid;
   justify-items: center;
-  min-width: 650px;
-  padding: 14px 0;
+  width: max-content;
+  min-width: var(--hex-board-min-width);
+  padding: 16px 0;
 }
 
 .hex-row {
   display: flex;
   justify-content: center;
-  height: 78px;
-  margin-top: -7px;
+  height: var(--hex-height);
+  margin-top: var(--hex-row-overlap);
 }
 
 .hex-row:first-child {
@@ -200,9 +210,9 @@ h1 {
   position: relative;
   display: grid;
   place-items: center;
-  width: 86px;
-  height: 78px;
-  margin: 0 -2px;
+  width: var(--hex-width);
+  height: var(--hex-height);
+  margin: 0 var(--hex-side-overlap);
   border: 1px solid rgba(247, 243, 234, 0.18);
   color: inherit;
   background:
@@ -233,8 +243,8 @@ h1 {
   align-content: center;
   justify-items: center;
   gap: 1px;
-  width: 58px;
-  min-height: 58px;
+  width: var(--token-size);
+  min-height: var(--token-size);
   border: 2px solid currentColor;
   border-radius: 8px;
   color: var(--green);
@@ -255,14 +265,14 @@ h1 {
 }
 
 .piece-token strong {
-  font-size: 0.82rem;
+  font-size: 0.88rem;
 }
 
 .piece-token span {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: 0.66rem;
+  font-size: 0.69rem;
   font-weight: 800;
 }
 
