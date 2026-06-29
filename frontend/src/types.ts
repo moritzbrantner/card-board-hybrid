@@ -89,6 +89,7 @@ export type PlayerState = {
   wizard: Wizard;
   hand: Card[];
   deckCount: number;
+  discardCount: number;
 };
 
 export type GameState = {
