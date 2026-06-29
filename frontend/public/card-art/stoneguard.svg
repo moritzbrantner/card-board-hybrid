@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520" role="img" aria-hidden="true">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#2a3440"/><stop offset=".6" stop-color="#5d6969"/><stop offset="1" stop-color="#1d221f"/></linearGradient>
+    <filter id="rough"><feTurbulence type="fractalNoise" baseFrequency=".018" numOctaves="5"/><feDisplacementMap in="SourceGraphic" scale="12"/></filter>
+  </defs>
+  <rect width="800" height="520" fill="url(#bg)"/>
+  <path d="M0 392 C120 340 220 362 340 322 C520 262 640 286 800 224 L800 520 L0 520 Z" fill="#101613"/>
+  <g filter="url(#rough)">
+    <path d="M314 430 L238 270 L320 128 L482 110 L592 250 L548 430 Z" fill="#747b72"/>
+    <path d="M338 404 L300 266 L352 164 L462 152 L532 262 L510 404 Z" fill="#a8aaa0"/>
+    <path d="M262 300 L160 352 L228 450 L330 420 Z" fill="#4b514b"/>
+    <path d="M548 292 L668 340 L610 456 L504 410 Z" fill="#3f4843"/>
+    <circle cx="410" cy="238" r="42" fill="#d6c170" opacity=".75"/>
+  </g>
+</svg>

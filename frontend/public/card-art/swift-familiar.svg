@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520" role="img" aria-hidden="true">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#12323a"/><stop offset=".6" stop-color="#4a8c91"/><stop offset="1" stop-color="#d7c889"/></linearGradient>
+    <filter id="paint"><feTurbulence type="fractalNoise" baseFrequency=".015" numOctaves="4"/><feDisplacementMap in="SourceGraphic" scale="18"/></filter>
+  </defs>
+  <rect width="800" height="520" fill="url(#bg)"/>
+  <path d="M0 355 C160 280 280 340 420 280 C560 220 650 245 800 180 L800 520 L0 520 Z" fill="#152222" opacity=".72"/>
+  <g filter="url(#paint)" opacity=".96">
+    <path d="M196 302 C292 204 394 184 548 236 C430 244 366 292 300 386 Z" fill="#dbefe5"/>
+    <path d="M280 226 C360 114 480 108 632 162 C502 190 408 240 330 330 Z" fill="#86d4ca" opacity=".9"/>
+    <path d="M250 368 C346 330 444 324 574 386 C450 412 348 412 250 368 Z" fill="#0f3034" opacity=".85"/>
+    <circle cx="478" cy="218" r="28" fill="#f9e49c"/>
+  </g>
+</svg>

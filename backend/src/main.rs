@@ -1,3 +1,4 @@
+mod card_catalog;
 mod match_session;
 mod match_store;
 
@@ -9,6 +10,7 @@ use axum::http::{Method, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use card_catalog::{CatalogResponse, starter_catalog};
 use match_session::{MatchActionRequest, MatchState};
 use match_store::{MatchStoreError, SqliteMatchStore, StoredMatch};
 use serde::Serialize;
@@ -50,6 +52,7 @@ fn create_app(store: SqliteMatchStore) -> Router {
 
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/catalog/cards", get(catalog_cards))
         .route("/api/matches", post(create_match))
         .route("/api/matches/{match_id}", get(load_match))
         .route("/api/matches/{match_id}/actions", post(apply_match_action))
@@ -69,6 +72,12 @@ async fn serve(app: Router) {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+async fn catalog_cards() -> impl IntoResponse {
+    Json(CatalogResponse {
+        cards: starter_catalog(),
+    })
 }
 
 async fn create_match(State(state): State<SharedState>) -> impl IntoResponse {
@@ -347,6 +356,46 @@ mod tests {
 
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body["message"], "Match rl-unknown was not found");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn catalog_cards_return_starter_recipe_order_and_copy_counts() {
+        let path = test_db_path("catalog");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, body) = json_request(
+            app,
+            Request::builder()
+                .uri("/api/catalog/cards")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let cards = body["cards"].as_array().expect("cards should be an array");
+        assert_eq!(cards.len(), 10);
+        assert_eq!(cards[0]["id"], "ember-squire");
+        assert_eq!(cards[9]["id"], "starfire-bolt");
+        assert_eq!(cards[0]["copyCount"], 8);
+        assert_eq!(cards[4]["copyCount"], 4);
+        assert_eq!(cards[8]["copyCount"], 1);
+        assert_eq!(
+            cards
+                .iter()
+                .map(|card| card["copyCount"]
+                    .as_u64()
+                    .expect("copy count should be numeric"))
+                .sum::<u64>(),
+            50
+        );
+        assert!(cards.iter().all(|card| {
+            card["artPath"]
+                .as_str()
+                .is_some_and(|path| path.starts_with("/card-art/"))
+        }));
 
         let _ = fs::remove_file(path);
     }
