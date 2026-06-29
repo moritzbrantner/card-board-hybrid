@@ -13,13 +13,22 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { attack, endTurn, getGame, movePiece, newGame, playCard } from "./api";
-import type { Card, GameState, HexCoord, HexTile, Side, Unit, Wizard } from "./types";
+import { attack, endTurn, getMatch, movePiece, newMatch, playCard } from "./api";
+import type {
+  Card,
+  HexCoord,
+  HexTile,
+  MatchParticipantState,
+  MatchState,
+  Side,
+  Unit,
+  Wizard,
+} from "./types";
 import type { ReactNode } from "react";
 
 type LoadState =
   | { status: "loading" }
-  | { status: "ready"; game: GameState }
+  | { status: "ready"; match: MatchState }
   | { status: "error"; message: string };
 
 type Selection =
@@ -38,12 +47,12 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    getGame()
-      .then((game) => setLoadState({ status: "ready", game }))
+    getMatch()
+      .then((match) => setLoadState({ status: "ready", match }))
       .catch((error: unknown) =>
         setLoadState({
           status: "error",
-          message: error instanceof Error ? error.message : "Could not load game",
+          message: error instanceof Error ? error.message : "Could not load match",
         }),
       );
   }, []);
@@ -53,7 +62,7 @@ export function App() {
       return null;
     }
 
-    return loadState.game.player.hand.find((card) => card.id === selection.cardId) ?? null;
+    return loadState.match.player.hand.find((card) => card.id === selection.cardId) ?? null;
   }, [loadState, selection]);
 
   const selectedPiece = useMemo(() => {
@@ -61,16 +70,16 @@ export function App() {
       return null;
     }
 
-    return pieceById(loadState.game, selection.pieceId);
+    return pieceById(loadState.match, selection.pieceId);
   }, [loadState, selection]);
 
-  async function runAction(action: () => Promise<GameState>) {
+  async function runAction(action: () => Promise<MatchState>) {
     setBusy(true);
     setNotice(null);
 
     try {
-      const game = await action();
-      setLoadState({ status: "ready", game });
+      const match = await action();
+      setLoadState({ status: "ready", match });
       setSelection(null);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Action failed");
@@ -87,17 +96,17 @@ export function App() {
     return <ShellMessage title="Rune Lanes" message={loadState.message} />;
   }
 
-  const { game } = loadState;
+  const { match } = loadState;
 
   function handleTileClick(tile: HexTile) {
-    if (busy || game.phase === "gameOver") {
+    if (busy || match.phase === "matchOver") {
       return;
     }
 
-    const piece = pieceAt(game, tile.coord);
+    const piece = pieceAt(match, tile.coord);
 
     if (selectedCard) {
-      if (isLegalCardTarget(game, selectedCard, tile.coord, piece)) {
+      if (isLegalCardTarget(match, selectedCard, tile.coord, piece)) {
         const target =
           selectedCard.kind.type === "unit"
             ? { type: "hex" as const, coord: tile.coord }
@@ -110,7 +119,7 @@ export function App() {
     }
 
     if (selectedPiece) {
-      if (!piece && isLegalMove(game, selectedPiece, tile.coord)) {
+      if (!piece && isLegalMove(match, selectedPiece, tile.coord)) {
         void runAction(() => movePiece(selectedPiece.id, tile.coord));
         return;
       }
@@ -135,15 +144,15 @@ export function App() {
         <header className="top-bar">
           <div>
             <p className="eyebrow">Rune Lanes</p>
-            <h1>Round {game.round}</h1>
+            <h1>Round {match.round}</h1>
           </div>
           <div className="actions">
             <button
               className="icon-button"
               type="button"
-              onClick={() => void runAction(newGame)}
+              onClick={() => void runAction(newMatch)}
               disabled={busy}
-              title="New game"
+              title="New match"
             >
               <RotateCcw size={18} />
             </button>
@@ -151,7 +160,7 @@ export function App() {
               className="primary-button"
               type="button"
               onClick={() => void runAction(endTurn)}
-              disabled={busy || game.phase === "gameOver"}
+              disabled={busy || match.phase === "matchOver"}
             >
               <Play size={18} />
               End Turn
@@ -160,19 +169,19 @@ export function App() {
         </header>
 
         <section className="score-row" aria-label="Score">
-          <PlayerBadge player={game.player} />
+          <PlayerBadge player={match.player} />
           <div className="phase-pill">
             <Activity size={16} />
-            {game.phase === "gameOver" ? `${sideLabel(game.winner)} wins` : "Planning"}
+            {match.phase === "matchOver" ? `${sideLabel(match.winner)} wins` : "Planning"}
           </div>
-          <PlayerBadge player={game.opponent} />
+          <PlayerBadge player={match.opponent} />
         </section>
 
         <Board
-          game={game}
+          match={match}
           selectedCard={selectedCard}
           selectedPiece={selectedPiece}
-          disabled={busy || game.phase === "gameOver"}
+          disabled={busy || match.phase === "matchOver"}
           onTileClick={handleTileClick}
         />
 
@@ -182,23 +191,23 @@ export function App() {
               <PileDisplay
                 icon={<Layers size={19} />}
                 label="Deck"
-                count={game.player.deckCount}
+                count={match.player.deckCount}
                 status="Remaining"
               />
               <PileDisplay
                 icon={<Archive size={19} />}
                 label="Discard"
-                count={game.player.discardCount}
-                status={game.player.discardCount === 0 ? "Empty" : "In pile"}
+                count={match.player.discardCount}
+                status={match.player.discardCount === 0 ? "Empty" : "In pile"}
               />
             </section>
             <div className="hand" aria-label="Hand">
-              {game.player.hand.map((card) => (
+              {match.player.hand.map((card) => (
                 <CardButton
                   key={card.id}
                   card={card}
                   selected={selection?.type === "card" && card.id === selection.cardId}
-                  disabled={busy || !isPlayableCard(game, card)}
+                  disabled={busy || !isPlayableCard(match, card)}
                   onClick={() => {
                     setSelection(
                       selection?.type === "card" && card.id === selection.cardId
@@ -211,9 +220,9 @@ export function App() {
               ))}
             </div>
           </div>
-          <aside className="log" aria-label="Game log">
+          <aside className="log" aria-label="Match log">
             {notice ? <p className="notice">{notice}</p> : null}
-            {game.log.map((entry, index) => (
+            {match.log.map((entry, index) => (
               <p key={`${entry}-${index}`}>{entry}</p>
             ))}
           </aside>
@@ -257,7 +266,7 @@ function ShellMessage({ title, message }: { title: string; message: string }) {
   );
 }
 
-function PlayerBadge({ player }: { player: GameState["player"] }) {
+function PlayerBadge({ player }: { player: MatchParticipantState }) {
   return (
     <div className={`player-badge ${player.side}`}>
       <strong>{sideLabel(player.side)}</strong>
@@ -278,19 +287,19 @@ function PlayerBadge({ player }: { player: GameState["player"] }) {
 }
 
 function Board({
-  game,
+  match,
   selectedCard,
   selectedPiece,
   disabled,
   onTileClick,
 }: {
-  game: GameState;
+  match: MatchState;
   selectedCard: Card | null;
   selectedPiece: BoardPiece | null;
   disabled: boolean;
   onTileClick: (tile: HexTile) => void;
 }) {
-  const rows = groupTilesByRow(game.board.tiles);
+  const rows = groupTilesByRow(match.board.tiles);
 
   return (
     <section className="board" aria-label="Hex board">
@@ -298,12 +307,12 @@ function Board({
         {rows.map((row) => (
           <div className="hex-row" key={row.r}>
             {row.tiles.map((tile) => {
-              const piece = pieceAt(game, tile.coord);
+              const piece = pieceAt(match, tile.coord);
               const isLegal =
                 !disabled &&
-                ((selectedCard && isLegalCardTarget(game, selectedCard, tile.coord, piece)) ||
+                ((selectedCard && isLegalCardTarget(match, selectedCard, tile.coord, piece)) ||
                   (selectedPiece &&
-                    ((!piece && isLegalMove(game, selectedPiece, tile.coord)) ||
+                    ((!piece && isLegalMove(match, selectedPiece, tile.coord)) ||
                       (piece && isLegalAttack(selectedPiece, piece)))));
               const isSelected = piece?.id === selectedPiece?.id;
 
@@ -402,53 +411,53 @@ function groupTilesByRow(tiles: HexTile[]) {
     }));
 }
 
-function pieceAt(game: GameState, coord: HexCoord): BoardPiece | null {
-  if (sameCoord(game.player.wizard.position, coord)) {
-    return { ...game.player.wizard, pieceType: "wizard", name: "Wizard" };
+function pieceAt(match: MatchState, coord: HexCoord): BoardPiece | null {
+  if (sameCoord(match.player.wizard.position, coord)) {
+    return { ...match.player.wizard, pieceType: "wizard", name: "Wizard" };
   }
-  if (sameCoord(game.opponent.wizard.position, coord)) {
-    return { ...game.opponent.wizard, pieceType: "wizard", name: "Wizard" };
+  if (sameCoord(match.opponent.wizard.position, coord)) {
+    return { ...match.opponent.wizard, pieceType: "wizard", name: "Wizard" };
   }
 
-  const unit = game.board.units.find((candidate) => sameCoord(candidate.position, coord));
+  const unit = match.board.units.find((candidate) => sameCoord(candidate.position, coord));
   return unit ? { ...unit, pieceType: "unit" } : null;
 }
 
-function pieceById(game: GameState, pieceId: string): BoardPiece | null {
-  if (game.player.wizard.id === pieceId) {
-    return { ...game.player.wizard, pieceType: "wizard", name: "Wizard" };
+function pieceById(match: MatchState, pieceId: string): BoardPiece | null {
+  if (match.player.wizard.id === pieceId) {
+    return { ...match.player.wizard, pieceType: "wizard", name: "Wizard" };
   }
-  if (game.opponent.wizard.id === pieceId) {
-    return { ...game.opponent.wizard, pieceType: "wizard", name: "Wizard" };
+  if (match.opponent.wizard.id === pieceId) {
+    return { ...match.opponent.wizard, pieceType: "wizard", name: "Wizard" };
   }
 
-  const unit = game.board.units.find((candidate) => candidate.id === pieceId);
+  const unit = match.board.units.find((candidate) => candidate.id === pieceId);
   return unit ? { ...unit, pieceType: "unit" } : null;
 }
 
-function isPlayableCard(game: GameState, card: Card) {
+function isPlayableCard(match: MatchState, card: Card) {
   return (
-    game.phase !== "gameOver" &&
-    game.player.mana >= card.cost &&
-    game.player.wizard.apRemaining > 0
+    match.phase !== "matchOver" &&
+    match.player.mana >= card.cost &&
+    match.player.wizard.apRemaining > 0
   );
 }
 
 function isLegalCardTarget(
-  game: GameState,
+  match: MatchState,
   card: Card,
   coord: HexCoord,
   piece: BoardPiece | null,
 ) {
-  if (!isPlayableCard(game, card)) {
+  if (!isPlayableCard(match, card)) {
     return false;
   }
 
   if (card.kind.type === "unit") {
-    return !piece && distance(game.player.wizard.position, coord) === 1;
+    return !piece && distance(match.player.wizard.position, coord) === 1;
   }
 
-  if (!piece || distance(game.player.wizard.position, piece.position) > card.kind.range) {
+  if (!piece || distance(match.player.wizard.position, piece.position) > card.kind.range) {
     return false;
   }
 
@@ -462,12 +471,12 @@ function isLegalCardTarget(
   }
 }
 
-function isLegalMove(game: GameState, piece: BoardPiece, coord: HexCoord) {
+function isLegalMove(match: MatchState, piece: BoardPiece, coord: HexCoord) {
   return (
     piece.side === "player" &&
     piece.apRemaining > 0 &&
     distance(piece.position, coord) === 1 &&
-    !pieceAt(game, coord)
+    !pieceAt(match, coord)
   );
 }
 

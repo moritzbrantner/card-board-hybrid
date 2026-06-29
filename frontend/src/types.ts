@@ -1,6 +1,6 @@
 export type Side = "player" | "opponent";
 
-export type Phase = "planning" | "gameOver";
+export type Phase = "planning" | "matchOver";
 
 export type Rarity = "basic" | "advanced" | "rare";
 
@@ -82,21 +82,24 @@ export type HexBoard = {
   units: Unit[];
 };
 
-export type PlayerState = {
+export type MatchParticipantState = {
   side: Side;
   mana: number;
   maxMana: number;
   wizard: Wizard;
-  hand: Card[];
   deckCount: number;
   discardCount: number;
 };
 
-export type GameState = {
+export type MatchPlayerState = MatchParticipantState & {
+  hand: Card[];
+};
+
+export type MatchState = {
   round: number;
   phase: Phase;
-  player: PlayerState;
-  opponent: PlayerState;
+  player: MatchPlayerState;
+  opponent: MatchParticipantState;
   board: HexBoard;
   log: string[];
   winner: Side | null;
@@ -112,7 +115,7 @@ export type ActionTarget =
       pieceId: string;
     };
 
-export type GameActionRequest =
+export type MatchActionRequest =
   | {
       type: "playCard";
       cardId: string;

@@ -1,4 +1,4 @@
-import type { ActionTarget, GameActionRequest, GameState, HexCoord } from "./types";
+import type { ActionTarget, MatchActionRequest, MatchState, HexCoord } from "./types";
 
 type ApiError = {
   message?: string;
@@ -21,33 +21,33 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-function gameAction(action: GameActionRequest) {
-  return request<GameState>("/api/game/action", {
+function matchAction(action: MatchActionRequest) {
+  return request<MatchState>("/api/match/action", {
     method: "POST",
     body: JSON.stringify(action),
   });
 }
 
-export function getGame() {
-  return request<GameState>("/api/game");
+export function getMatch() {
+  return request<MatchState>("/api/match");
 }
 
-export function newGame() {
-  return request<GameState>("/api/game/new", { method: "POST" });
+export function newMatch() {
+  return request<MatchState>("/api/match/new", { method: "POST" });
 }
 
 export function playCard(cardId: string, target: ActionTarget) {
-  return gameAction({ type: "playCard", cardId, target });
+  return matchAction({ type: "playCard", cardId, target });
 }
 
 export function movePiece(pieceId: string, to: HexCoord) {
-  return gameAction({ type: "movePiece", pieceId, to });
+  return matchAction({ type: "movePiece", pieceId, to });
 }
 
 export function attack(attackerId: string, targetId: string) {
-  return gameAction({ type: "attack", attackerId, targetId });
+  return matchAction({ type: "attack", attackerId, targetId });
 }
 
 export function endTurn() {
-  return gameAction({ type: "endTurn" });
+  return matchAction({ type: "endTurn" });
 }
