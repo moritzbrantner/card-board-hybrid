@@ -1,4 +1,4 @@
-mod game;
+mod match_session;
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -8,11 +8,11 @@ use axum::http::{Method, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use game::{GameActionRequest, GameState};
+use match_session::{MatchActionRequest, MatchState};
 use serde::Serialize;
 use tower_http::cors::{Any, CorsLayer};
 
-type SharedGame = Arc<Mutex<GameState>>;
+type SharedMatch = Arc<Mutex<MatchState>>;
 
 #[derive(Serialize)]
 struct ApiError {
@@ -21,7 +21,7 @@ struct ApiError {
 
 #[tokio::main]
 async fn main() {
-    let game = Arc::new(Mutex::new(GameState::new()));
+    let match_state = Arc::new(Mutex::new(MatchState::new()));
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([Method::GET, Method::POST])
@@ -29,12 +29,12 @@ async fn main() {
 
     let app = Router::new()
         .route("/api/health", get(health))
-        .route("/api/game", get(get_game))
-        .route("/api/game/new", post(new_game))
-        .route("/api/game/action", post(apply_action))
-        .route("/api/game/resolve", post(resolve_turn))
+        .route("/api/match", get(get_match))
+        .route("/api/match/new", post(new_match))
+        .route("/api/match/action", post(apply_action))
+        .route("/api/match/resolve", post(resolve_turn))
         .layer(cors)
-        .with_state(game);
+        .with_state(match_state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 4000));
     let listener = tokio::net::TcpListener::bind(addr)
@@ -49,28 +49,33 @@ async fn health() -> &'static str {
     "ok"
 }
 
-async fn get_game(State(game): State<SharedGame>) -> Json<GameState> {
+async fn get_match(State(match_state): State<SharedMatch>) -> Json<MatchState> {
     Json(
-        game.lock()
-            .expect("game lock should not be poisoned")
+        match_state
+            .lock()
+            .expect("match lock should not be poisoned")
             .clone(),
     )
 }
 
-async fn new_game(State(game): State<SharedGame>) -> Json<GameState> {
-    let mut game = game.lock().expect("game lock should not be poisoned");
-    *game = GameState::new();
-    Json(game.clone())
+async fn new_match(State(match_state): State<SharedMatch>) -> Json<MatchState> {
+    let mut match_state = match_state
+        .lock()
+        .expect("match lock should not be poisoned");
+    *match_state = MatchState::new();
+    Json(match_state.clone())
 }
 
 async fn apply_action(
-    State(game): State<SharedGame>,
-    Json(request): Json<GameActionRequest>,
+    State(match_state): State<SharedMatch>,
+    Json(request): Json<MatchActionRequest>,
 ) -> impl IntoResponse {
-    let mut game = game.lock().expect("game lock should not be poisoned");
+    let mut match_state = match_state
+        .lock()
+        .expect("match lock should not be poisoned");
 
-    match game.apply_action(request) {
-        Ok(()) => Json(game.clone()).into_response(),
+    match match_state.apply_action(request) {
+        Ok(()) => Json(match_state.clone()).into_response(),
         Err(error) => (
             StatusCode::BAD_REQUEST,
             Json(ApiError {
@@ -81,8 +86,10 @@ async fn apply_action(
     }
 }
 
-async fn resolve_turn(State(game): State<SharedGame>) -> Json<GameState> {
-    let mut game = game.lock().expect("game lock should not be poisoned");
-    let _ = game.apply_action(GameActionRequest::EndTurn);
-    Json(game.clone())
+async fn resolve_turn(State(match_state): State<SharedMatch>) -> Json<MatchState> {
+    let mut match_state = match_state
+        .lock()
+        .expect("match lock should not be poisoned");
+    let _ = match_state.apply_action(MatchActionRequest::EndTurn);
+    Json(match_state.clone())
 }

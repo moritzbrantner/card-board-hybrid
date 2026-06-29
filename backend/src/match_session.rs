@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 
 const BOARD_RADIUS: i32 = 3;
@@ -12,9 +13,8 @@ const STARTING_MANA: u8 = 2;
 const MAX_MANA: u8 = 8;
 const OPENING_HAND_SIZE: usize = 4;
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GameState {
+#[derive(Clone, Debug)]
+pub struct MatchState {
     pub round: u32,
     pub phase: Phase,
     pub player: PlayerState,
@@ -22,15 +22,68 @@ pub struct GameState {
     pub board: HexBoard,
     pub log: Vec<String>,
     pub winner: Option<Side>,
-    #[serde(skip)]
     next_unit_id: u32,
+}
+
+impl Serialize for MatchState {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("MatchState", 7)?;
+        state.serialize_field("round", &self.round)?;
+        state.serialize_field("phase", &self.phase)?;
+        state.serialize_field(
+            "player",
+            &PublicPlayerState {
+                player: &self.player,
+                expose_hand: true,
+            },
+        )?;
+        state.serialize_field(
+            "opponent",
+            &PublicPlayerState {
+                player: &self.opponent,
+                expose_hand: false,
+            },
+        )?;
+        state.serialize_field("board", &self.board)?;
+        state.serialize_field("log", &self.log)?;
+        state.serialize_field("winner", &self.winner)?;
+        state.end()
+    }
+}
+
+struct PublicPlayerState<'a> {
+    player: &'a PlayerState,
+    expose_hand: bool,
+}
+
+impl Serialize for PublicPlayerState<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let field_count = if self.expose_hand { 8 } else { 7 };
+        let mut state = serializer.serialize_struct("PlayerState", field_count)?;
+        state.serialize_field("side", &self.player.side)?;
+        state.serialize_field("mana", &self.player.mana)?;
+        state.serialize_field("maxMana", &self.player.max_mana)?;
+        state.serialize_field("wizard", &self.player.wizard)?;
+        if self.expose_hand {
+            state.serialize_field("hand", &self.player.hand)?;
+        }
+        state.serialize_field("deckCount", &self.player.deck_count)?;
+        state.serialize_field("discardCount", &self.player.discard_count)?;
+        state.end()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Phase {
     Planning,
-    GameOver,
+    MatchOver,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -155,7 +208,7 @@ pub enum SpellEffect {
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
-pub enum GameActionRequest {
+pub enum MatchActionRequest {
     PlayCard {
         card_id: String,
         target: ActionTarget,
@@ -183,8 +236,8 @@ pub enum ActionTarget {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum GameError {
-    GameOver,
+pub enum MatchError {
+    MatchOver,
     CardNotFound,
     NotEnoughMana,
     NoActionPoints,
@@ -207,10 +260,10 @@ struct PieceView {
     has_attacked: bool,
 }
 
-impl fmt::Display for GameError {
+impl fmt::Display for MatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
-            Self::GameOver => "the game is over",
+            Self::MatchOver => "the match is over",
             Self::CardNotFound => "card is no longer in hand",
             Self::NotEnoughMana => "not enough mana",
             Self::NoActionPoints => "not enough action points",
@@ -227,9 +280,9 @@ impl fmt::Display for GameError {
     }
 }
 
-impl Error for GameError {}
+impl Error for MatchError {}
 
-impl GameState {
+impl MatchState {
     pub fn new() -> Self {
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -260,23 +313,23 @@ impl GameState {
         game
     }
 
-    pub fn apply_action(&mut self, request: GameActionRequest) -> Result<(), GameError> {
-        if self.phase == Phase::GameOver {
-            return Err(GameError::GameOver);
+    pub fn apply_action(&mut self, request: MatchActionRequest) -> Result<(), MatchError> {
+        if self.phase == Phase::MatchOver {
+            return Err(MatchError::MatchOver);
         }
 
         match request {
-            GameActionRequest::PlayCard { card_id, target } => {
+            MatchActionRequest::PlayCard { card_id, target } => {
                 self.play_card_for_side(Side::Player, card_id, target)
             }
-            GameActionRequest::MovePiece { piece_id, to } => {
+            MatchActionRequest::MovePiece { piece_id, to } => {
                 self.move_piece_for_side(Side::Player, &piece_id, to)
             }
-            GameActionRequest::Attack {
+            MatchActionRequest::Attack {
                 attacker_id,
                 target_id,
             } => self.attack_for_side(Side::Player, &attacker_id, &target_id),
-            GameActionRequest::EndTurn => {
+            MatchActionRequest::EndTurn => {
                 self.end_player_turn();
                 Ok(())
             }
@@ -303,7 +356,7 @@ impl GameState {
         side: Side,
         card_id: String,
         target: ActionTarget,
-    ) -> Result<(), GameError> {
+    ) -> Result<(), MatchError> {
         let card = {
             let player = self.player_ref(side);
             player
@@ -311,16 +364,16 @@ impl GameState {
                 .iter()
                 .find(|card| card.id == card_id)
                 .cloned()
-                .ok_or(GameError::CardNotFound)?
+                .ok_or(MatchError::CardNotFound)?
         };
 
         {
             let player = self.player_ref(side);
             if player.mana < card.cost {
-                return Err(GameError::NotEnoughMana);
+                return Err(MatchError::NotEnoughMana);
             }
             if player.wizard.ap_remaining == 0 {
-                return Err(GameError::NoActionPoints);
+                return Err(MatchError::NoActionPoints);
             }
         }
 
@@ -331,17 +384,17 @@ impl GameState {
                 max_ap,
             } => {
                 let ActionTarget::Hex { coord } = target else {
-                    return Err(GameError::InvalidTarget);
+                    return Err(MatchError::InvalidTarget);
                 };
                 let wizard_position = self.player_ref(side).wizard.position;
                 if !self.board.is_valid(coord) {
-                    return Err(GameError::InvalidHex);
+                    return Err(MatchError::InvalidHex);
                 }
                 if !wizard_position.is_adjacent(coord) {
-                    return Err(GameError::InvalidTarget);
+                    return Err(MatchError::InvalidTarget);
                 }
                 if self.is_occupied(coord) {
-                    return Err(GameError::OccupiedHex);
+                    return Err(MatchError::OccupiedHex);
                 }
 
                 self.spend_card_resources(side, &card_id, &card)?;
@@ -363,12 +416,14 @@ impl GameState {
             }
             CardKind::Spell { range, effect } => {
                 let ActionTarget::Piece { piece_id } = target else {
-                    return Err(GameError::InvalidTarget);
+                    return Err(MatchError::InvalidTarget);
                 };
-                let target = self.piece_view(&piece_id).ok_or(GameError::PieceNotFound)?;
+                let target = self
+                    .piece_view(&piece_id)
+                    .ok_or(MatchError::PieceNotFound)?;
                 let caster_position = self.player_ref(side).wizard.position;
                 if caster_position.distance(target.position) > i32::from(*range) {
-                    return Err(GameError::InvalidTarget);
+                    return Err(MatchError::InvalidTarget);
                 }
                 self.validate_spell_target(side, effect, &target)?;
                 self.spend_card_resources(side, &card_id, &card)?;
@@ -386,19 +441,19 @@ impl GameState {
         side: Side,
         card_id: &str,
         card: &Card,
-    ) -> Result<(), GameError> {
+    ) -> Result<(), MatchError> {
         let player = self.player_mut(side);
         let hand_index = player
             .hand
             .iter()
             .position(|candidate| candidate.id == card_id)
-            .ok_or(GameError::CardNotFound)?;
+            .ok_or(MatchError::CardNotFound)?;
 
         if player.mana < card.cost {
-            return Err(GameError::NotEnoughMana);
+            return Err(MatchError::NotEnoughMana);
         }
         if player.wizard.ap_remaining == 0 {
-            return Err(GameError::NoActionPoints);
+            return Err(MatchError::NoActionPoints);
         }
 
         player.mana -= card.cost;
@@ -414,14 +469,14 @@ impl GameState {
         side: Side,
         effect: &SpellEffect,
         target: &PieceView,
-    ) -> Result<(), GameError> {
+    ) -> Result<(), MatchError> {
         match effect {
             SpellEffect::Heal { .. } | SpellEffect::Buff { .. } if target.side != side => {
-                Err(GameError::InvalidTarget)
+                Err(MatchError::InvalidTarget)
             }
-            SpellEffect::Damage { .. } if target.side == side => Err(GameError::InvalidTarget),
+            SpellEffect::Damage { .. } if target.side == side => Err(MatchError::InvalidTarget),
             SpellEffect::Buff { .. } if self.is_wizard_id(&target.id) => {
-                Err(GameError::InvalidTarget)
+                Err(MatchError::InvalidTarget)
             }
             _ => Ok(()),
         }
@@ -468,22 +523,22 @@ impl GameState {
         side: Side,
         piece_id: &str,
         to: HexCoord,
-    ) -> Result<(), GameError> {
-        let piece = self.piece_view(piece_id).ok_or(GameError::PieceNotFound)?;
+    ) -> Result<(), MatchError> {
+        let piece = self.piece_view(piece_id).ok_or(MatchError::PieceNotFound)?;
         if piece.side != side {
-            return Err(GameError::NotYourPiece);
+            return Err(MatchError::NotYourPiece);
         }
         if piece.ap_remaining == 0 {
-            return Err(GameError::NoActionPoints);
+            return Err(MatchError::NoActionPoints);
         }
         if !self.board.is_valid(to) {
-            return Err(GameError::InvalidHex);
+            return Err(MatchError::InvalidHex);
         }
         if !piece.position.is_adjacent(to) {
-            return Err(GameError::NotAdjacent);
+            return Err(MatchError::NotAdjacent);
         }
         if self.is_occupied(to) {
-            return Err(GameError::OccupiedHex);
+            return Err(MatchError::OccupiedHex);
         }
 
         if self.player.wizard.id == piece_id {
@@ -508,26 +563,28 @@ impl GameState {
         side: Side,
         attacker_id: &str,
         target_id: &str,
-    ) -> Result<(), GameError> {
+    ) -> Result<(), MatchError> {
         let attacker = self
             .piece_view(attacker_id)
-            .ok_or(GameError::PieceNotFound)?;
-        let target = self.piece_view(target_id).ok_or(GameError::PieceNotFound)?;
+            .ok_or(MatchError::PieceNotFound)?;
+        let target = self
+            .piece_view(target_id)
+            .ok_or(MatchError::PieceNotFound)?;
 
         if attacker.side != side {
-            return Err(GameError::NotYourPiece);
+            return Err(MatchError::NotYourPiece);
         }
         if target.side == side {
-            return Err(GameError::InvalidTarget);
+            return Err(MatchError::InvalidTarget);
         }
         if attacker.ap_remaining == 0 {
-            return Err(GameError::NoActionPoints);
+            return Err(MatchError::NoActionPoints);
         }
         if attacker.has_attacked {
-            return Err(GameError::AlreadyAttacked);
+            return Err(MatchError::AlreadyAttacked);
         }
         if !attacker.position.is_adjacent(target.position) {
-            return Err(GameError::NotAdjacent);
+            return Err(MatchError::NotAdjacent);
         }
 
         self.mark_attacker_spent(attacker_id);
@@ -553,7 +610,7 @@ impl GameState {
             .insert(0, "Opponent begins their turn.".to_string());
 
         for _ in 0..24 {
-            if self.phase == Phase::GameOver {
+            if self.phase == Phase::MatchOver {
                 return;
             }
             if let Some((attacker_id, target_id)) = self.best_opponent_attack() {
@@ -870,7 +927,7 @@ impl GameState {
         };
 
         if let Some(winner) = winner {
-            self.phase = Phase::GameOver;
+            self.phase = Phase::MatchOver;
             self.winner = Some(winner);
             self.log.insert(0, format!("{} wins.", winner.label()));
             self.truncate_log();
@@ -1300,7 +1357,7 @@ mod tests {
         HexCoord { q, r }
     }
 
-    fn player_unit_card(game: &GameState, template_id: &str) -> Card {
+    fn player_unit_card(game: &MatchState, template_id: &str) -> Card {
         game.player
             .hand
             .iter()
@@ -1310,7 +1367,7 @@ mod tests {
             .clone()
     }
 
-    fn put_card_in_hand(game: &mut GameState, card: Card) -> String {
+    fn put_card_in_hand(game: &mut MatchState, card: Card) -> String {
         let id = card.id.clone();
         game.player.hand.push(card);
         id
@@ -1318,7 +1375,7 @@ mod tests {
 
     #[test]
     fn radius_three_board_has_thirty_seven_tiles() {
-        let game = GameState::new_with_seed(7);
+        let game = MatchState::new_with_seed(7);
 
         assert_eq!(game.board.radius, 3);
         assert_eq!(game.board.tiles.len(), 37);
@@ -1327,8 +1384,8 @@ mod tests {
     }
 
     #[test]
-    fn action_payloads_accept_camel_case_api_fields() {
-        let action: GameActionRequest = serde_json::from_str(
+    fn match_action_payloads_accept_camel_case_api_fields() {
+        let action: MatchActionRequest = serde_json::from_str(
             r#"{
                 "type": "playCard",
                 "cardId": "p-0-ember-squire",
@@ -1341,14 +1398,14 @@ mod tests {
         .expect("frontend play-card payload should deserialize");
 
         match action {
-            GameActionRequest::PlayCard { card_id, target } => {
+            MatchActionRequest::PlayCard { card_id, target } => {
                 assert_eq!(card_id, "p-0-ember-squire");
                 assert!(matches!(target, ActionTarget::Hex { coord } if coord == hex(0, 2)));
             }
             _ => panic!("expected play-card action"),
         }
 
-        let action: GameActionRequest = serde_json::from_str(
+        let action: MatchActionRequest = serde_json::from_str(
             r#"{
                 "type": "attack",
                 "attackerId": "player-wizard",
@@ -1359,7 +1416,7 @@ mod tests {
 
         assert!(matches!(
             action,
-            GameActionRequest::Attack {
+            MatchActionRequest::Attack {
                 attacker_id,
                 target_id
             } if attacker_id == "player-wizard" && target_id == "opponent-wizard"
@@ -1368,7 +1425,7 @@ mod tests {
 
     #[test]
     fn card_payloads_emit_camel_case_kind_fields() {
-        let game = GameState::new_with_seed(7);
+        let game = MatchState::new_with_seed(7);
         let card = game
             .player
             .hand
@@ -1384,27 +1441,53 @@ mod tests {
     }
 
     #[test]
-    fn public_player_state_serializes_discard_count_after_unit_play() {
-        let mut game = GameState::new_with_seed(7);
-        let value = serde_json::to_value(&game).expect("game should serialize");
+    fn terminal_match_phase_serializes_as_match_over() {
+        let mut game = MatchState::new_with_seed(7);
+        game.phase = Phase::MatchOver;
+
+        let value = serde_json::to_value(&game).expect("match should serialize");
+
+        assert_eq!(value["phase"], "matchOver");
+        assert_ne!(value["phase"], "gameOver");
+    }
+
+    #[test]
+    fn public_match_state_hides_opponent_hand_and_private_piles() {
+        let game = MatchState::new_with_seed(7);
+
+        let value = serde_json::to_value(&game).expect("match should serialize");
+
+        assert!(value["player"].get("hand").is_some());
+        assert!(value["player"].get("deck").is_none());
+        assert!(value["player"].get("discard").is_none());
+        assert!(value["opponent"].get("hand").is_none());
+        assert!(value["opponent"].get("deck").is_none());
+        assert!(value["opponent"].get("discard").is_none());
+        assert_eq!(value["opponent"]["deckCount"], 46);
+    }
+
+    #[test]
+    fn public_match_state_serializes_player_discard_count_after_unit_play() {
+        let mut game = MatchState::new_with_seed(7);
+        let value = serde_json::to_value(&game).expect("match should serialize");
         assert_eq!(value["player"]["discardCount"], 0);
 
         let card = player_unit_card(&game, "ember-squire");
         let card_id = put_card_in_hand(&mut game, card);
 
-        game.apply_action(GameActionRequest::PlayCard {
+        game.apply_action(MatchActionRequest::PlayCard {
             card_id,
             target: ActionTarget::Hex { coord: hex(0, 2) },
         })
         .expect("unit should be playable next to wizard");
 
-        let value = serde_json::to_value(&game).expect("game should serialize");
+        let value = serde_json::to_value(&game).expect("match should serialize");
         assert_eq!(value["player"]["discardCount"], 1);
     }
 
     #[test]
-    fn public_player_state_serializes_discard_count_after_spell_play() {
-        let mut game = GameState::new_with_seed(7);
+    fn public_match_state_serializes_player_discard_count_after_spell_play() {
+        let mut game = MatchState::new_with_seed(7);
         game.board.units.push(Unit {
             id: "ally".to_string(),
             side: Side::Player,
@@ -1423,7 +1506,7 @@ mod tests {
             .expect("heal exists");
         let card_id = put_card_in_hand(&mut game, card);
 
-        game.apply_action(GameActionRequest::PlayCard {
+        game.apply_action(MatchActionRequest::PlayCard {
             card_id,
             target: ActionTarget::Piece {
                 piece_id: "ally".to_string(),
@@ -1431,13 +1514,13 @@ mod tests {
         })
         .expect("spell should be playable on damaged ally");
 
-        let value = serde_json::to_value(&game).expect("game should serialize");
+        let value = serde_json::to_value(&game).expect("match should serialize");
         assert_eq!(value["player"]["discardCount"], 1);
     }
 
     #[test]
     fn wizards_start_on_opposite_centered_edges() {
-        let game = GameState::new_with_seed(7);
+        let game = MatchState::new_with_seed(7);
 
         assert_eq!(game.player.wizard.position, hex(0, 3));
         assert_eq!(game.opponent.wizard.position, hex(0, -3));
@@ -1448,7 +1531,7 @@ mod tests {
 
     #[test]
     fn starter_deck_has_the_expected_rarity_counts() {
-        let game = GameState::new_with_seed(7);
+        let game = MatchState::new_with_seed(7);
         let all_cards: Vec<_> = game
             .player
             .hand
@@ -1485,11 +1568,11 @@ mod tests {
 
     #[test]
     fn playing_a_unit_spends_mana_and_wizard_ap_and_summons_adjacent() {
-        let mut game = GameState::new_with_seed(7);
+        let mut game = MatchState::new_with_seed(7);
         let card = player_unit_card(&game, "ember-squire");
         let card_id = put_card_in_hand(&mut game, card);
 
-        game.apply_action(GameActionRequest::PlayCard {
+        game.apply_action(MatchActionRequest::PlayCard {
             card_id,
             target: ActionTarget::Hex { coord: hex(0, 2) },
         })
@@ -1505,23 +1588,23 @@ mod tests {
 
     #[test]
     fn unit_summons_must_target_empty_adjacent_hexes() {
-        let mut game = GameState::new_with_seed(7);
+        let mut game = MatchState::new_with_seed(7);
         let card = player_unit_card(&game, "ember-squire");
         let card_id = put_card_in_hand(&mut game, card);
 
-        let result = game.apply_action(GameActionRequest::PlayCard {
+        let result = game.apply_action(MatchActionRequest::PlayCard {
             card_id,
             target: ActionTarget::Hex { coord: hex(0, 1) },
         });
 
-        assert_eq!(result, Err(GameError::InvalidTarget));
+        assert_eq!(result, Err(MatchError::InvalidTarget));
     }
 
     #[test]
     fn movement_costs_action_points_and_requires_empty_adjacency() {
-        let mut game = GameState::new_with_seed(7);
+        let mut game = MatchState::new_with_seed(7);
 
-        game.apply_action(GameActionRequest::MovePiece {
+        game.apply_action(MatchActionRequest::MovePiece {
             piece_id: "player-wizard".to_string(),
             to: hex(0, 2),
         })
@@ -1530,17 +1613,17 @@ mod tests {
         assert_eq!(game.player.wizard.position, hex(0, 2));
         assert_eq!(game.player.wizard.ap_remaining, 2);
 
-        let result = game.apply_action(GameActionRequest::MovePiece {
+        let result = game.apply_action(MatchActionRequest::MovePiece {
             piece_id: "player-wizard".to_string(),
             to: hex(0, 0),
         });
 
-        assert_eq!(result, Err(GameError::NotAdjacent));
+        assert_eq!(result, Err(MatchError::NotAdjacent));
     }
 
     #[test]
     fn adjacent_attacks_apply_counterdamage_once_per_piece() {
-        let mut game = GameState::new_with_seed(7);
+        let mut game = MatchState::new_with_seed(7);
         game.board.units.push(Unit {
             id: "player-unit".to_string(),
             side: Side::Player,
@@ -1566,7 +1649,7 @@ mod tests {
             has_attacked: false,
         });
 
-        game.apply_action(GameActionRequest::Attack {
+        game.apply_action(MatchActionRequest::Attack {
             attacker_id: "player-unit".to_string(),
             target_id: "opponent-unit".to_string(),
         })
@@ -1588,17 +1671,17 @@ mod tests {
         assert_eq!(opponent.armor, 2);
         assert!(player.has_attacked);
 
-        let result = game.apply_action(GameActionRequest::Attack {
+        let result = game.apply_action(MatchActionRequest::Attack {
             attacker_id: "player-unit".to_string(),
             target_id: "opponent-unit".to_string(),
         });
 
-        assert_eq!(result, Err(GameError::AlreadyAttacked));
+        assert_eq!(result, Err(MatchError::AlreadyAttacked));
     }
 
     #[test]
     fn spells_heal_buff_and_damage_with_caps() {
-        let mut game = GameState::new_with_seed(7);
+        let mut game = MatchState::new_with_seed(7);
         game.player.mana = 8;
         game.player.wizard.ap_remaining = 3;
         game.board.units.push(Unit {
@@ -1631,7 +1714,7 @@ mod tests {
             .find(|card| card.template_id == "mending-rune")
             .expect("heal exists");
         let heal_id = put_card_in_hand(&mut game, heal);
-        game.apply_action(GameActionRequest::PlayCard {
+        game.apply_action(MatchActionRequest::PlayCard {
             card_id: heal_id,
             target: ActionTarget::Piece {
                 piece_id: "ally".to_string(),
@@ -1652,7 +1735,7 @@ mod tests {
             .find(|card| card.template_id == "war-chant")
             .expect("buff exists");
         let buff_id = put_card_in_hand(&mut game, buff);
-        game.apply_action(GameActionRequest::PlayCard {
+        game.apply_action(MatchActionRequest::PlayCard {
             card_id: buff_id,
             target: ActionTarget::Piece {
                 piece_id: "ally".to_string(),
@@ -1676,7 +1759,7 @@ mod tests {
         let bolt_id = put_card_in_hand(&mut game, bolt);
         game.player.mana = 5;
         game.player.wizard.ap_remaining = 1;
-        game.apply_action(GameActionRequest::PlayCard {
+        game.apply_action(MatchActionRequest::PlayCard {
             card_id: bolt_id,
             target: ActionTarget::Piece {
                 piece_id: "enemy".to_string(),
@@ -1688,9 +1771,9 @@ mod tests {
 
     #[test]
     fn ending_turn_runs_ai_and_advances_round() {
-        let mut game = GameState::new_with_seed(7);
+        let mut game = MatchState::new_with_seed(7);
 
-        game.apply_action(GameActionRequest::EndTurn)
+        game.apply_action(MatchActionRequest::EndTurn)
             .expect("ending turn should work");
 
         assert_eq!(game.round, 2);
@@ -1699,8 +1782,8 @@ mod tests {
     }
 
     #[test]
-    fn wizard_death_ends_the_game() {
-        let mut game = GameState::new_with_seed(7);
+    fn wizard_death_ends_the_match() {
+        let mut game = MatchState::new_with_seed(7);
         game.board.units.push(Unit {
             id: "player-unit".to_string(),
             side: Side::Player,
@@ -1714,13 +1797,13 @@ mod tests {
             has_attacked: false,
         });
 
-        game.apply_action(GameActionRequest::Attack {
+        game.apply_action(MatchActionRequest::Attack {
             attacker_id: "player-unit".to_string(),
             target_id: "opponent-wizard".to_string(),
         })
         .expect("wizard can be attacked when adjacent");
 
-        assert_eq!(game.phase, Phase::GameOver);
+        assert_eq!(game.phase, Phase::MatchOver);
         assert_eq!(game.winner, Some(Side::Player));
     }
 }
