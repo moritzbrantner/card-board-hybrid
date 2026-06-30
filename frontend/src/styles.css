@@ -96,6 +96,97 @@ button {
   gap: 10px;
 }
 
+.wizard-picker {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.wizard-picker legend {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.wizard-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.wizard-option {
+  display: grid;
+  gap: 10px;
+  min-height: 166px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  color: #fffaf0;
+  background: var(--panel);
+  cursor: pointer;
+  text-align: left;
+}
+
+.wizard-option.selected {
+  border-color: var(--gold);
+  background:
+    linear-gradient(145deg, rgba(217, 184, 79, 0.16), transparent 68%),
+    var(--panel-strong);
+  box-shadow: 0 0 0 2px rgba(217, 184, 79, 0.18);
+}
+
+.wizard-option-header,
+.wizard-stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wizard-option-header > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wizard-option-header strong {
+  overflow-wrap: anywhere;
+  line-height: 1.05;
+}
+
+.wizard-option-header span span,
+.wizard-option-text {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.wizard-option-text {
+  line-height: 1.35;
+}
+
+.wizard-stat-row {
+  justify-content: start;
+}
+
+.wizard-stat-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  border: 1px solid rgba(247, 243, 234, 0.12);
+  border-radius: 8px;
+  padding: 0 8px;
+  color: #fffaf0;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
 .open-match-form {
   display: grid;
   gap: 8px;
@@ -205,6 +296,7 @@ h1 {
 .icon-button:disabled,
 .primary-button:disabled,
 .secondary-link:disabled,
+.wizard-option:disabled,
 .hex-tile:disabled,
 .card-button:disabled {
   cursor: not-allowed;
@@ -247,6 +339,11 @@ h1 {
 
 .player-badge.opponent strong {
   color: var(--red);
+}
+
+.wizard-type-pill {
+  color: #fffaf0;
+  font-weight: 800;
 }
 
 .phase-pill {

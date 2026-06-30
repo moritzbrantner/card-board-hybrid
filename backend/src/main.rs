@@ -5,17 +5,18 @@ mod match_store;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
+use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{Method, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use card_catalog::{CatalogResponse, starter_catalog};
-use match_session::{MatchActionRequest, MatchState, ReplayEvent, ReplayVisibility};
+use match_session::{MatchActionRequest, MatchState, ReplayEvent, ReplayVisibility, WizardType};
 use match_store::{
     MatchStoreError, SqliteMatchStore, StoredMatch, StoredMatchSummary, StoredReplayFrame,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tower_http::cors::{Any, CorsLayer};
 
 type SharedState = Arc<AppState>;
@@ -27,6 +28,12 @@ struct AppState {
 #[derive(Serialize)]
 struct ApiError {
     message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateMatchRequest {
+    wizard_type: WizardType,
 }
 
 #[derive(Serialize)]
@@ -137,13 +144,34 @@ async fn list_matches(State(state): State<SharedState>) -> impl IntoResponse {
     .into_response()
 }
 
-async fn create_match(State(state): State<SharedState>) -> impl IntoResponse {
+async fn create_match(State(state): State<SharedState>, body: Bytes) -> impl IntoResponse {
+    let wizard_type = if body.is_empty() || body.iter().all(|byte| byte.is_ascii_whitespace()) {
+        None
+    } else {
+        match serde_json::from_slice::<CreateMatchRequest>(&body) {
+            Ok(request) => Some(request.wizard_type),
+            Err(error) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiError {
+                        message: format!("Invalid match request: {error}"),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    };
+
     let created = {
         let mut store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        match store.create_match() {
+        let result = match wizard_type {
+            Some(wizard_type) => store.create_match_with_wizard_type(wizard_type),
+            None => store.create_match(),
+        };
+        match result {
             Ok(created) => created,
             Err(error) => return store_error_response(error),
         }
@@ -402,6 +430,37 @@ mod tests {
         );
         assert!(loaded["matchState"]["opponent"].get("hand").is_none());
         assert!(path.exists());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn create_match_accepts_player_wizard_type() {
+        let path = test_db_path("create-wizard-type");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, created) = json_request(
+            app,
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            created["matchState"]["player"]["wizard"]["wizardType"],
+            "chronomancer"
+        );
+        assert_eq!(created["matchState"]["player"]["wizard"]["maxAp"], 4);
+        assert_eq!(created["matchState"]["player"]["wizard"]["maxHp"], 16);
+        assert_eq!(
+            created["matchState"]["opponent"]["wizard"]["wizardType"],
+            "runekeeper"
+        );
 
         let _ = fs::remove_file(path);
     }

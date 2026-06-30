@@ -9,9 +9,6 @@ use serde_json::json;
 use crate::card_catalog::{starter_card_templates, starter_copy_count};
 
 const BOARD_RADIUS: i32 = 3;
-const STARTING_WIZARD_HP: i32 = 20;
-const WIZARD_ATTACK: i32 = 1;
-const WIZARD_AP: u8 = 3;
 const STARTING_MANA: u8 = 2;
 const MAX_MANA: u8 = 8;
 const OPENING_HAND_SIZE: usize = 4;
@@ -215,6 +212,8 @@ pub struct PlayerState {
 pub struct Wizard {
     pub id: String,
     pub side: Side,
+    #[serde(default)]
+    pub wizard_type: WizardType,
     pub hp: i32,
     pub max_hp: i32,
     pub attack: i32,
@@ -222,6 +221,60 @@ pub struct Wizard {
     pub ap_remaining: u8,
     pub max_ap: u8,
     pub has_attacked: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WizardType {
+    Runekeeper,
+    Pyromancer,
+    Chronomancer,
+    Warden,
+    Battlemage,
+}
+
+impl Default for WizardType {
+    fn default() -> Self {
+        Self::Runekeeper
+    }
+}
+
+struct WizardProfile {
+    max_hp: i32,
+    attack: i32,
+    max_ap: u8,
+}
+
+impl WizardType {
+    fn profile(self) -> WizardProfile {
+        match self {
+            Self::Runekeeper => WizardProfile {
+                max_hp: 20,
+                attack: 1,
+                max_ap: 3,
+            },
+            Self::Pyromancer => WizardProfile {
+                max_hp: 18,
+                attack: 2,
+                max_ap: 3,
+            },
+            Self::Chronomancer => WizardProfile {
+                max_hp: 16,
+                attack: 1,
+                max_ap: 4,
+            },
+            Self::Warden => WizardProfile {
+                max_hp: 24,
+                attack: 1,
+                max_ap: 2,
+            },
+            Self::Battlemage => WizardProfile {
+                max_hp: 20,
+                attack: 2,
+                max_ap: 2,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -382,13 +435,18 @@ impl fmt::Display for MatchError {
 impl Error for MatchError {}
 
 impl MatchState {
+    #[allow(dead_code, reason = "kept as the default rules-engine constructor")]
     pub fn new() -> Self {
+        Self::new_with_player_wizard_type(WizardType::default())
+    }
+
+    pub fn new_with_player_wizard_type(player_wizard_type: WizardType) -> Self {
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos() as u64)
             .unwrap_or(1);
 
-        Self::new_with_seed(seed)
+        Self::new_with_seed_and_player_wizard_type(seed, player_wizard_type)
     }
 
     pub fn to_snapshot_json(&self) -> Result<String, serde_json::Error> {
@@ -421,12 +479,28 @@ impl MatchState {
         })
     }
 
+    #[allow(
+        dead_code,
+        reason = "kept as the deterministic rules-engine test constructor"
+    )]
     fn new_with_seed(seed: u64) -> Self {
+        Self::new_with_seed_and_player_wizard_type(seed, WizardType::default())
+    }
+
+    fn new_with_seed_and_player_wizard_type(seed: u64, player_wizard_type: WizardType) -> Self {
         let mut game = Self {
             round: 1,
             phase: Phase::Planning,
-            player: PlayerState::new(Side::Player, seed ^ 0xA11C_E551_1234_5678),
-            opponent: PlayerState::new(Side::Opponent, seed ^ 0x0B0E_1234_9876_5432),
+            player: PlayerState::new(
+                Side::Player,
+                seed ^ 0xA11C_E551_1234_5678,
+                player_wizard_type,
+            ),
+            opponent: PlayerState::new(
+                Side::Opponent,
+                seed ^ 0x0B0E_1234_9876_5432,
+                WizardType::Runekeeper,
+            ),
             board: HexBoard::new(BOARD_RADIUS),
             log: vec!["The wizards enter the hex arena.".to_string()],
             winner: None,
@@ -1453,7 +1527,7 @@ impl HexCoord {
 }
 
 impl PlayerState {
-    fn new(side: Side, mut rng_seed: u64) -> Self {
+    fn new(side: Side, mut rng_seed: u64, wizard_type: WizardType) -> Self {
         let mut deck = starter_deck(side);
         shuffle(&mut deck, &mut rng_seed);
 
@@ -1461,7 +1535,7 @@ impl PlayerState {
             side,
             mana: STARTING_MANA,
             max_mana: STARTING_MANA,
-            wizard: Wizard::new(side),
+            wizard: Wizard::new(side, wizard_type),
             hand: Vec::new(),
             deck_count: deck.len(),
             discard_count: 0,
@@ -1540,7 +1614,7 @@ impl ReplayEvent {
 }
 
 impl Wizard {
-    fn new(side: Side) -> Self {
+    fn new(side: Side, wizard_type: WizardType) -> Self {
         let (id, position) = match side {
             Side::Player => (
                 "player-wizard",
@@ -1557,16 +1631,18 @@ impl Wizard {
                 },
             ),
         };
+        let profile = wizard_type.profile();
 
         Self {
             id: id.to_string(),
             side,
-            hp: STARTING_WIZARD_HP,
-            max_hp: STARTING_WIZARD_HP,
-            attack: WIZARD_ATTACK,
+            wizard_type,
+            hp: profile.max_hp,
+            max_hp: profile.max_hp,
+            attack: profile.attack,
             position,
-            ap_remaining: WIZARD_AP,
-            max_ap: WIZARD_AP,
+            ap_remaining: profile.max_ap,
+            max_ap: profile.max_ap,
             has_attacked: false,
         }
     }
@@ -1864,6 +1940,17 @@ mod tests {
         assert_eq!(game.player.wizard.hp, 20);
         assert_eq!(game.player.wizard.attack, 1);
         assert_eq!(game.player.wizard.ap_remaining, 3);
+    }
+
+    #[test]
+    fn selected_wizard_type_sets_player_starting_stats() {
+        let game = MatchState::new_with_seed_and_player_wizard_type(7, WizardType::Pyromancer);
+
+        assert_eq!(game.player.wizard.wizard_type, WizardType::Pyromancer);
+        assert_eq!(game.player.wizard.hp, 18);
+        assert_eq!(game.player.wizard.attack, 2);
+        assert_eq!(game.player.wizard.ap_remaining, 3);
+        assert_eq!(game.opponent.wizard.wizard_type, WizardType::Runekeeper);
     }
 
     #[test]

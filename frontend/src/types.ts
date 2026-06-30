@@ -67,6 +67,7 @@ export type CatalogResponse = {
 export type Wizard = {
   id: string;
   side: Side;
+  wizardType: WizardType;
   hp: number;
   maxHp: number;
   attack: number;
@@ -75,6 +76,13 @@ export type Wizard = {
   maxAp: number;
   hasAttacked: boolean;
 };
+
+export type WizardType =
+  | "runekeeper"
+  | "pyromancer"
+  | "chronomancer"
+  | "warden"
+  | "battlemage";
 
 export type Unit = {
   id: string;

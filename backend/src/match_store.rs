@@ -8,7 +8,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-use crate::match_session::{MatchActionRequest, MatchState, RecordedReplayFrame, ReplayEvent};
+use crate::match_session::{
+    MatchActionRequest, MatchState, RecordedReplayFrame, ReplayEvent, WizardType,
+};
 
 pub const MATCH_DATABASE_PATH_ENV: &str = "RUNE_LANES_DB_PATH";
 
@@ -129,9 +131,16 @@ impl SqliteMatchStore {
     }
 
     pub fn create_match(&mut self) -> Result<StoredMatch, MatchStoreError> {
+        self.create_match_with_wizard_type(WizardType::default())
+    }
+
+    pub fn create_match_with_wizard_type(
+        &mut self,
+        player_wizard_type: WizardType,
+    ) -> Result<StoredMatch, MatchStoreError> {
         for attempt in 0..8 {
             let id = readable_match_id(attempt);
-            let state = MatchState::new();
+            let state = MatchState::new_with_player_wizard_type(player_wizard_type);
             let snapshot = state.to_snapshot_json()?;
             let initial_frame = state.initial_replay_frame();
             let event_json = serde_json::to_string(&initial_frame.event)?;
@@ -160,7 +169,7 @@ impl SqliteMatchStore {
         }
 
         let id = readable_match_id(99);
-        let state = MatchState::new();
+        let state = MatchState::new_with_player_wizard_type(player_wizard_type);
         let snapshot = state.to_snapshot_json()?;
         let initial_frame = state.initial_replay_frame();
         let event_json = serde_json::to_string(&initial_frame.event)?;

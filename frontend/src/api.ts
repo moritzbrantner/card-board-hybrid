@@ -7,6 +7,7 @@ import type {
   MatchResponse,
   MatchState,
   HexCoord,
+  WizardType,
 } from "./types";
 
 type ApiError = {
@@ -37,8 +38,11 @@ function matchAction(matchId: string, action: MatchActionRequest) {
   }).then((response) => response.matchState);
 }
 
-export function createMatch() {
-  return request<MatchResponse>("/api/matches", { method: "POST" });
+export function createMatch(wizardType?: WizardType) {
+  return request<MatchResponse>("/api/matches", {
+    method: "POST",
+    body: wizardType ? JSON.stringify({ wizardType }) : undefined,
+  });
 }
 
 export function loadMatch(matchId: string) {

@@ -48,6 +48,7 @@ import type {
   Side,
   Unit,
   Wizard,
+  WizardType,
 } from "./types";
 import type { FormEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 
@@ -90,6 +91,70 @@ type BoardPiece = BoardWizard | BoardUnit;
 type CatalogUnitCard = CatalogCard & {
   kind: Extract<CatalogCard["kind"], { type: "unit" }>;
 };
+
+type WizardOption = {
+  id: WizardType;
+  name: string;
+  role: string;
+  hp: number;
+  attack: number;
+  ap: number;
+  text: string;
+  token: string;
+};
+
+const WIZARD_OPTIONS = [
+  {
+    id: "runekeeper",
+    name: "Runekeeper",
+    role: "Balanced",
+    hp: 20,
+    attack: 1,
+    ap: 3,
+    text: "Steady stats for flexible card play.",
+    token: "Run",
+  },
+  {
+    id: "pyromancer",
+    name: "Pyromancer",
+    role: "Aggressive",
+    hp: 18,
+    attack: 2,
+    ap: 3,
+    text: "Higher melee damage with a smaller health pool.",
+    token: "Pyr",
+  },
+  {
+    id: "chronomancer",
+    name: "Chronomancer",
+    role: "Mobile",
+    hp: 16,
+    attack: 1,
+    ap: 4,
+    text: "Extra action point for repositioning and summons.",
+    token: "Chr",
+  },
+  {
+    id: "warden",
+    name: "Warden",
+    role: "Defensive",
+    hp: 24,
+    attack: 1,
+    ap: 2,
+    text: "Durable but slower across the board.",
+    token: "War",
+  },
+  {
+    id: "battlemage",
+    name: "Battlemage",
+    role: "Bruiser",
+    hp: 20,
+    attack: 2,
+    ap: 2,
+    text: "Tougher frontline duelist with fewer actions.",
+    token: "Bat",
+  },
+] as const satisfies readonly WizardOption[];
 
 export function App() {
   const [path, setPath] = useState(() => window.location.pathname);
@@ -380,6 +445,7 @@ function DetailStat({ label, value }: { label: string; value: string | number })
 
 function MatchPicker({ onNavigate }: { onNavigate: (to: string) => void }) {
   const [matchId, setMatchId] = useState("");
+  const [selectedWizardType, setSelectedWizardType] = useState<WizardType>("runekeeper");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -387,7 +453,7 @@ function MatchPicker({ onNavigate }: { onNavigate: (to: string) => void }) {
     setBusy(true);
     setNotice(null);
     try {
-      const created = await createMatch();
+      const created = await createMatch(selectedWizardType);
       onNavigate(`/match/${created.matchId}`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not create match");
@@ -411,8 +477,46 @@ function MatchPicker({ onNavigate }: { onNavigate: (to: string) => void }) {
       <section className="match-picker" aria-label="Match picker">
         <div>
           <p className="eyebrow">Rune Lanes</p>
-          <h1>Open a Match</h1>
+          <h1>Choose Your Wizard</h1>
         </div>
+        <fieldset className="wizard-picker" aria-label="Wizard type">
+          <legend>Wizard Type</legend>
+          <div className="wizard-options">
+            {WIZARD_OPTIONS.map((wizard) => (
+              <button
+                key={wizard.id}
+                className={`wizard-option ${selectedWizardType === wizard.id ? "selected" : ""}`}
+                type="button"
+                aria-pressed={selectedWizardType === wizard.id}
+                onClick={() => setSelectedWizardType(wizard.id)}
+                disabled={busy}
+              >
+                <span className="wizard-option-header">
+                  <span>
+                    <strong>{wizard.name}</strong>
+                    <span>{wizard.role}</span>
+                  </span>
+                  <WandSparkles size={18} />
+                </span>
+                <span className="wizard-option-text">{wizard.text}</span>
+                <span className="wizard-stat-row">
+                  <span>
+                    <Heart size={13} />
+                    {wizard.hp}
+                  </span>
+                  <span>
+                    <Sword size={13} />
+                    {wizard.attack}
+                  </span>
+                  <span>
+                    <Zap size={13} />
+                    {wizard.ap}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </fieldset>
         <div className="picker-actions">
           <button
             className="primary-button"
@@ -1224,6 +1328,10 @@ function PlayerBadge({ player }: { player: MatchParticipantState }) {
   return (
     <div className={`player-badge ${player.side}`}>
       <strong>{sideLabel(player.side)}</strong>
+      <span className="wizard-type-pill">
+        <WandSparkles size={16} />
+        {wizardTypeLabel(player.wizard.wizardType)}
+      </span>
       <span>
         <Heart size={16} />
         {player.wizard.hp}/{player.wizard.maxHp}
@@ -1306,8 +1414,12 @@ function Board({
 
 function PieceToken({ piece }: { piece: BoardPiece }) {
   return (
-    <span className={`piece-token ${piece.side} ${piece.pieceType}`}>
-      <strong>{piece.pieceType === "wizard" ? "Wiz" : piece.name.slice(0, 3)}</strong>
+    <span className={`piece-token ${piece.side} ${piece.pieceType}`} title={piece.name}>
+      <strong>
+        {piece.pieceType === "wizard"
+          ? wizardTokenLabel(piece.wizardType)
+          : piece.name.slice(0, 3)}
+      </strong>
       <span>
         <Sword size={11} />
         {piece.attack}
@@ -1376,10 +1488,18 @@ function groupTilesByColumn(tiles: HexTile[]) {
 
 function pieceAt(match: MatchState, coord: HexCoord): BoardPiece | null {
   if (sameCoord(match.player.wizard.position, coord)) {
-    return { ...match.player.wizard, pieceType: "wizard", name: "Wizard" };
+    return {
+      ...match.player.wizard,
+      pieceType: "wizard",
+      name: wizardTypeLabel(match.player.wizard.wizardType),
+    };
   }
   if (sameCoord(match.opponent.wizard.position, coord)) {
-    return { ...match.opponent.wizard, pieceType: "wizard", name: "Wizard" };
+    return {
+      ...match.opponent.wizard,
+      pieceType: "wizard",
+      name: wizardTypeLabel(match.opponent.wizard.wizardType),
+    };
   }
 
   const unit = match.board.units.find((candidate) => sameCoord(candidate.position, coord));
@@ -1388,10 +1508,18 @@ function pieceAt(match: MatchState, coord: HexCoord): BoardPiece | null {
 
 function pieceById(match: MatchState, pieceId: string): BoardPiece | null {
   if (match.player.wizard.id === pieceId) {
-    return { ...match.player.wizard, pieceType: "wizard", name: "Wizard" };
+    return {
+      ...match.player.wizard,
+      pieceType: "wizard",
+      name: wizardTypeLabel(match.player.wizard.wizardType),
+    };
   }
   if (match.opponent.wizard.id === pieceId) {
-    return { ...match.opponent.wizard, pieceType: "wizard", name: "Wizard" };
+    return {
+      ...match.opponent.wizard,
+      pieceType: "wizard",
+      name: wizardTypeLabel(match.opponent.wizard.wizardType),
+    };
   }
 
   const unit = match.board.units.find((candidate) => candidate.id === pieceId);
@@ -1597,6 +1725,18 @@ function eventDetail(event: ReplayEvent) {
     case "matchEnded":
       return `${sideLabel(event.winner)} won the match.`;
   }
+}
+
+function wizardOptionByType(wizardType: WizardType) {
+  return WIZARD_OPTIONS.find((wizard) => wizard.id === wizardType) ?? WIZARD_OPTIONS[0];
+}
+
+function wizardTypeLabel(wizardType: WizardType) {
+  return wizardOptionByType(wizardType).name;
+}
+
+function wizardTokenLabel(wizardType: WizardType) {
+  return wizardOptionByType(wizardType).token;
 }
 
 function sideLabel(side: Side | null) {
