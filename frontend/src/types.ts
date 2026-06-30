@@ -2,6 +2,8 @@ export type Side = "player" | "opponent";
 
 export type Phase = "planning" | "matchOver";
 
+export type MatchMode = "solo" | "shared";
+
 export type Rarity = "basic" | "advanced" | "rare";
 
 export type HexCoord = {
@@ -113,6 +115,7 @@ export type MatchParticipantState = {
   mana: number;
   maxMana: number;
   wizard: Wizard;
+  hand?: Card[];
   deckCount: number;
   discardCount: number;
 };
@@ -122,8 +125,10 @@ export type MatchPlayerState = MatchParticipantState & {
 };
 
 export type MatchState = {
+  mode: MatchMode;
   round: number;
   phase: Phase;
+  activeSide: Side;
   player: MatchPlayerState;
   opponent: MatchParticipantState;
   board: HexBoard;
@@ -134,6 +139,28 @@ export type MatchState = {
 export type MatchResponse = {
   matchId: string;
   matchState: MatchState;
+};
+
+export type CreateSharedMatchResponse = {
+  matchId: string;
+  mode: "shared";
+  status: SharedMatchStatus;
+  viewerSide: Side;
+  playerSeatUrl: string;
+  inviteSeatUrl: string;
+};
+
+export type SharedMatchStatus = "setup" | "active" | "completed" | "forfeited";
+
+export type SharedMatchResponse = {
+  matchId: string;
+  mode: "shared";
+  status: SharedMatchStatus;
+  viewerSide: Side;
+  activeSide: Side | null;
+  opponentConnected: boolean;
+  canClaimForfeitAt: number | null;
+  matchState: MatchState | null;
 };
 
 export type ReplayVisibility = "public" | "revealed";
@@ -180,6 +207,44 @@ export type MatchActionRequest =
     }
   | {
       type: "endTurn";
+    };
+
+export type SharedClientMessage =
+  | {
+      type: "action";
+      requestId: string;
+      action: MatchActionRequest;
+    }
+  | {
+      type: "claimForfeit";
+      requestId: string;
+    }
+  | {
+      type: "heartbeat";
+    };
+
+export type SharedServerMessage =
+  | {
+      type: "snapshot";
+      payload: SharedMatchResponse;
+    }
+  | {
+      type: "actionAccepted";
+      requestId: string;
+      payload: SharedMatchResponse;
+    }
+  | {
+      type: "actionRejected";
+      requestId: string;
+      message: string;
+    }
+  | {
+      type: "presenceChanged";
+      payload: SharedMatchResponse;
+    }
+  | {
+      type: "error";
+      message: string;
     };
 
 export type CardSummary = {

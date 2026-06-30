@@ -2,27 +2,58 @@ mod card_catalog;
 mod match_session;
 mod match_store;
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use axum::body::Bytes;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::{Method, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use card_catalog::{CatalogResponse, starter_catalog};
-use match_session::{MatchActionRequest, MatchState, ReplayEvent, ReplayVisibility, WizardType};
+use futures_util::StreamExt;
+use match_session::{
+    MatchActionRequest, MatchMode, MatchState, ReplayEvent, ReplayVisibility, Side, WizardType,
+};
 use match_store::{
-    MatchStoreError, SqliteMatchStore, StoredMatch, StoredMatchSummary, StoredReplayFrame,
+    CreatedSharedMatch, MatchStoreError, SharedMatchStatus, SqliteMatchStore, StoredMatch,
+    StoredMatchSummary, StoredReplayFrame, StoredSharedMatch,
 };
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
+use tokio::time::{self, Duration, Instant};
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::{ServeDir, ServeFile};
 
 type SharedState = Arc<AppState>;
 
 struct AppState {
     store: Mutex<SqliteMatchStore>,
+    live_matches: Mutex<HashMap<String, broadcast::Sender<()>>>,
+}
+
+impl AppState {
+    fn match_sender(&self, match_id: &str) -> broadcast::Sender<()> {
+        let mut live_matches = self
+            .live_matches
+            .lock()
+            .expect("live match lock should not be poisoned");
+        live_matches
+            .entry(match_id.to_string())
+            .or_insert_with(|| {
+                let (sender, _) = broadcast::channel(32);
+                sender
+            })
+            .clone()
+    }
+
+    fn notify_match(&self, match_id: &str) {
+        let sender = self.match_sender(match_id);
+        let _ = sender.send(());
+    }
 }
 
 #[derive(Serialize)]
@@ -33,6 +64,12 @@ struct ApiError {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateMatchRequest {
+    wizard_type: WizardType,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JoinSharedMatchRequest {
     wizard_type: WizardType,
 }
 
@@ -79,6 +116,73 @@ struct ReplayFrameResponse {
     match_state: serde_json::Value,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateSharedMatchResponse {
+    match_id: String,
+    mode: &'static str,
+    status: &'static str,
+    viewer_side: Side,
+    player_seat_url: String,
+    invite_seat_url: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedMatchResponse {
+    match_id: String,
+    mode: &'static str,
+    status: &'static str,
+    viewer_side: Side,
+    active_side: Option<Side>,
+    opponent_connected: bool,
+    can_claim_forfeit_at: Option<i64>,
+    match_state: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum SharedClientMessage {
+    Action {
+        request_id: String,
+        action: MatchActionRequest,
+    },
+    ClaimForfeit {
+        request_id: String,
+    },
+    Heartbeat,
+}
+
+#[derive(Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum SharedServerMessage {
+    Snapshot {
+        payload: SharedMatchResponse,
+    },
+    ActionAccepted {
+        request_id: String,
+        payload: SharedMatchResponse,
+    },
+    ActionRejected {
+        request_id: String,
+        message: String,
+    },
+    PresenceChanged {
+        payload: SharedMatchResponse,
+    },
+    Error {
+        message: String,
+    },
+}
+
 #[tokio::main]
 async fn main() {
     let store = SqliteMatchStore::from_environment().expect("match database should open");
@@ -89,11 +193,15 @@ async fn main() {
 fn create_app(store: SqliteMatchStore) -> Router {
     let state = Arc::new(AppState {
         store: Mutex::new(store),
+        live_matches: Mutex::new(HashMap::new()),
     });
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([Method::GET, Method::POST])
         .allow_headers(Any);
+
+    let static_files = ServeDir::new("frontend/dist")
+        .not_found_service(ServeFile::new("frontend/dist/index.html"));
 
     Router::new()
         .route("/api/health", get(health))
@@ -102,7 +210,21 @@ fn create_app(store: SqliteMatchStore) -> Router {
         .route("/api/matches/{match_id}", get(load_match))
         .route("/api/matches/{match_id}/replay", get(load_replay))
         .route("/api/matches/{match_id}/actions", post(apply_match_action))
+        .route("/api/shared-matches", post(create_shared_match))
+        .route(
+            "/api/shared-matches/{match_id}/seats/{seat_token}",
+            get(load_shared_match),
+        )
+        .route(
+            "/api/shared-matches/{match_id}/seats/{seat_token}/join",
+            post(join_shared_match),
+        )
+        .route(
+            "/api/shared-matches/{match_id}/seats/{seat_token}/ws",
+            get(shared_match_ws),
+        )
         .layer(cors)
+        .fallback_service(static_files)
         .with_state(state)
 }
 
@@ -180,6 +302,373 @@ async fn create_match(State(state): State<SharedState>, body: Bytes) -> impl Int
     Json(MatchResponse::from(created)).into_response()
 }
 
+async fn create_shared_match(
+    State(state): State<SharedState>,
+    Json(request): Json<CreateMatchRequest>,
+) -> impl IntoResponse {
+    let created = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        match store.create_shared_match(request.wizard_type) {
+            Ok(created) => created,
+            Err(error) => return store_error_response(error),
+        }
+    };
+
+    Json(CreateSharedMatchResponse::from(created)).into_response()
+}
+
+async fn load_shared_match(
+    State(state): State<SharedState>,
+    Path((match_id, seat_token)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let shared = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        if let Err(error) = store.mark_shared_seat_seen(&match_id, &seat_token) {
+            return store_error_response(error);
+        }
+        match store.load_shared_match_for_seat(&match_id, &seat_token) {
+            Ok(Some(shared)) => shared,
+            Ok(None) => return shared_not_found_response(),
+            Err(error) => return store_error_response(error),
+        }
+    };
+
+    Json(SharedMatchResponse::from(shared)).into_response()
+}
+
+async fn join_shared_match(
+    State(state): State<SharedState>,
+    Path((match_id, seat_token)): Path<(String, String)>,
+    Json(request): Json<JoinSharedMatchRequest>,
+) -> impl IntoResponse {
+    let shared = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        match store.join_shared_match(&match_id, &seat_token, request.wizard_type) {
+            Ok(Some(shared)) => shared,
+            Ok(None) => return shared_not_found_response(),
+            Err(error) => return store_error_response(error),
+        }
+    };
+    state.notify_match(&match_id);
+
+    Json(SharedMatchResponse::from(shared)).into_response()
+}
+
+async fn shared_match_ws(
+    ws: WebSocketUpgrade,
+    State(state): State<SharedState>,
+    Path((match_id, seat_token)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let found = {
+        let store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        match store.load_shared_match_for_seat(&match_id, &seat_token) {
+            Ok(Some(_)) => true,
+            Ok(None) => false,
+            Err(error) => return store_error_response(error),
+        }
+    };
+    if !found {
+        return shared_not_found_response();
+    }
+
+    ws.on_upgrade(move |socket| handle_shared_socket(socket, state, match_id, seat_token))
+        .into_response()
+}
+
+async fn handle_shared_socket(
+    mut socket: WebSocket,
+    state: SharedState,
+    match_id: String,
+    seat_token: String,
+) {
+    {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let _ = store.mark_shared_seat_seen(&match_id, &seat_token);
+    }
+
+    let sender = state.match_sender(&match_id);
+    let mut receiver = sender.subscribe();
+    let mut heartbeat_timeout = time::interval(Duration::from_secs(5));
+    let mut last_client_message = Instant::now();
+    if let Some(message) = shared_snapshot_message(&state, &match_id, &seat_token, false) {
+        if send_shared_message(&mut socket, message).await.is_err() {
+            return;
+        }
+    }
+    state.notify_match(&match_id);
+
+    loop {
+        tokio::select! {
+            received = socket.next() => {
+                let Some(received) = received else {
+                    break;
+                };
+                let Ok(message) = received else {
+                    break;
+                };
+                last_client_message = Instant::now();
+                match message {
+                    Message::Text(text) => {
+                        handle_shared_client_text(&mut socket, &state, &match_id, &seat_token, &text).await;
+                    }
+                    Message::Close(_) => break,
+                    _ => {}
+                }
+            }
+            _ = heartbeat_timeout.tick() => {
+                if last_client_message.elapsed() > Duration::from_secs(45) {
+                    break;
+                }
+            }
+            broadcast = receiver.recv() => {
+                if broadcast.is_err() {
+                    break;
+                }
+                if let Some(message) = shared_snapshot_message(&state, &match_id, &seat_token, false) {
+                    if send_shared_message(&mut socket, message).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let _ = store.mark_shared_seat_disconnected(&match_id, &seat_token);
+    }
+    state.notify_match(&match_id);
+}
+
+async fn handle_shared_client_text(
+    socket: &mut WebSocket,
+    state: &SharedState,
+    match_id: &str,
+    seat_token: &str,
+    text: &str,
+) {
+    let message = match serde_json::from_str::<SharedClientMessage>(text) {
+        Ok(message) => message,
+        Err(error) => {
+            let _ = send_shared_message(
+                socket,
+                SharedServerMessage::Error {
+                    message: format!("Invalid WebSocket message: {error}"),
+                },
+            )
+            .await;
+            return;
+        }
+    };
+
+    match message {
+        SharedClientMessage::Action { request_id, action } => {
+            match apply_shared_socket_action(state, match_id, seat_token, action) {
+                Ok(payload) => {
+                    let _ = send_shared_message(
+                        socket,
+                        SharedServerMessage::ActionAccepted {
+                            request_id,
+                            payload,
+                        },
+                    )
+                    .await;
+                    state.notify_match(match_id);
+                }
+                Err(message) => {
+                    let _ = send_shared_message(
+                        socket,
+                        SharedServerMessage::ActionRejected {
+                            request_id,
+                            message,
+                        },
+                    )
+                    .await;
+                }
+            }
+        }
+        SharedClientMessage::ClaimForfeit { request_id } => {
+            match claim_shared_forfeit(state, match_id, seat_token) {
+                Ok(payload) => {
+                    let _ = send_shared_message(
+                        socket,
+                        SharedServerMessage::ActionAccepted {
+                            request_id,
+                            payload,
+                        },
+                    )
+                    .await;
+                    state.notify_match(match_id);
+                }
+                Err(message) => {
+                    let _ = send_shared_message(
+                        socket,
+                        SharedServerMessage::ActionRejected {
+                            request_id,
+                            message,
+                        },
+                    )
+                    .await;
+                }
+            }
+        }
+        SharedClientMessage::Heartbeat => {
+            let mut store = state
+                .store
+                .lock()
+                .expect("store lock should not be poisoned");
+            let _ = store.mark_shared_seat_seen(match_id, seat_token);
+        }
+    }
+}
+
+fn apply_shared_socket_action(
+    state: &SharedState,
+    match_id: &str,
+    seat_token: &str,
+    action: MatchActionRequest,
+) -> Result<SharedMatchResponse, String> {
+    let mut store = state
+        .store
+        .lock()
+        .expect("store lock should not be poisoned");
+    store
+        .mark_shared_seat_seen(match_id, seat_token)
+        .map_err(|error| error.to_string())?;
+    let shared = store
+        .load_shared_match_for_seat(match_id, seat_token)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "Shared match seat was not found".to_string())?;
+    if shared.status != SharedMatchStatus::Active {
+        return Err("Shared match is not active".to_string());
+    }
+    let mut match_state = shared
+        .state
+        .ok_or_else(|| "Shared match has not started".to_string())?;
+    let action_index = store
+        .next_action_index(match_id)
+        .map_err(|error| error.to_string())?;
+    let frames = match_state
+        .apply_action_recording_for_side(shared.viewer_seat.side, action.clone(), action_index)
+        .map_err(|error| error.to_string())?;
+    store
+        .save_action_and_replay_frames(match_id, action_index, &action, &match_state, &frames)
+        .map_err(|error| error.to_string())?;
+    store
+        .load_shared_match_for_seat(match_id, seat_token)
+        .map_err(|error| error.to_string())?
+        .map(SharedMatchResponse::from)
+        .ok_or_else(|| "Shared match seat was not found".to_string())
+}
+
+fn claim_shared_forfeit(
+    state: &SharedState,
+    match_id: &str,
+    seat_token: &str,
+) -> Result<SharedMatchResponse, String> {
+    let mut store = state
+        .store
+        .lock()
+        .expect("store lock should not be poisoned");
+    let shared = store
+        .load_shared_match_for_seat(match_id, seat_token)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "Shared match seat was not found".to_string())?;
+    if shared.status != SharedMatchStatus::Active {
+        return Err("Shared match is not active".to_string());
+    }
+    let disconnected_at = shared
+        .opposing_seat
+        .disconnected_at
+        .ok_or_else(|| "Opponent is still connected".to_string())?;
+    if unix_timestamp() < disconnected_at + 120 {
+        return Err("Forfeit is not claimable yet".to_string());
+    }
+    let mut match_state = shared
+        .state
+        .ok_or_else(|| "Shared match has not started".to_string())?;
+    let action_index = store
+        .next_action_index(match_id)
+        .map_err(|error| error.to_string())?;
+    let frames = match_state.forfeit_recording(shared.viewer_seat.side, action_index);
+    store
+        .mark_shared_match_forfeited(match_id, shared.viewer_seat.side)
+        .map_err(|error| error.to_string())?;
+    store
+        .save_custom_action_and_replay_frames(
+            match_id,
+            action_index,
+            r#"{"type":"claimForfeit"}"#,
+            &match_state,
+            &frames,
+        )
+        .map_err(|error| error.to_string())?;
+    store
+        .load_shared_match_for_seat(match_id, seat_token)
+        .map_err(|error| error.to_string())?
+        .map(SharedMatchResponse::from)
+        .ok_or_else(|| "Shared match seat was not found".to_string())
+}
+
+fn shared_snapshot_message(
+    state: &SharedState,
+    match_id: &str,
+    seat_token: &str,
+    presence: bool,
+) -> Option<SharedServerMessage> {
+    let shared = {
+        let store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        store
+            .load_shared_match_for_seat(match_id, seat_token)
+            .ok()
+            .flatten()
+    }?;
+    let payload = SharedMatchResponse::from(shared);
+    if presence {
+        Some(SharedServerMessage::PresenceChanged { payload })
+    } else {
+        Some(SharedServerMessage::Snapshot { payload })
+    }
+}
+
+async fn send_shared_message(
+    socket: &mut WebSocket,
+    message: SharedServerMessage,
+) -> Result<(), axum::Error> {
+    let text = serde_json::to_string(&message).expect("server message should serialize");
+    socket.send(Message::Text(text.into())).await
+}
+
+fn unix_timestamp() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 async fn load_match(
     State(state): State<SharedState>,
     Path(match_id): Path<String>,
@@ -230,6 +719,16 @@ async fn load_replay(
             Err(error) => return store_error_response(error),
         }
     };
+
+    if replay.summary.state.mode == MatchMode::Shared && replay.summary.state.winner.is_none() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ApiError {
+                message: format!("Replay for match {match_id} was not found"),
+            }),
+        )
+            .into_response();
+    }
 
     let visibility = if replay.summary.state.winner.is_some() {
         ReplayVisibility::Revealed
@@ -324,11 +823,71 @@ fn store_error_response(error: MatchStoreError) -> axum::response::Response {
         .into_response()
 }
 
+fn shared_not_found_response() -> axum::response::Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ApiError {
+            message: "Shared match seat was not found".to_string(),
+        }),
+    )
+        .into_response()
+}
+
 impl From<StoredMatch> for MatchResponse {
     fn from(stored_match: StoredMatch) -> Self {
         Self {
             match_id: stored_match.id,
             match_state: stored_match.state,
+        }
+    }
+}
+
+impl From<CreatedSharedMatch> for CreateSharedMatchResponse {
+    fn from(created: CreatedSharedMatch) -> Self {
+        Self {
+            player_seat_url: format!("/match/{}/{}", created.match_id, created.player_token),
+            invite_seat_url: format!("/match/{}/{}", created.match_id, created.opponent_token),
+            match_id: created.match_id,
+            mode: "shared",
+            status: "setup",
+            viewer_side: Side::Player,
+        }
+    }
+}
+
+impl From<StoredSharedMatch> for SharedMatchResponse {
+    fn from(shared: StoredSharedMatch) -> Self {
+        let active_side = shared.state.as_ref().and_then(|state| {
+            if state.phase == match_session::Phase::MatchOver {
+                None
+            } else {
+                Some(state.active_side)
+            }
+        });
+        let match_state = shared
+            .state
+            .as_ref()
+            .map(|state| state.public_value_for_side(shared.viewer_seat.side));
+        let opponent_connected = shared.opposing_seat.joined_at.is_some()
+            && shared.opposing_seat.disconnected_at.is_none();
+        let can_claim_forfeit_at = if shared.status == SharedMatchStatus::Active {
+            shared
+                .opposing_seat
+                .disconnected_at
+                .map(|disconnected_at| disconnected_at + 120)
+        } else {
+            None
+        };
+
+        Self {
+            match_id: shared.match_id,
+            mode: "shared",
+            status: shared.status.as_str(),
+            viewer_side: shared.viewer_seat.side,
+            active_side,
+            opponent_connected,
+            can_claim_forfeit_at,
+            match_state,
         }
     }
 }
@@ -389,6 +948,12 @@ mod tests {
             .expect("body should read");
         let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
         (status, json)
+    }
+
+    fn seat_token_from_url(url: &str) -> &str {
+        url.rsplit('/')
+            .next()
+            .expect("seat URL should end in token")
     }
 
     #[tokio::test]
@@ -720,6 +1285,159 @@ mod tests {
             })
             .expect("opponent hidden draw should be present");
         assert!(hidden_draw["event"]["card"].is_null());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn shared_match_creation_returns_private_seat_links_and_hides_setup_from_archive() {
+        let path = test_db_path("shared-create");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, created) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/shared-matches")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(created["mode"], "shared");
+        assert_eq!(created["status"], "setup");
+        assert_eq!(created["viewerSide"], "player");
+        assert_ne!(created["playerSeatUrl"], created["inviteSeatUrl"]);
+        assert!(
+            created["playerSeatUrl"]
+                .as_str()
+                .unwrap()
+                .contains("/match/")
+        );
+        assert!(
+            created["inviteSeatUrl"]
+                .as_str()
+                .unwrap()
+                .contains("/match/")
+        );
+
+        let (status, archive) = json_request(
+            app,
+            Request::builder()
+                .uri("/api/matches")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(archive["matches"].as_array().unwrap().is_empty());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn shared_match_join_exposes_only_the_viewer_seat_hand() {
+        let path = test_db_path("shared-join");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (_, created) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/shared-matches")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
+                .expect("request should build"),
+        )
+        .await;
+        let match_id = created["matchId"].as_str().expect("match id should exist");
+        let player_token = seat_token_from_url(
+            created["playerSeatUrl"]
+                .as_str()
+                .expect("player URL exists"),
+        );
+        let opponent_token = seat_token_from_url(
+            created["inviteSeatUrl"]
+                .as_str()
+                .expect("invite URL exists"),
+        );
+
+        let (status, setup) = json_request(
+            app.clone(),
+            Request::builder()
+                .uri(format!(
+                    "/api/shared-matches/{match_id}/seats/{player_token}"
+                ))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(setup["status"], "setup");
+        assert!(setup["matchState"].is_null());
+
+        let (status, joined) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/shared-matches/{match_id}/seats/{opponent_token}/join"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"wizardType":"pyromancer"}"#))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(joined["status"], "active");
+        assert_eq!(joined["viewerSide"], "opponent");
+        assert_eq!(
+            joined["matchState"]["opponent"]["wizard"]["wizardType"],
+            "pyromancer"
+        );
+        assert!(joined["matchState"]["opponent"].get("hand").is_some());
+        assert!(joined["matchState"]["player"].get("hand").is_none());
+
+        let (status, player_view) = json_request(
+            app.clone(),
+            Request::builder()
+                .uri(format!(
+                    "/api/shared-matches/{match_id}/seats/{player_token}"
+                ))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            player_view["matchState"]["player"]["wizard"]["wizardType"],
+            "chronomancer"
+        );
+        assert!(player_view["matchState"]["player"].get("hand").is_some());
+        assert!(player_view["matchState"]["opponent"].get("hand").is_none());
+
+        let (status, _) = json_request(
+            app.clone(),
+            Request::builder()
+                .uri(format!("/api/matches/{match_id}/replay"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (status, archive) = json_request(
+            app,
+            Request::builder()
+                .uri("/api/matches")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(archive["matches"].as_array().unwrap().is_empty());
 
         let _ = fs::remove_file(path);
     }

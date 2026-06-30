@@ -3,6 +3,7 @@ import {
   Archive,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Eye,
   EyeOff,
   Footprints,
@@ -18,21 +19,27 @@ import {
   Shield,
   Sparkles,
   Sword,
+  Users,
   WandSparkles,
+  Wifi,
   X,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   attack,
   createMatch,
+  createSharedMatch,
   endTurn,
+  joinSharedMatch,
   loadCatalog,
   loadMatch,
   loadMatches,
   loadReplay,
+  loadSharedMatch,
   movePiece,
   playCard,
+  sharedMatchWebSocketUrl,
 } from "./api";
 import type {
   Card,
@@ -40,11 +47,15 @@ import type {
   HexCoord,
   HexTile,
   MatchReplayResponse,
+  MatchActionRequest,
   MatchSummary,
   MatchParticipantState,
   MatchState,
   Rarity,
   ReplayEvent,
+  SharedClientMessage,
+  SharedMatchResponse,
+  SharedServerMessage,
   Side,
   Unit,
   Wizard,
@@ -76,6 +87,11 @@ type MatchArchiveLoadState =
 type ReplayLoadState =
   | { status: "loading" }
   | { status: "ready"; replay: MatchReplayResponse }
+  | { status: "error"; message: string };
+
+type SharedLoadState =
+  | { status: "loading" }
+  | { status: "ready"; shared: SharedMatchResponse }
   | { status: "error"; message: string };
 
 type Selection =
@@ -191,6 +207,18 @@ export function App() {
   const replayRoute = replayRouteFromPath(path);
   if (replayRoute) {
     return <ReplayPage key={replayRoute} matchId={replayRoute} onNavigate={navigate} />;
+  }
+
+  const sharedMatchRoute = sharedMatchRouteFromPath(path);
+  if (sharedMatchRoute) {
+    return (
+      <SharedMatchPage
+        key={`${sharedMatchRoute.matchId}:${sharedMatchRoute.seatToken}`}
+        matchId={sharedMatchRoute.matchId}
+        seatToken={sharedMatchRoute.seatToken}
+        onNavigate={navigate}
+      />
+    );
   }
 
   const matchRoute = matchRouteFromPath(path);
@@ -468,6 +496,23 @@ function MatchPicker({ onNavigate }: { onNavigate: (to: string) => void }) {
     }
   }
 
+  async function handleCreateSharedMatch() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const created = await createSharedMatch(selectedWizardType);
+      sessionStorage.setItem(
+        `rune-lanes-invite:${created.matchId}`,
+        `${window.location.origin}${created.inviteSeatUrl}`,
+      );
+      onNavigate(created.playerSeatUrl);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not create multiplayer match");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function handleOpenMatch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const normalized = matchId.trim();
@@ -531,7 +576,16 @@ function MatchPicker({ onNavigate }: { onNavigate: (to: string) => void }) {
             disabled={busy}
           >
             <Plus size={18} />
-            New Match
+            New Solo Match
+          </button>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => void handleCreateSharedMatch()}
+            disabled={busy}
+          >
+            <Users size={18} />
+            New Multiplayer Match
           </button>
           <button className="secondary-link" type="button" onClick={() => onNavigate("/catalog/")}>
             <LibraryBig size={18} />
@@ -697,6 +751,57 @@ function MatchArchivePage({ onNavigate }: { onNavigate: (to: string) => void }) 
   );
 }
 
+function WizardPicker({
+  selectedWizardType,
+  busy,
+  onSelect,
+}: {
+  selectedWizardType: WizardType;
+  busy: boolean;
+  onSelect: (wizardType: WizardType) => void;
+}) {
+  return (
+    <fieldset className="wizard-picker" aria-label="Wizard type">
+      <legend>Wizard Type</legend>
+      <div className="wizard-options">
+        {WIZARD_OPTIONS.map((wizard) => (
+          <button
+            key={wizard.id}
+            className={`wizard-option ${selectedWizardType === wizard.id ? "selected" : ""}`}
+            type="button"
+            aria-pressed={selectedWizardType === wizard.id}
+            onClick={() => onSelect(wizard.id)}
+            disabled={busy}
+          >
+            <span className="wizard-option-header">
+              <span>
+                <strong>{wizard.name}</strong>
+                <span>{wizard.role}</span>
+              </span>
+              <WandSparkles size={18} />
+            </span>
+            <span className="wizard-option-text">{wizard.text}</span>
+            <span className="wizard-stat-row">
+              <span>
+                <Heart size={13} />
+                {wizard.hp}
+              </span>
+              <span>
+                <Sword size={13} />
+                {wizard.attack}
+              </span>
+              <span>
+                <Zap size={13} />
+                {wizard.ap}
+              </span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 function MatchPage({
   matchId,
   onNavigate,
@@ -704,6 +809,7 @@ function MatchPage({
   matchId: string;
   onNavigate: (to: string) => void;
 }) {
+  const viewerSide: Side = "player";
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
@@ -741,7 +847,7 @@ function MatchPage({
       return null;
     }
 
-    return loadState.match.player.hand.find((card) => card.id === selection.cardId) ?? null;
+    return handForSide(loadState.match, viewerSide).find((card) => card.id === selection.cardId) ?? null;
   }, [loadState, selection]);
 
   const selectedPiece = useMemo(() => {
@@ -848,7 +954,7 @@ function MatchPage({
     const piece = pieceAt(match, tile.coord);
 
     if (selectedCard) {
-      const target = cardTargetForTile(match, selectedCard, tile);
+      const target = cardTargetForTile(match, viewerSide, selectedCard, tile);
       if (target) {
         void runAction(() => playCard(matchId, selectedCard.id, target));
       } else {
@@ -858,17 +964,17 @@ function MatchPage({
     }
 
     if (selectedPiece) {
-      if (!piece && isLegalMove(match, selectedPiece, tile.coord)) {
+      if (!piece && isLegalMove(match, viewerSide, selectedPiece, tile.coord)) {
         void runAction(() => movePiece(matchId, selectedPiece.id, tile.coord));
         return;
       }
-      if (piece && isLegalAttack(selectedPiece, piece)) {
+      if (piece && isLegalAttack(viewerSide, selectedPiece, piece)) {
         void runAction(() => attack(matchId, selectedPiece.id, piece.id));
         return;
       }
     }
 
-    if (piece?.side === "player") {
+    if (piece?.side === viewerSide) {
       setSelection({ type: "piece", pieceId: piece.id });
       setNotice(null);
       return;
@@ -893,14 +999,14 @@ function MatchPage({
       return;
     }
 
-    const card = match.player.hand.find((candidate) => candidate.id === cardId);
+    const card = handForSide(match, viewerSide).find((candidate) => candidate.id === cardId);
     if (!card) {
       setNotice("That card is no longer in your hand.");
       setDraggedCardId(null);
       return;
     }
 
-    const target = cardTargetForTile(match, card, tile);
+    const target = cardTargetForTile(match, viewerSide, card, tile);
     if (!target) {
       setNotice("That card cannot target this hex.");
       setDraggedCardId(null);
@@ -966,6 +1072,7 @@ function MatchPage({
         <section className="battlefield">
           <Board
             match={match}
+            viewerSide="player"
             selectedCard={selectedCard}
             selectedPiece={selectedPiece}
             disabled={busy || match.phase === "matchOver"}
@@ -975,13 +1082,13 @@ function MatchPage({
           />
           <div className="hand-overlay">
             <div className="hand" aria-label="Hand">
-              {match.player.hand.map((card) => (
+              {handForSide(match, viewerSide).map((card) => (
                 <CardButton
                   key={card.id}
                   card={card}
                   selected={selection?.type === "card" && card.id === selection.cardId}
                   dragging={draggedCardId === card.id}
-                  disabled={busy || !isPlayableCard(match, card)}
+                  disabled={busy || !isPlayableCard(match, viewerSide, card)}
                   onClick={() => {
                     setUnitContextMenu(null);
                     setSelection(
@@ -1019,6 +1126,496 @@ function MatchPage({
           </div>
           <aside className="log" aria-label="Match log">
             {notice ? <p className="notice">{notice}</p> : null}
+            {match.log.map((entry, index) => (
+              <p key={`${entry}-${index}`}>{entry}</p>
+            ))}
+          </aside>
+        </section>
+      </section>
+      {modalUnit ? (
+        <UnitCardModal
+          unit={modalUnit}
+          card={modalUnitCard}
+          onClose={() => setUnitModalPieceId(null)}
+        />
+      ) : null}
+      {unitContextMenu && contextMenuUnit ? (
+        <UnitContextMenuView
+          menu={unitContextMenu}
+          unit={contextMenuUnit}
+          onClose={() => setUnitContextMenu(null)}
+          onOpenCardInfo={() => {
+            setUnitModalPieceId(contextMenuUnit.id);
+            setUnitContextMenu(null);
+          }}
+        />
+      ) : null}
+    </main>
+  );
+}
+
+function SharedMatchPage({
+  matchId,
+  seatToken,
+  onNavigate,
+}: {
+  matchId: string;
+  seatToken: string;
+  onNavigate: (to: string) => void;
+}) {
+  const [loadState, setLoadState] = useState<SharedLoadState>({ status: "loading" });
+  const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
+  const [selection, setSelection] = useState<Selection>(null);
+  const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
+  const [unitModalPieceId, setUnitModalPieceId] = useState<string | null>(null);
+  const [unitContextMenu, setUnitContextMenu] = useState<UnitContextMenu>(null);
+  const [selectedWizardType, setSelectedWizardType] = useState<WizardType>("runekeeper");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  const socketRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    setLoadState({ status: "loading" });
+    setSelection(null);
+    setDraggedCardId(null);
+    setNotice(null);
+    loadSharedMatch(matchId, seatToken)
+      .then((shared) => setLoadState({ status: "ready", shared }))
+      .catch((error: unknown) =>
+        setLoadState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not load shared match",
+        }),
+      );
+  }, [matchId, seatToken]);
+
+  useEffect(() => {
+    loadCatalog()
+      .then((response) => setCatalogCards(response.cards))
+      .catch(() => setCatalogCards([]));
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const socket = new WebSocket(sharedMatchWebSocketUrl(matchId, seatToken));
+    socketRef.current = socket;
+
+    socket.addEventListener("message", (event) => {
+      const message = JSON.parse(event.data as string) as SharedServerMessage;
+      if (
+        message.type === "snapshot" ||
+        message.type === "presenceChanged" ||
+        message.type === "actionAccepted"
+      ) {
+        setLoadState({ status: "ready", shared: message.payload });
+        setBusy(false);
+        if (message.type === "actionAccepted") {
+          setSelection(null);
+          setDraggedCardId(null);
+          setUnitModalPieceId(null);
+          setUnitContextMenu(null);
+        }
+      } else if (message.type === "actionRejected") {
+        setNotice(message.message);
+        setBusy(false);
+      } else if (message.type === "error") {
+        setNotice(message.message);
+        setBusy(false);
+      }
+    });
+
+    socket.addEventListener("close", () => {
+      if (socketRef.current === socket) {
+        setNotice("Live connection closed. Reload the page to reconnect.");
+      }
+    });
+
+    const heartbeat = window.setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        const message: SharedClientMessage = { type: "heartbeat" };
+        socket.send(JSON.stringify(message));
+      }
+    }, 15_000);
+
+    return () => {
+      window.clearInterval(heartbeat);
+      socketRef.current = null;
+      socket.close();
+    };
+  }, [matchId, seatToken]);
+
+  const shared = loadState.status === "ready" ? loadState.shared : null;
+  const match = shared?.matchState ?? null;
+  const viewerSide = shared?.viewerSide ?? "player";
+  const isActiveViewer = Boolean(match && shared?.activeSide === viewerSide);
+
+  const selectedCard = useMemo(() => {
+    if (!match || selection?.type !== "card") {
+      return null;
+    }
+
+    return handForSide(match, viewerSide).find((card) => card.id === selection.cardId) ?? null;
+  }, [match, selection, viewerSide]);
+
+  const selectedPiece = useMemo(() => {
+    if (!match || selection?.type !== "piece") {
+      return null;
+    }
+
+    return pieceById(match, selection.pieceId);
+  }, [match, selection]);
+
+  const modalUnit = useMemo(() => {
+    if (!match || unitModalPieceId === null) {
+      return null;
+    }
+
+    const piece = pieceById(match, unitModalPieceId);
+    return piece?.pieceType === "unit" ? piece : null;
+  }, [match, unitModalPieceId]);
+
+  const modalUnitCard = useMemo(() => {
+    if (!modalUnit) {
+      return null;
+    }
+
+    return findUnitCatalogCard(catalogCards, modalUnit);
+  }, [catalogCards, modalUnit]);
+
+  const contextMenuUnit = useMemo(() => {
+    if (!match || unitContextMenu === null) {
+      return null;
+    }
+
+    const piece = pieceById(match, unitContextMenu.pieceId);
+    return piece?.pieceType === "unit" ? piece : null;
+  }, [match, unitContextMenu]);
+
+  function sendSharedAction(action: MatchActionRequest) {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setNotice("Live connection is not ready.");
+      return;
+    }
+
+    setBusy(true);
+    setNotice(null);
+    const message: SharedClientMessage = {
+      type: "action",
+      requestId: crypto.randomUUID(),
+      action,
+    };
+    socket.send(JSON.stringify(message));
+  }
+
+  function claimForfeit() {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setNotice("Live connection is not ready.");
+      return;
+    }
+
+    setBusy(true);
+    setNotice(null);
+    const message: SharedClientMessage = {
+      type: "claimForfeit",
+      requestId: crypto.randomUUID(),
+    };
+    socket.send(JSON.stringify(message));
+  }
+
+  async function handleJoinSharedMatch() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const joined = await joinSharedMatch(matchId, seatToken, selectedWizardType);
+      setLoadState({ status: "ready", shared: joined });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not join match");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleTileClick(tile: HexTile) {
+    if (!match || busy || match.phase === "matchOver" || !isActiveViewer) {
+      return;
+    }
+
+    setUnitContextMenu(null);
+    const piece = pieceAt(match, tile.coord);
+
+    if (selectedCard) {
+      const target = cardTargetForTile(match, viewerSide, selectedCard, tile);
+      if (target) {
+        sendSharedAction({ type: "playCard", cardId: selectedCard.id, target });
+      } else {
+        setNotice("That card cannot target this hex.");
+      }
+      return;
+    }
+
+    if (selectedPiece) {
+      if (!piece && isLegalMove(match, viewerSide, selectedPiece, tile.coord)) {
+        sendSharedAction({ type: "movePiece", pieceId: selectedPiece.id, to: tile.coord });
+        return;
+      }
+      if (piece && isLegalAttack(viewerSide, selectedPiece, piece)) {
+        sendSharedAction({ type: "attack", attackerId: selectedPiece.id, targetId: piece.id });
+        return;
+      }
+    }
+
+    if (piece?.side === viewerSide) {
+      setSelection({ type: "piece", pieceId: piece.id });
+      setNotice(null);
+      return;
+    }
+
+    setSelection(null);
+    setUnitModalPieceId(null);
+  }
+
+  function handleCardDragStart(card: Card, event: ReactDragEvent<HTMLButtonElement>) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", card.id);
+    setUnitContextMenu(null);
+    setSelection({ type: "card", cardId: card.id });
+    setDraggedCardId(card.id);
+    setUnitModalPieceId(null);
+    setNotice(null);
+  }
+
+  function handleCardDrop(tile: HexTile, cardId: string) {
+    if (!match || busy || match.phase === "matchOver" || !isActiveViewer) {
+      return;
+    }
+
+    const card = handForSide(match, viewerSide).find((candidate) => candidate.id === cardId);
+    if (!card) {
+      setNotice("That card is no longer in your hand.");
+      setDraggedCardId(null);
+      return;
+    }
+
+    const target = cardTargetForTile(match, viewerSide, card, tile);
+    if (!target) {
+      setNotice("That card cannot target this hex.");
+      setDraggedCardId(null);
+      return;
+    }
+
+    setDraggedCardId(null);
+    sendSharedAction({ type: "playCard", cardId: card.id, target });
+  }
+
+  function handleUnitContextMenu(unit: BoardUnit, position: { x: number; y: number }) {
+    if (!match || busy || match.phase === "matchOver") {
+      return;
+    }
+
+    setUnitContextMenu({
+      pieceId: unit.id,
+      x: position.x,
+      y: position.y,
+    });
+  }
+
+  if (loadState.status === "loading") {
+    return <ShellMessage title={`Match ${matchId}`} message="Loading multiplayer match" />;
+  }
+
+  if (loadState.status === "error") {
+    return (
+      <ShellMessage
+        title={`Match ${matchId}`}
+        message={loadState.message}
+        actions={
+          <button className="primary-button" type="button" onClick={() => onNavigate("/")}>
+            Open match picker
+          </button>
+        }
+      />
+    );
+  }
+
+  if (!shared) {
+    return <ShellMessage title={`Match ${matchId}`} message="Shared match unavailable" />;
+  }
+
+  if (!match) {
+    const inviteUrl =
+      sessionStorage.getItem(`rune-lanes-invite:${matchId}`) ??
+      "Invite link unavailable after reload.";
+    return (
+      <main className="app-shell picker-shell">
+        <section className="match-picker" aria-label="Shared match setup">
+          <div>
+            <p className="eyebrow">Rune Lanes Multiplayer</p>
+            <h1>{viewerSide === "player" ? "Invite Player" : "Choose Your Wizard"}</h1>
+            <p className="match-id">Match {matchId}</p>
+          </div>
+          {viewerSide === "player" ? (
+            <>
+              <div className="share-panel">
+                <span>Invite Link</span>
+                <strong>{inviteUrl}</strong>
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => void navigator.clipboard?.writeText(inviteUrl)}
+                >
+                  <Copy size={18} />
+                  Copy
+                </button>
+              </div>
+              <p className="notice">Waiting for the invited player to choose a wizard.</p>
+            </>
+          ) : (
+            <>
+              <WizardPicker
+                selectedWizardType={selectedWizardType}
+                busy={busy}
+                onSelect={setSelectedWizardType}
+              />
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => void handleJoinSharedMatch()}
+                disabled={busy}
+              >
+                <Users size={18} />
+                Join Match
+              </button>
+            </>
+          )}
+          {notice ? <p className="notice">{notice}</p> : null}
+        </section>
+      </main>
+    );
+  }
+
+  const canClaimForfeit =
+    shared.canClaimForfeitAt !== null &&
+    now >= shared.canClaimForfeitAt &&
+    match.phase !== "matchOver";
+
+  return (
+    <main className="app-shell">
+      <section className="table">
+        <header className="top-bar">
+          <div>
+            <p className="eyebrow">Rune Lanes Multiplayer</p>
+            <h1>Round {match.round}</h1>
+            <p className="match-id">Match {matchId}</p>
+          </div>
+          <div className="actions">
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => onNavigate("/")}
+              title="Match picker"
+            >
+              <House size={18} />
+            </button>
+            {canClaimForfeit ? (
+              <button className="primary-button" type="button" onClick={claimForfeit} disabled={busy}>
+                <Sword size={18} />
+                Claim Forfeit
+              </button>
+            ) : null}
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => sendSharedAction({ type: "endTurn" })}
+              disabled={busy || match.phase === "matchOver" || !isActiveViewer}
+            >
+              <Play size={18} />
+              End Turn
+            </button>
+          </div>
+        </header>
+
+        <section className="score-row" aria-label="Score">
+          <PlayerBadge player={match.player} />
+          <div className="phase-pill">
+            <Wifi size={16} />
+            {match.phase === "matchOver"
+              ? `${sideLabel(match.winner)} wins`
+              : isActiveViewer
+                ? "Your turn"
+                : "Waiting"}
+          </div>
+          <PlayerBadge player={match.opponent} />
+        </section>
+
+        <section className="battlefield">
+          <Board
+            match={match}
+            viewerSide={viewerSide}
+            selectedCard={selectedCard}
+            selectedPiece={selectedPiece}
+            disabled={busy || match.phase === "matchOver" || !isActiveViewer}
+            onTileClick={handleTileClick}
+            onTileDrop={handleCardDrop}
+            onUnitContextMenu={handleUnitContextMenu}
+          />
+          <div className="hand-overlay">
+            <div className="hand" aria-label="Hand">
+              {handForSide(match, viewerSide).map((card) => (
+                <CardButton
+                  key={card.id}
+                  card={card}
+                  selected={selection?.type === "card" && card.id === selection.cardId}
+                  dragging={draggedCardId === card.id}
+                  disabled={busy || !isActiveViewer || !isPlayableCard(match, viewerSide, card)}
+                  onClick={() => {
+                    setUnitContextMenu(null);
+                    setSelection(
+                      selection?.type === "card" && card.id === selection.cardId
+                        ? null
+                        : { type: "card", cardId: card.id },
+                    );
+                    setUnitModalPieceId(null);
+                    setNotice(null);
+                  }}
+                  onDragStart={(event) => handleCardDragStart(card, event)}
+                  onDragEnd={() => setDraggedCardId(null)}
+                />
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="hand-and-log">
+          <div className="player-zone">
+            <section className="pile-row" aria-label="Player card piles">
+              <PileDisplay
+                icon={<Layers size={19} />}
+                label="Deck"
+                count={participantBySide(match, viewerSide).deckCount}
+                status="Remaining"
+              />
+              <PileDisplay
+                icon={<Archive size={19} />}
+                label="Discard"
+                count={participantBySide(match, viewerSide).discardCount}
+                status={
+                  participantBySide(match, viewerSide).discardCount === 0 ? "Empty" : "In pile"
+                }
+              />
+            </section>
+          </div>
+          <aside className="log" aria-label="Match log">
+            {notice ? <p className="notice">{notice}</p> : null}
+            {!shared.opponentConnected && match.phase !== "matchOver" ? (
+              <p>Opponent disconnected.</p>
+            ) : null}
             {match.log.map((entry, index) => (
               <p key={`${entry}-${index}`}>{entry}</p>
             ))}
@@ -1134,6 +1731,7 @@ function ReplayPage({
 
         <Board
           match={match}
+          viewerSide="player"
           selectedCard={null}
           selectedPiece={null}
           disabled={false}
@@ -1371,6 +1969,17 @@ function replayRouteFromPath(path: string) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function sharedMatchRouteFromPath(path: string) {
+  const normalized = path.replace(/\/+$/, "");
+  const match = normalized.match(/^\/match\/([^/]+)\/([^/]+)$/);
+  return match
+    ? {
+        matchId: decodeURIComponent(match[1]),
+        seatToken: decodeURIComponent(match[2]),
+      }
+    : null;
+}
+
 function PlayerBadge({ player }: { player: MatchParticipantState }) {
   return (
     <div className={`player-badge ${player.side}`}>
@@ -1397,6 +2006,7 @@ function PlayerBadge({ player }: { player: MatchParticipantState }) {
 
 function Board({
   match,
+  viewerSide,
   selectedCard,
   selectedPiece,
   disabled,
@@ -1406,6 +2016,7 @@ function Board({
   onUnitContextMenu,
 }: {
   match: MatchState;
+  viewerSide: Side;
   selectedCard: Card | null;
   selectedPiece: BoardPiece | null;
   disabled: boolean;
@@ -1426,10 +2037,11 @@ function Board({
               const isLegal =
                 !readOnly &&
                 !disabled &&
-                ((selectedCard && isLegalCardTarget(match, selectedCard, tile.coord, piece)) ||
+                ((selectedCard &&
+                  isLegalCardTarget(match, viewerSide, selectedCard, tile.coord, piece)) ||
                   (selectedPiece &&
-                    ((!piece && isLegalMove(match, selectedPiece, tile.coord)) ||
-                      (piece && isLegalAttack(selectedPiece, piece)))));
+                    ((!piece && isLegalMove(match, viewerSide, selectedPiece, tile.coord)) ||
+                      (piece && isLegalAttack(viewerSide, selectedPiece, piece)))));
               const isSelected = piece?.id === selectedPiece?.id;
 
               return (
@@ -1615,17 +2227,32 @@ function isCatalogUnitCard(card: CatalogCard | null): card is CatalogUnitCard {
   return card?.kind.type === "unit";
 }
 
-function isPlayableCard(match: MatchState, card: Card) {
+function participantBySide(match: MatchState, side: Side): MatchParticipantState {
+  return side === "player" ? match.player : match.opponent;
+}
+
+function handForSide(match: MatchState, side: Side): Card[] {
+  return participantBySide(match, side).hand ?? [];
+}
+
+function isPlayableCard(match: MatchState, viewerSide: Side, card: Card) {
+  const participant = participantBySide(match, viewerSide);
   return (
     match.phase !== "matchOver" &&
-    match.player.mana >= card.cost &&
-    match.player.wizard.apRemaining > 0
+    match.activeSide === viewerSide &&
+    participant.mana >= card.cost &&
+    participant.wizard.apRemaining > 0
   );
 }
 
-function cardTargetForTile(match: MatchState, card: Card, tile: HexTile): ActionTarget | null {
+function cardTargetForTile(
+  match: MatchState,
+  viewerSide: Side,
+  card: Card,
+  tile: HexTile,
+): ActionTarget | null {
   const piece = pieceAt(match, tile.coord);
-  if (!isLegalCardTarget(match, card, tile.coord, piece)) {
+  if (!isLegalCardTarget(match, viewerSide, card, tile.coord, piece)) {
     return null;
   }
 
@@ -1638,45 +2265,49 @@ function cardTargetForTile(match: MatchState, card: Card, tile: HexTile): Action
 
 function isLegalCardTarget(
   match: MatchState,
+  viewerSide: Side,
   card: Card,
   coord: HexCoord,
   piece: BoardPiece | null,
 ) {
-  if (!isPlayableCard(match, card)) {
+  const participant = participantBySide(match, viewerSide);
+  const opponentSide = viewerSide === "player" ? "opponent" : "player";
+  if (!isPlayableCard(match, viewerSide, card)) {
     return false;
   }
 
   if (card.kind.type === "unit") {
-    return !piece && distance(match.player.wizard.position, coord) === 1;
+    return !piece && distance(participant.wizard.position, coord) === 1;
   }
 
-  if (!piece || distance(match.player.wizard.position, piece.position) > card.kind.range) {
+  if (!piece || distance(participant.wizard.position, piece.position) > card.kind.range) {
     return false;
   }
 
   switch (card.kind.effect.type) {
     case "heal":
-      return piece.side === "player";
+      return piece.side === viewerSide;
     case "buff":
-      return piece.side === "player" && piece.pieceType === "unit";
+      return piece.side === viewerSide && piece.pieceType === "unit";
     case "damage":
-      return piece.side === "opponent";
+      return piece.side === opponentSide;
   }
 }
 
-function isLegalMove(match: MatchState, piece: BoardPiece, coord: HexCoord) {
+function isLegalMove(match: MatchState, viewerSide: Side, piece: BoardPiece, coord: HexCoord) {
   return (
-    piece.side === "player" &&
+    match.activeSide === viewerSide &&
+    piece.side === viewerSide &&
     piece.apRemaining > 0 &&
     distance(piece.position, coord) === 1 &&
     !pieceAt(match, coord)
   );
 }
 
-function isLegalAttack(attacker: BoardPiece, target: BoardPiece) {
+function isLegalAttack(viewerSide: Side, attacker: BoardPiece, target: BoardPiece) {
   return (
-    attacker.side === "player" &&
-    target.side === "opponent" &&
+    attacker.side === viewerSide &&
+    target.side !== viewerSide &&
     attacker.apRemaining > 0 &&
     !attacker.hasAttacked &&
     distance(attacker.position, target.position) === 1

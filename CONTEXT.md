@@ -44,6 +44,34 @@ _Avoid_: lane board
 The shared 50-card deck recipe used by both players at the beginning of the game.
 _Avoid_: beginner deck
 
+**Solo match**:
+A match where one human controls Player and the backend AI controls Opponent.
+_Avoid_: offline match
+
+**Shared match**:
+A human-vs-human match reached through two private seat links.
+_Avoid_: online match, lobby match
+
+**Seat**:
+One side-specific player slot in a shared match, either Player or Opponent.
+_Avoid_: account, user
+
+**Seat link**:
+A private URL that grants access to exactly one seat in a shared match.
+_Avoid_: public match link
+
+**Match setup**:
+The pre-game state where the creator has chosen a wizard and the invitee has not joined or has not chosen theirs.
+_Avoid_: lobby
+
+**Active side**:
+The side whose turn may submit match actions.
+_Avoid_: current user
+
+**Forfeit**:
+A match-ending claim available after the opposing seat has been disconnected for at least two minutes.
+_Avoid_: surrender
+
 **Basic card**:
 A starter deck card with many copies in the deck.
 _Avoid_: common card

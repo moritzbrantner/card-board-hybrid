@@ -36,6 +36,7 @@ The frontend proxies `/api` to `http://localhost:4000`.
 
 - `/` opens the match picker. It can create a new match, open a match by ID, or link to `/catalog/`.
 - `/match/<match-id>` opens the playable Rune Lanes board for a persisted match.
+- `/match/<match-id>/<seat-token>` opens a private shared-match seat link.
 - `/catalog/` opens the backend-driven starter card catalog.
 
 ## Match persistence
@@ -49,6 +50,27 @@ creation and after each successful action.
 SQLite data defaults to `data/rune-lanes.sqlite3`, which is ignored by git. Set
 `RUNE_LANES_DB_PATH=/path/to/rune-lanes.sqlite3` to use a different database,
 including isolated temporary databases for tests or local experiments.
+
+## Shared multiplayer
+
+The match picker can create a solo AI match or a multiplayer match. Multiplayer
+matches create private seat links for Player and Opponent. The creator shares the
+invite link, the invitee chooses a wizard, and both browsers play over a
+server-authoritative WebSocket connection. Active multiplayer matches are only
+viewable from their seat links; completed matches can be replayed from the
+archive.
+
+## Production serving
+
+For a single-origin production run, build the frontend and start the backend:
+
+```sh
+bun run --cwd frontend build
+cargo run -p backend
+```
+
+The backend serves `/api`, WebSocket routes, and built frontend files from
+`frontend/dist`, falling back to `index.html` for app routes.
 
 ## Checks
 

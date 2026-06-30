@@ -6,10 +6,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rand::RngCore;
+use rand::rngs::OsRng;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::match_session::{
-    MatchActionRequest, MatchState, RecordedReplayFrame, ReplayEvent, WizardType,
+    MatchActionRequest, MatchState, RecordedReplayFrame, ReplayEvent, Side, WizardType,
 };
 
 pub const MATCH_DATABASE_PATH_ENV: &str = "RUNE_LANES_DB_PATH";
@@ -41,6 +43,39 @@ pub struct StoredReplayFrame {
 pub struct StoredReplay {
     pub summary: StoredMatchSummary,
     pub frames: Vec<StoredReplayFrame>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SharedMatchStatus {
+    Setup,
+    Active,
+    Completed,
+    Forfeited,
+}
+
+#[derive(Clone, Debug)]
+pub struct StoredSharedSeat {
+    pub side: Side,
+    pub seat_token: String,
+    pub wizard_type: Option<WizardType>,
+    pub joined_at: Option<i64>,
+    pub disconnected_at: Option<i64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct StoredSharedMatch {
+    pub match_id: String,
+    pub status: SharedMatchStatus,
+    pub viewer_seat: StoredSharedSeat,
+    pub opposing_seat: StoredSharedSeat,
+    pub state: Option<MatchState>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CreatedSharedMatch {
+    pub match_id: String,
+    pub player_token: String,
+    pub opponent_token: String,
 }
 
 pub struct SqliteMatchStore {
@@ -103,6 +138,7 @@ impl SqliteMatchStore {
                 snapshot_json TEXT NOT NULL,
                 initial_snapshot_json TEXT,
                 completed_at INTEGER,
+                mode TEXT NOT NULL DEFAULT 'solo',
                 created_at INTEGER NOT NULL DEFAULT (unixepoch()),
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())
             );
@@ -122,10 +158,33 @@ impl SqliteMatchStore {
                 created_at INTEGER NOT NULL,
                 PRIMARY KEY (match_id, frame_index)
             );
+            CREATE TABLE IF NOT EXISTS shared_matches (
+                match_id TEXT PRIMARY KEY NOT NULL,
+                status TEXT NOT NULL,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                forfeit_winner TEXT
+            );
+            CREATE TABLE IF NOT EXISTS match_seats (
+                match_id TEXT NOT NULL,
+                side TEXT NOT NULL,
+                seat_token TEXT NOT NULL UNIQUE,
+                wizard_type TEXT,
+                joined_at INTEGER,
+                last_seen_at INTEGER,
+                disconnected_at INTEGER,
+                PRIMARY KEY (match_id, side)
+            );
             ",
         )?;
         add_column_if_missing(&connection, "matches", "initial_snapshot_json", "TEXT")?;
         add_column_if_missing(&connection, "matches", "completed_at", "INTEGER")?;
+        add_column_if_missing(
+            &connection,
+            "matches",
+            "mode",
+            "TEXT NOT NULL DEFAULT 'solo'",
+        )?;
 
         Ok(Self { connection })
     }
@@ -152,10 +211,11 @@ impl SqliteMatchStore {
                     id,
                     snapshot_json,
                     initial_snapshot_json,
+                    mode,
                     created_at,
                     updated_at
                 )
-                VALUES (?1, ?2, ?2, unixepoch(), unixepoch())
+                VALUES (?1, ?2, ?2, 'solo', unixepoch(), unixepoch())
                 ",
                 params![id, snapshot],
             )?;
@@ -180,13 +240,15 @@ impl SqliteMatchStore {
                 id,
                 snapshot_json,
                 initial_snapshot_json,
+                mode,
                 created_at,
                 updated_at
             )
-            VALUES (?1, ?2, ?2, unixepoch(), unixepoch())
+            VALUES (?1, ?2, ?2, 'solo', unixepoch(), unixepoch())
             ON CONFLICT(id) DO UPDATE SET
                 snapshot_json = excluded.snapshot_json,
                 initial_snapshot_json = excluded.initial_snapshot_json,
+                mode = excluded.mode,
                 updated_at = unixepoch()
             ",
             params![id, snapshot],
@@ -194,6 +256,199 @@ impl SqliteMatchStore {
         insert_replay_frame(&transaction, &id, 0, &initial_frame, &event_json)?;
         transaction.commit()?;
         Ok(StoredMatch { id, state })
+    }
+
+    pub fn create_shared_match(
+        &mut self,
+        player_wizard_type: WizardType,
+    ) -> Result<CreatedSharedMatch, MatchStoreError> {
+        for attempt in 0..8 {
+            let match_id = readable_match_id(attempt);
+            let player_token = random_seat_token();
+            let opponent_token = random_seat_token();
+            let transaction = self.connection.transaction()?;
+            let inserted = transaction.execute(
+                "
+                INSERT OR IGNORE INTO shared_matches (
+                    match_id,
+                    status,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?1, 'setup', unixepoch(), unixepoch())
+                ",
+                params![match_id],
+            )?;
+
+            if inserted == 1 {
+                insert_shared_seat(
+                    &transaction,
+                    &match_id,
+                    Side::Player,
+                    &player_token,
+                    Some(player_wizard_type),
+                    true,
+                )?;
+                insert_shared_seat(
+                    &transaction,
+                    &match_id,
+                    Side::Opponent,
+                    &opponent_token,
+                    None,
+                    false,
+                )?;
+                transaction.commit()?;
+                return Ok(CreatedSharedMatch {
+                    match_id,
+                    player_token,
+                    opponent_token,
+                });
+            }
+
+            transaction.commit()?;
+        }
+
+        Err(MatchStoreError::Sqlite(
+            rusqlite::Error::ExecuteReturnedResults,
+        ))
+    }
+
+    pub fn load_shared_match_for_seat(
+        &self,
+        id: &str,
+        seat_token: &str,
+    ) -> Result<Option<StoredSharedMatch>, MatchStoreError> {
+        let row: Option<(String, String)> = self
+            .connection
+            .query_row(
+                "
+                SELECT match_id, status
+                FROM shared_matches
+                WHERE match_id = ?1
+                ",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((match_id, status)) = row else {
+            return Ok(None);
+        };
+
+        let seats = self.load_shared_seats(&match_id)?;
+        let Some(viewer_seat) = seats
+            .iter()
+            .find(|seat| seat.seat_token == seat_token)
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let opposing_seat = seats
+            .into_iter()
+            .find(|seat| seat.side != viewer_seat.side)
+            .expect("shared match should have an opposing seat");
+        let state = self.load_match(&match_id)?.map(|stored| stored.state);
+
+        Ok(Some(StoredSharedMatch {
+            match_id,
+            status: SharedMatchStatus::from_db(&status),
+            viewer_seat,
+            opposing_seat,
+            state,
+        }))
+    }
+
+    pub fn join_shared_match(
+        &mut self,
+        id: &str,
+        seat_token: &str,
+        wizard_type: WizardType,
+    ) -> Result<Option<StoredSharedMatch>, MatchStoreError> {
+        let Some(shared) = self.load_shared_match_for_seat(id, seat_token)? else {
+            return Ok(None);
+        };
+        if shared.viewer_seat.side != Side::Opponent || shared.status != SharedMatchStatus::Setup {
+            return Ok(Some(shared));
+        }
+        let Some(player_wizard_type) = shared.opposing_seat.wizard_type else {
+            return Ok(Some(shared));
+        };
+
+        let state = MatchState::new_shared_with_wizard_types(player_wizard_type, wizard_type);
+        let snapshot = state.to_snapshot_json()?;
+        let initial_frame = state.initial_replay_frame();
+        let event_json = serde_json::to_string(&initial_frame.event)?;
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
+            "
+            INSERT INTO matches (
+                id,
+                snapshot_json,
+                initial_snapshot_json,
+                mode,
+                created_at,
+                updated_at
+            )
+            VALUES (?1, ?2, ?2, 'shared', unixepoch(), unixepoch())
+            ",
+            params![id, snapshot],
+        )?;
+        insert_replay_frame(&transaction, id, 0, &initial_frame, &event_json)?;
+        transaction.execute(
+            "
+            UPDATE match_seats
+            SET wizard_type = ?3,
+                joined_at = unixepoch(),
+                last_seen_at = unixepoch(),
+                disconnected_at = NULL
+            WHERE match_id = ?1 AND seat_token = ?2
+            ",
+            params![id, seat_token, wizard_type.to_db()],
+        )?;
+        transaction.execute(
+            "
+            UPDATE shared_matches
+            SET status = 'active',
+                updated_at = unixepoch()
+            WHERE match_id = ?1
+            ",
+            params![id],
+        )?;
+        transaction.commit()?;
+
+        self.load_shared_match_for_seat(id, seat_token)
+    }
+
+    pub fn mark_shared_seat_seen(
+        &mut self,
+        id: &str,
+        seat_token: &str,
+    ) -> Result<(), MatchStoreError> {
+        self.connection.execute(
+            "
+            UPDATE match_seats
+            SET last_seen_at = unixepoch(),
+                disconnected_at = NULL
+            WHERE match_id = ?1 AND seat_token = ?2
+            ",
+            params![id, seat_token],
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_shared_seat_disconnected(
+        &mut self,
+        id: &str,
+        seat_token: &str,
+    ) -> Result<(), MatchStoreError> {
+        self.connection.execute(
+            "
+            UPDATE match_seats
+            SET disconnected_at = COALESCE(disconnected_at, unixepoch())
+            WHERE match_id = ?1 AND seat_token = ?2
+            ",
+            params![id, seat_token],
+        )?;
+        Ok(())
     }
 
     pub fn load_match(&self, id: &str) -> Result<Option<StoredMatch>, MatchStoreError> {
@@ -239,8 +494,30 @@ impl SqliteMatchStore {
         state: &MatchState,
         frames: &[RecordedReplayFrame],
     ) -> Result<(), MatchStoreError> {
-        let snapshot = state.to_snapshot_json()?;
         let request_json = serde_json::to_string(action)?;
+        self.save_action_json_and_replay_frames(id, action_index, &request_json, state, frames)
+    }
+
+    pub fn save_custom_action_and_replay_frames(
+        &mut self,
+        id: &str,
+        action_index: u32,
+        request_json: &str,
+        state: &MatchState,
+        frames: &[RecordedReplayFrame],
+    ) -> Result<(), MatchStoreError> {
+        self.save_action_json_and_replay_frames(id, action_index, request_json, state, frames)
+    }
+
+    fn save_action_json_and_replay_frames(
+        &mut self,
+        id: &str,
+        action_index: u32,
+        request_json: &str,
+        state: &MatchState,
+        frames: &[RecordedReplayFrame],
+    ) -> Result<(), MatchStoreError> {
+        let snapshot = state.to_snapshot_json()?;
         let completed_at = if state.winner.is_some() {
             "completed_at = COALESCE(completed_at, unixepoch()),"
         } else {
@@ -280,6 +557,38 @@ impl SqliteMatchStore {
             params![id, snapshot],
         )?;
         transaction.commit()?;
+        if state.winner.is_some() {
+            self.connection.execute(
+                "
+                UPDATE shared_matches
+                SET status = CASE status
+                        WHEN 'forfeited' THEN 'forfeited'
+                        ELSE 'completed'
+                    END,
+                    updated_at = unixepoch()
+                WHERE match_id = ?1
+                ",
+                params![id],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn mark_shared_match_forfeited(
+        &mut self,
+        id: &str,
+        winner: Side,
+    ) -> Result<(), MatchStoreError> {
+        self.connection.execute(
+            "
+            UPDATE shared_matches
+            SET status = 'forfeited',
+                forfeit_winner = ?2,
+                updated_at = unixepoch()
+            WHERE match_id = ?1
+            ",
+            params![id, winner.to_db()],
+        )?;
         Ok(())
     }
 
@@ -294,7 +603,12 @@ impl SqliteMatchStore {
                 COUNT(match_replay_frames.frame_index) AS frame_count
             FROM matches
             JOIN match_replay_frames ON match_replay_frames.match_id = matches.id
+            LEFT JOIN shared_matches ON shared_matches.match_id = matches.id
             WHERE matches.initial_snapshot_json IS NOT NULL
+                AND (
+                    matches.mode = 'solo'
+                    OR shared_matches.status IN ('completed', 'forfeited')
+                )
             GROUP BY matches.id
             HAVING frame_count > 0
             ORDER BY matches.updated_at DESC
@@ -412,6 +726,127 @@ impl SqliteMatchStore {
         .transpose()
         .map_err(MatchStoreError::from)
     }
+
+    fn load_shared_seats(&self, match_id: &str) -> Result<Vec<StoredSharedSeat>, MatchStoreError> {
+        let mut statement = self.connection.prepare(
+            "
+            SELECT side, seat_token, wizard_type, joined_at, last_seen_at, disconnected_at
+            FROM match_seats
+            WHERE match_id = ?1
+            ",
+        )?;
+        let rows = statement.query_map(params![match_id], |row| {
+            let side = row.get::<_, String>(0)?;
+            let wizard_type = row.get::<_, Option<String>>(2)?;
+            Ok(StoredSharedSeat {
+                side: side_from_db(&side).expect("stored side should be valid"),
+                seat_token: row.get(1)?,
+                wizard_type: wizard_type.as_deref().and_then(wizard_type_from_db),
+                joined_at: row.get(3)?,
+                disconnected_at: row.get(5)?,
+            })
+        })?;
+
+        let mut seats = Vec::new();
+        for row in rows {
+            seats.push(row?);
+        }
+        Ok(seats)
+    }
+}
+
+impl SharedMatchStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Setup => "setup",
+            Self::Active => "active",
+            Self::Completed => "completed",
+            Self::Forfeited => "forfeited",
+        }
+    }
+
+    fn from_db(value: &str) -> Self {
+        match value {
+            "setup" => Self::Setup,
+            "active" => Self::Active,
+            "completed" => Self::Completed,
+            "forfeited" => Self::Forfeited,
+            _ => Self::Setup,
+        }
+    }
+}
+
+impl Side {
+    fn to_db(self) -> &'static str {
+        match self {
+            Self::Player => "player",
+            Self::Opponent => "opponent",
+        }
+    }
+}
+
+impl WizardType {
+    fn to_db(self) -> &'static str {
+        match self {
+            Self::Runekeeper => "runekeeper",
+            Self::Pyromancer => "pyromancer",
+            Self::Chronomancer => "chronomancer",
+            Self::Warden => "warden",
+            Self::Battlemage => "battlemage",
+        }
+    }
+}
+
+fn side_from_db(value: &str) -> Option<Side> {
+    match value {
+        "player" => Some(Side::Player),
+        "opponent" => Some(Side::Opponent),
+        _ => None,
+    }
+}
+
+fn wizard_type_from_db(value: &str) -> Option<WizardType> {
+    match value {
+        "runekeeper" => Some(WizardType::Runekeeper),
+        "pyromancer" => Some(WizardType::Pyromancer),
+        "chronomancer" => Some(WizardType::Chronomancer),
+        "warden" => Some(WizardType::Warden),
+        "battlemage" => Some(WizardType::Battlemage),
+        _ => None,
+    }
+}
+
+fn insert_shared_seat(
+    transaction: &Transaction<'_>,
+    match_id: &str,
+    side: Side,
+    seat_token: &str,
+    wizard_type: Option<WizardType>,
+    joined: bool,
+) -> Result<(), MatchStoreError> {
+    let joined_expr = if joined { "unixepoch()" } else { "NULL" };
+    transaction.execute(
+        &format!(
+            "
+            INSERT INTO match_seats (
+                match_id,
+                side,
+                seat_token,
+                wizard_type,
+                joined_at,
+                last_seen_at
+            )
+            VALUES (?1, ?2, ?3, ?4, {joined_expr}, {joined_expr})
+            "
+        ),
+        params![
+            match_id,
+            side.to_db(),
+            seat_token,
+            wizard_type.map(WizardType::to_db)
+        ],
+    )?;
+    Ok(())
 }
 
 fn add_column_if_missing(
@@ -500,6 +935,16 @@ fn readable_match_id(attempt: u32) -> String {
         format!("-{}", to_base36(u64::from(attempt)))
     };
     format!("rl-{}{}", to_base36(millis), suffix)
+}
+
+fn random_seat_token() -> String {
+    let mut bytes = [0_u8; 24];
+    OsRng.fill_bytes(&mut bytes);
+    let mut token = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        token.push_str(&format!("{byte:02x}"));
+    }
+    token
 }
 
 fn to_base36(mut value: u64) -> String {

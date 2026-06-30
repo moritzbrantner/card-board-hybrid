@@ -15,8 +15,10 @@ const OPENING_HAND_SIZE: usize = 4;
 
 #[derive(Clone, Debug)]
 pub struct MatchState {
+    pub mode: MatchMode,
     pub round: u32,
     pub phase: Phase,
+    pub active_side: Side,
     pub player: PlayerState,
     pub opponent: PlayerState,
     pub board: HexBoard,
@@ -30,6 +32,13 @@ pub struct MatchState {
 pub enum ReplayVisibility {
     Public,
     Revealed,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MatchMode {
+    Solo,
+    Shared,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -128,9 +137,11 @@ impl Serialize for MatchState {
     where
         S: serde::Serializer,
     {
-        let mut state = serializer.serialize_struct("MatchState", 7)?;
+        let mut state = serializer.serialize_struct("MatchState", 9)?;
+        state.serialize_field("mode", &self.mode)?;
         state.serialize_field("round", &self.round)?;
         state.serialize_field("phase", &self.phase)?;
+        state.serialize_field("activeSide", &self.active_side)?;
         state.serialize_field(
             "player",
             &PublicPlayerState {
@@ -223,20 +234,15 @@ pub struct Wizard {
     pub has_attacked: bool,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum WizardType {
+    #[default]
     Runekeeper,
     Pyromancer,
     Chronomancer,
     Warden,
     Battlemage,
-}
-
-impl Default for WizardType {
-    fn default() -> Self {
-        Self::Runekeeper
-    }
 }
 
 struct WizardProfile {
@@ -390,6 +396,7 @@ pub enum ActionTarget {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MatchError {
     MatchOver,
+    NotActiveSide,
     CardNotFound,
     NotEnoughMana,
     NoActionPoints,
@@ -416,6 +423,7 @@ impl fmt::Display for MatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
             Self::MatchOver => "the match is over",
+            Self::NotActiveSide => "it is not your turn",
             Self::CardNotFound => "card is no longer in hand",
             Self::NotEnoughMana => "not enough mana",
             Self::NoActionPoints => "not enough action points",
@@ -449,6 +457,23 @@ impl MatchState {
         Self::new_with_seed_and_player_wizard_type(seed, player_wizard_type)
     }
 
+    pub fn new_shared_with_wizard_types(
+        player_wizard_type: WizardType,
+        opponent_wizard_type: WizardType,
+    ) -> Self {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos() as u64)
+            .unwrap_or(1);
+
+        Self::new_with_seed_wizard_types_and_mode(
+            seed,
+            player_wizard_type,
+            opponent_wizard_type,
+            MatchMode::Shared,
+        )
+    }
+
     pub fn to_snapshot_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(&MatchSnapshot::from(self))
     }
@@ -469,8 +494,10 @@ impl MatchState {
 
     pub fn replay_value(&self, visibility: ReplayVisibility) -> serde_json::Value {
         json!({
+            "mode": self.mode,
             "round": self.round,
             "phase": self.phase,
+            "activeSide": self.active_side,
             "player": self.player.replay_value(true),
             "opponent": self.opponent.replay_value(visibility == ReplayVisibility::Revealed),
             "board": self.board,
@@ -488,9 +515,25 @@ impl MatchState {
     }
 
     fn new_with_seed_and_player_wizard_type(seed: u64, player_wizard_type: WizardType) -> Self {
+        Self::new_with_seed_wizard_types_and_mode(
+            seed,
+            player_wizard_type,
+            WizardType::Runekeeper,
+            MatchMode::Solo,
+        )
+    }
+
+    fn new_with_seed_wizard_types_and_mode(
+        seed: u64,
+        player_wizard_type: WizardType,
+        opponent_wizard_type: WizardType,
+        mode: MatchMode,
+    ) -> Self {
         let mut game = Self {
+            mode,
             round: 1,
             phase: Phase::Planning,
+            active_side: Side::Player,
             player: PlayerState::new(
                 Side::Player,
                 seed ^ 0xA11C_E551_1234_5678,
@@ -499,7 +542,7 @@ impl MatchState {
             opponent: PlayerState::new(
                 Side::Opponent,
                 seed ^ 0x0B0E_1234_9876_5432,
-                WizardType::Runekeeper,
+                opponent_wizard_type,
             ),
             board: HexBoard::new(BOARD_RADIUS),
             log: vec!["The wizards enter the hex arena.".to_string()],
@@ -519,7 +562,8 @@ impl MatchState {
 
     #[allow(dead_code, reason = "kept as the non-recording rules-engine API")]
     pub fn apply_action(&mut self, request: MatchActionRequest) -> Result<(), MatchError> {
-        self.apply_action_internal(request, None).map(|_| ())
+        self.apply_action_internal(Side::Player, request, None)
+            .map(|_| ())
     }
 
     pub fn apply_action_recording(
@@ -527,38 +571,86 @@ impl MatchState {
         request: MatchActionRequest,
         action_index: u32,
     ) -> Result<Vec<RecordedReplayFrame>, MatchError> {
-        self.apply_action_internal(request, Some(action_index))
+        self.apply_action_recording_for_side(Side::Player, request, action_index)
+    }
+
+    pub fn apply_action_recording_for_side(
+        &mut self,
+        side: Side,
+        request: MatchActionRequest,
+        action_index: u32,
+    ) -> Result<Vec<RecordedReplayFrame>, MatchError> {
+        self.apply_action_internal(side, request, Some(action_index))
+    }
+
+    pub fn forfeit_recording(
+        &mut self,
+        winner: Side,
+        action_index: u32,
+    ) -> Vec<RecordedReplayFrame> {
+        let mut frames = Vec::new();
+        if self.phase == Phase::MatchOver {
+            return frames;
+        }
+
+        self.phase = Phase::MatchOver;
+        self.winner = Some(winner);
+        self.log
+            .insert(0, format!("{} wins by forfeit.", winner.label()));
+        self.truncate_log();
+        self.record_replay_frame(
+            &mut frames,
+            Some(action_index),
+            ReplayEvent::MatchEnded { winner },
+        );
+        frames
+    }
+
+    pub fn public_value_for_side(&self, viewer_side: Side) -> serde_json::Value {
+        json!({
+            "mode": self.mode,
+            "round": self.round,
+            "phase": self.phase,
+            "activeSide": self.active_side,
+            "player": self.player.replay_value(viewer_side == Side::Player),
+            "opponent": self.opponent.replay_value(viewer_side == Side::Opponent),
+            "board": self.board,
+            "log": self.log,
+            "winner": self.winner,
+        })
     }
 
     fn apply_action_internal(
         &mut self,
+        side: Side,
         request: MatchActionRequest,
         action_index: Option<u32>,
     ) -> Result<Vec<RecordedReplayFrame>, MatchError> {
         if self.phase == Phase::MatchOver {
             return Err(MatchError::MatchOver);
         }
+        if self.mode == MatchMode::Shared && side != self.active_side {
+            return Err(MatchError::NotActiveSide);
+        }
 
         let mut frames = Vec::new();
         match request {
             MatchActionRequest::PlayCard { card_id, target } => {
-                self.play_card_for_side(Side::Player, card_id, target, &mut frames, action_index)
+                self.play_card_for_side(side, card_id, target, &mut frames, action_index)
             }
             MatchActionRequest::MovePiece { piece_id, to } => {
-                self.move_piece_for_side(Side::Player, &piece_id, to, &mut frames, action_index)
+                self.move_piece_for_side(side, &piece_id, to, &mut frames, action_index)
             }
             MatchActionRequest::Attack {
                 attacker_id,
                 target_id,
-            } => self.attack_for_side(
-                Side::Player,
-                &attacker_id,
-                &target_id,
-                &mut frames,
-                action_index,
-            ),
+            } => self.attack_for_side(side, &attacker_id, &target_id, &mut frames, action_index),
             MatchActionRequest::EndTurn => {
-                self.end_player_turn(&mut frames, action_index);
+                if self.mode == MatchMode::Shared {
+                    self.end_shared_turn(side, &mut frames, action_index);
+                } else {
+                    self.end_player_turn(&mut frames, action_index);
+                }
                 Ok(())
             }
         }?;
@@ -610,6 +702,37 @@ impl MatchState {
             );
         }
 
+        self.truncate_log();
+    }
+
+    fn end_shared_turn(
+        &mut self,
+        side: Side,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        self.log
+            .insert(0, format!("{} ended their turn.", side.label()));
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::TurnEnded {
+                side,
+                round: self.round,
+            },
+        );
+
+        if side == Side::Opponent {
+            self.round += 1;
+            self.log.insert(0, format!("Round {} begins.", self.round));
+            self.record_replay_frame(
+                frames,
+                action_index,
+                ReplayEvent::RoundStarted { round: self.round },
+            );
+        }
+
+        self.start_turn(side.opponent(), frames, action_index);
         self.truncate_log();
     }
 
@@ -1196,6 +1319,7 @@ impl MatchState {
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) {
+        self.active_side = side;
         let round_mana = (STARTING_MANA + (self.round - 1) as u8).min(MAX_MANA);
         let should_draw = self.player_ref(side).has_started_first_turn;
         let mut drawn = None;
@@ -1420,8 +1544,12 @@ impl MatchState {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MatchSnapshot {
+    #[serde(default = "default_match_mode")]
+    mode: MatchMode,
     round: u32,
     phase: Phase,
+    #[serde(default = "default_active_side")]
+    active_side: Side,
     player: PlayerState,
     opponent: PlayerState,
     board: HexBoard,
@@ -1434,7 +1562,9 @@ impl From<&MatchState> for MatchSnapshot {
     fn from(match_state: &MatchState) -> Self {
         Self {
             round: match_state.round,
+            mode: match_state.mode,
             phase: match_state.phase.clone(),
+            active_side: match_state.active_side,
             player: match_state.player.clone(),
             opponent: match_state.opponent.clone(),
             board: match_state.board.clone(),
@@ -1449,7 +1579,9 @@ impl From<MatchSnapshot> for MatchState {
     fn from(snapshot: MatchSnapshot) -> Self {
         Self {
             round: snapshot.round,
+            mode: snapshot.mode,
             phase: snapshot.phase,
+            active_side: snapshot.active_side,
             player: snapshot.player,
             opponent: snapshot.opponent,
             board: snapshot.board,
@@ -1458,6 +1590,14 @@ impl From<MatchSnapshot> for MatchState {
             next_unit_id: snapshot.next_unit_id,
         }
     }
+}
+
+fn default_match_mode() -> MatchMode {
+    MatchMode::Solo
+}
+
+fn default_active_side() -> Side {
+    Side::Player
 }
 
 impl HexBoard {
@@ -2207,6 +2347,45 @@ mod tests {
 
         assert_eq!(game.round, 2);
         assert_eq!(game.player.max_mana, 3);
+        assert_eq!(game.player.hand.len(), 5);
+    }
+
+    #[test]
+    fn shared_matches_reject_inactive_side_actions() {
+        let mut game = MatchState::new_with_seed_wizard_types_and_mode(
+            7,
+            WizardType::Runekeeper,
+            WizardType::Pyromancer,
+            MatchMode::Shared,
+        );
+
+        let result =
+            game.apply_action_recording_for_side(Side::Opponent, MatchActionRequest::EndTurn, 0);
+
+        assert_eq!(result.err(), Some(MatchError::NotActiveSide));
+    }
+
+    #[test]
+    fn shared_turns_pass_between_humans_without_running_ai() {
+        let mut game = MatchState::new_with_seed_wizard_types_and_mode(
+            7,
+            WizardType::Runekeeper,
+            WizardType::Pyromancer,
+            MatchMode::Shared,
+        );
+
+        game.apply_action_recording_for_side(Side::Player, MatchActionRequest::EndTurn, 0)
+            .expect("player can end their active turn");
+
+        assert_eq!(game.active_side, Side::Opponent);
+        assert_eq!(game.round, 1);
+        assert_eq!(game.opponent.wizard.wizard_type, WizardType::Pyromancer);
+
+        game.apply_action_recording_for_side(Side::Opponent, MatchActionRequest::EndTurn, 1)
+            .expect("opponent can end their active turn");
+
+        assert_eq!(game.active_side, Side::Player);
+        assert_eq!(game.round, 2);
         assert_eq!(game.player.hand.len(), 5);
     }
 

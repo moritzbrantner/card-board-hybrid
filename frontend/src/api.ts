@@ -1,11 +1,13 @@
 import type {
   ActionTarget,
   CatalogResponse,
+  CreateSharedMatchResponse,
   MatchArchiveResponse,
   MatchActionRequest,
   MatchReplayResponse,
   MatchResponse,
   MatchState,
+  SharedMatchResponse,
   HexCoord,
   WizardType,
 } from "./types";
@@ -43,6 +45,36 @@ export function createMatch(wizardType?: WizardType) {
     method: "POST",
     body: wizardType ? JSON.stringify({ wizardType }) : undefined,
   });
+}
+
+export function createSharedMatch(wizardType: WizardType) {
+  return request<CreateSharedMatchResponse>("/api/shared-matches", {
+    method: "POST",
+    body: JSON.stringify({ wizardType }),
+  });
+}
+
+export function loadSharedMatch(matchId: string, seatToken: string) {
+  return request<SharedMatchResponse>(
+    `/api/shared-matches/${encodeURIComponent(matchId)}/seats/${encodeURIComponent(seatToken)}`,
+  );
+}
+
+export function joinSharedMatch(matchId: string, seatToken: string, wizardType: WizardType) {
+  return request<SharedMatchResponse>(
+    `/api/shared-matches/${encodeURIComponent(matchId)}/seats/${encodeURIComponent(seatToken)}/join`,
+    {
+      method: "POST",
+      body: JSON.stringify({ wizardType }),
+    },
+  );
+}
+
+export function sharedMatchWebSocketUrl(matchId: string, seatToken: string) {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/api/shared-matches/${encodeURIComponent(
+    matchId,
+  )}/seats/${encodeURIComponent(seatToken)}/ws`;
 }
 
 export function loadMatch(matchId: string) {
