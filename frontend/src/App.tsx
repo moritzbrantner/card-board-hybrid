@@ -49,8 +49,14 @@ import type {
   Unit,
   Wizard,
   WizardType,
+  ActionTarget,
 } from "./types";
-import type { FormEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import type {
+  DragEvent as ReactDragEvent,
+  FormEvent,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+} from "react";
 
 type LoadState =
   | { status: "loading" }
@@ -701,6 +707,7 @@ function MatchPage({
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
+  const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [unitModalPieceId, setUnitModalPieceId] = useState<string | null>(null);
   const [unitContextMenu, setUnitContextMenu] = useState<UnitContextMenu>(null);
   const [busy, setBusy] = useState(false);
@@ -709,6 +716,7 @@ function MatchPage({
   useEffect(() => {
     setLoadState({ status: "loading" });
     setSelection(null);
+    setDraggedCardId(null);
     setUnitContextMenu(null);
     setUnitModalPieceId(null);
     setNotice(null);
@@ -778,6 +786,7 @@ function MatchPage({
       const match = await action();
       setLoadState({ status: "ready", match });
       setSelection(null);
+      setDraggedCardId(null);
       setUnitModalPieceId(null);
       setUnitContextMenu(null);
     } catch (error) {
@@ -839,11 +848,8 @@ function MatchPage({
     const piece = pieceAt(match, tile.coord);
 
     if (selectedCard) {
-      if (isLegalCardTarget(match, selectedCard, tile.coord, piece)) {
-        const target =
-          selectedCard.kind.type === "unit"
-            ? { type: "hex" as const, coord: tile.coord }
-            : { type: "piece" as const, pieceId: piece?.id ?? "" };
+      const target = cardTargetForTile(match, selectedCard, tile);
+      if (target) {
         void runAction(() => playCard(matchId, selectedCard.id, target));
       } else {
         setNotice("That card cannot target this hex.");
@@ -870,6 +876,39 @@ function MatchPage({
 
     setSelection(null);
     setUnitModalPieceId(null);
+  }
+
+  function handleCardDragStart(card: Card, event: ReactDragEvent<HTMLButtonElement>) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", card.id);
+    setUnitContextMenu(null);
+    setSelection({ type: "card", cardId: card.id });
+    setDraggedCardId(card.id);
+    setUnitModalPieceId(null);
+    setNotice(null);
+  }
+
+  function handleCardDrop(tile: HexTile, cardId: string) {
+    if (busy || match.phase === "matchOver") {
+      return;
+    }
+
+    const card = match.player.hand.find((candidate) => candidate.id === cardId);
+    if (!card) {
+      setNotice("That card is no longer in your hand.");
+      setDraggedCardId(null);
+      return;
+    }
+
+    const target = cardTargetForTile(match, card, tile);
+    if (!target) {
+      setNotice("That card cannot target this hex.");
+      setDraggedCardId(null);
+      return;
+    }
+
+    setDraggedCardId(null);
+    void runAction(() => playCard(matchId, card.id, target));
   }
 
   function handleUnitContextMenu(unit: BoardUnit, position: { x: number; y: number }) {
@@ -924,14 +963,42 @@ function MatchPage({
           <PlayerBadge player={match.opponent} />
         </section>
 
-        <Board
-          match={match}
-          selectedCard={selectedCard}
-          selectedPiece={selectedPiece}
-          disabled={busy || match.phase === "matchOver"}
-          onTileClick={handleTileClick}
-          onUnitContextMenu={handleUnitContextMenu}
-        />
+        <section className="battlefield">
+          <Board
+            match={match}
+            selectedCard={selectedCard}
+            selectedPiece={selectedPiece}
+            disabled={busy || match.phase === "matchOver"}
+            onTileClick={handleTileClick}
+            onTileDrop={handleCardDrop}
+            onUnitContextMenu={handleUnitContextMenu}
+          />
+          <div className="hand-overlay">
+            <div className="hand" aria-label="Hand">
+              {match.player.hand.map((card) => (
+                <CardButton
+                  key={card.id}
+                  card={card}
+                  selected={selection?.type === "card" && card.id === selection.cardId}
+                  dragging={draggedCardId === card.id}
+                  disabled={busy || !isPlayableCard(match, card)}
+                  onClick={() => {
+                    setUnitContextMenu(null);
+                    setSelection(
+                      selection?.type === "card" && card.id === selection.cardId
+                        ? null
+                        : { type: "card", cardId: card.id },
+                    );
+                    setUnitModalPieceId(null);
+                    setNotice(null);
+                  }}
+                  onDragStart={(event) => handleCardDragStart(card, event)}
+                  onDragEnd={() => setDraggedCardId(null)}
+                />
+              ))}
+            </div>
+          </div>
+        </section>
 
         <section className="hand-and-log">
           <div className="player-zone">
@@ -949,26 +1016,6 @@ function MatchPage({
                 status={match.player.discardCount === 0 ? "Empty" : "In pile"}
               />
             </section>
-            <div className="hand" aria-label="Hand">
-              {match.player.hand.map((card) => (
-                <CardButton
-                  key={card.id}
-                  card={card}
-                  selected={selection?.type === "card" && card.id === selection.cardId}
-                  disabled={busy || !isPlayableCard(match, card)}
-                  onClick={() => {
-                    setUnitContextMenu(null);
-                    setSelection(
-                      selection?.type === "card" && card.id === selection.cardId
-                        ? null
-                        : { type: "card", cardId: card.id },
-                    );
-                    setUnitModalPieceId(null);
-                    setNotice(null);
-                  }}
-                />
-              ))}
-            </div>
           </div>
           <aside className="log" aria-label="Match log">
             {notice ? <p className="notice">{notice}</p> : null}
@@ -1355,6 +1402,7 @@ function Board({
   disabled,
   readOnly = false,
   onTileClick,
+  onTileDrop,
   onUnitContextMenu,
 }: {
   match: MatchState;
@@ -1363,6 +1411,7 @@ function Board({
   disabled: boolean;
   readOnly?: boolean;
   onTileClick?: (tile: HexTile) => void;
+  onTileDrop?: (tile: HexTile, cardId: string) => void;
   onUnitContextMenu?: (unit: BoardUnit, position: { x: number; y: number }) => void;
 }) {
   const columns = groupTilesByColumn(match.board.tiles);
@@ -1391,6 +1440,25 @@ function Board({
                   disabled={disabled && !readOnly}
                   tabIndex={readOnly ? -1 : undefined}
                   onClick={() => onTileClick?.(tile)}
+                  onDragOver={(event: ReactDragEvent<HTMLButtonElement>) => {
+                    if (readOnly || disabled || !selectedCard || !isLegal) {
+                      return;
+                    }
+
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                  }}
+                  onDrop={(event: ReactDragEvent<HTMLButtonElement>) => {
+                    if (readOnly || disabled || !onTileDrop) {
+                      return;
+                    }
+
+                    event.preventDefault();
+                    const cardId = event.dataTransfer.getData("text/plain");
+                    if (cardId) {
+                      onTileDrop(tile, cardId);
+                    }
+                  }}
                   onContextMenu={(event: ReactMouseEvent<HTMLButtonElement>) => {
                     if (readOnly || piece?.pieceType !== "unit" || !onUnitContextMenu) {
                       return;
@@ -1446,20 +1514,29 @@ function PieceToken({ piece }: { piece: BoardPiece }) {
 function CardButton({
   card,
   selected,
+  dragging = false,
   disabled,
   onClick,
+  onDragStart,
+  onDragEnd,
 }: {
   card: Card;
   selected: boolean;
+  dragging?: boolean;
   disabled: boolean;
   onClick: () => void;
+  onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
+  onDragEnd?: () => void;
 }) {
   return (
     <button
-      className={`card-button ${selected ? "selected" : ""} ${card.rarity}`}
+      className={`card-button ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${card.rarity}`}
       type="button"
       disabled={disabled}
+      draggable={!disabled}
       onClick={onClick}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
     >
       <span className="card-cost">{card.cost}</span>
       <strong>{card.name}</strong>
@@ -1544,6 +1621,19 @@ function isPlayableCard(match: MatchState, card: Card) {
     match.player.mana >= card.cost &&
     match.player.wizard.apRemaining > 0
   );
+}
+
+function cardTargetForTile(match: MatchState, card: Card, tile: HexTile): ActionTarget | null {
+  const piece = pieceAt(match, tile.coord);
+  if (!isLegalCardTarget(match, card, tile.coord, piece)) {
+    return null;
+  }
+
+  if (card.kind.type === "unit") {
+    return { type: "hex", coord: tile.coord };
+  }
+
+  return piece ? { type: "piece", pieceId: piece.id } : null;
 }
 
 function isLegalCardTarget(

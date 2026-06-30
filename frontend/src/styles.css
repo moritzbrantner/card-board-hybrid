@@ -351,12 +351,16 @@ h1 {
   color: var(--muted);
 }
 
+.battlefield {
+  position: relative;
+}
+
 .board {
   display: grid;
   justify-items: center;
   max-width: 100%;
   overflow: auto;
-  padding: 30px;
+  padding: 30px 30px 194px;
   border: 1px solid rgba(217, 184, 79, 0.32);
   border-radius: 8px;
   background:
@@ -365,6 +369,18 @@ h1 {
   box-shadow: 0 24px 90px rgba(0, 0, 0, 0.34);
   overscroll-behavior-x: contain;
   scrollbar-gutter: stable both-edges;
+}
+
+.hand-overlay {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  z-index: 12;
+  display: flex;
+  width: min(900px, calc(100vw - 48px));
+  transform: translateX(-50%);
+  justify-content: center;
+  pointer-events: none;
 }
 
 .board.read-only .hex-tile {
@@ -470,6 +486,7 @@ h1 {
 .hand-and-log {
   align-items: stretch;
   margin-top: 16px;
+  margin-bottom: 212px;
 }
 
 .player-zone {
@@ -538,15 +555,26 @@ h1 {
 }
 
 .hand {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(128px, 1fr));
+  display: flex;
   gap: 10px;
+  width: min(860px, 100%);
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 12px;
+  border: 1px solid rgba(247, 243, 234, 0.16);
+  border-radius: 8px;
+  background: rgba(16, 19, 18, 0.72);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+  scrollbar-gutter: stable;
 }
 
 .card-button {
   position: relative;
   display: grid;
   align-content: start;
+  flex: 0 0 168px;
   gap: 8px;
   min-height: 178px;
   padding: 16px 12px 12px;
@@ -558,6 +586,11 @@ h1 {
     linear-gradient(160deg, rgba(88, 183, 161, 0.15), transparent 48%),
     #222827;
   cursor: pointer;
+}
+
+.card-button.dragging {
+  opacity: 0.72;
+  transform: translateY(-6px);
 }
 
 .card-button.advanced {
@@ -1126,7 +1159,7 @@ h1 {
 
   .board {
     justify-items: start;
-    padding: 18px;
+    padding: 18px 18px 184px;
   }
 
   .player-zone {
@@ -1134,8 +1167,12 @@ h1 {
   }
 
   .hand {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
+  }
+
+  .hand-overlay {
+    bottom: 14px;
+    width: calc(100vw - 28px);
   }
 
   .log {
@@ -1193,7 +1230,11 @@ h1 {
   }
 
   .hand {
-    grid-template-columns: 1fr;
+    padding: 10px;
+  }
+
+  .card-button {
+    flex-basis: 154px;
   }
 
   .player-badge {
