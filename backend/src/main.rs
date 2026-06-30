@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
-use axum::http::{Method, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -19,8 +19,8 @@ use match_session::{
     MatchActionRequest, MatchMode, MatchState, ReplayEvent, ReplayVisibility, Side, WizardType,
 };
 use match_store::{
-    CreatedSharedMatch, MatchStoreError, SharedMatchStatus, SqliteMatchStore, StoredMatch,
-    StoredMatchSummary, StoredReplayFrame, StoredSharedMatch,
+    CreatedAuthSession, CreatedSharedMatch, MatchStoreError, SharedMatchStatus, SqliteMatchStore,
+    StoredMatch, StoredMatchSummary, StoredReplayFrame, StoredSharedMatch, StoredUser,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -59,6 +59,33 @@ impl AppState {
 #[derive(Serialize)]
 struct ApiError {
     message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthRequest {
+    email: String,
+    password: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthUserResponse {
+    id: i64,
+    email: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthSessionResponse {
+    token: String,
+    user: AuthUserResponse,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthMessageResponse {
+    message: &'static str,
 }
 
 #[derive(Deserialize)]
@@ -210,6 +237,10 @@ fn create_app(store: SqliteMatchStore) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/catalog/cards", get(catalog_cards))
+        .route("/api/auth/register", post(register_account))
+        .route("/api/auth/login", post(login_account))
+        .route("/api/auth/logout", post(logout_account))
+        .route("/api/auth/me", get(current_account))
         .route("/api/matches", get(list_matches).post(create_match))
         .route("/api/matches/{match_id}", get(load_match))
         .route("/api/matches/{match_id}/replay", get(load_replay))
@@ -252,13 +283,128 @@ async fn catalog_cards() -> impl IntoResponse {
     })
 }
 
-async fn list_matches(State(state): State<SharedState>) -> impl IntoResponse {
+async fn register_account(
+    State(state): State<SharedState>,
+    Json(request): Json<AuthRequest>,
+) -> impl IntoResponse {
+    let Some((email, normalized_email)) = normalized_email(&request.email) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError {
+                message: "Enter a valid email address.".to_string(),
+            }),
+        )
+            .into_response();
+    };
+    if request.password.len() < 8 && !normalized_email.ends_with("@local.dev") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError {
+                message: "Password must be at least 8 characters.".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    let session = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let user = match store.create_user(&email, &normalized_email, &request.password) {
+            Ok(Some(user)) => user,
+            Ok(None) => {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(ApiError {
+                        message: "That email already has an account.".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+            Err(error) => return store_error_response(error),
+        };
+        match store.create_auth_session(user) {
+            Ok(session) => session,
+            Err(error) => return store_error_response(error),
+        }
+    };
+
+    Json(AuthSessionResponse::from(session)).into_response()
+}
+
+async fn login_account(
+    State(state): State<SharedState>,
+    Json(request): Json<AuthRequest>,
+) -> impl IntoResponse {
+    let Some((_, normalized_email)) = normalized_email(&request.email) else {
+        return invalid_credentials_response();
+    };
+
+    let session = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let user = match store.authenticate_user(&normalized_email, &request.password) {
+            Ok(Some(user)) => user,
+            Ok(None) => return invalid_credentials_response(),
+            Err(error) => return store_error_response(error),
+        };
+        match store.create_auth_session(user) {
+            Ok(session) => session,
+            Err(error) => return store_error_response(error),
+        }
+    };
+
+    Json(AuthSessionResponse::from(session)).into_response()
+}
+
+async fn current_account(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    match required_user_from_headers(&state, &headers) {
+        Ok(user) => Json(AuthUserResponse::from(user)).into_response(),
+        Err(response) => response,
+    }
+}
+
+async fn logout_account(State(state): State<SharedState>, headers: HeaderMap) -> impl IntoResponse {
+    let Some(token) = bearer_token_from_headers(&headers) else {
+        return Json(AuthMessageResponse {
+            message: "Signed out",
+        })
+        .into_response();
+    };
+
+    {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        if let Err(error) = store.delete_auth_session(&token) {
+            return store_error_response(error);
+        }
+    }
+
+    Json(AuthMessageResponse {
+        message: "Signed out",
+    })
+    .into_response()
+}
+
+async fn list_matches(State(state): State<SharedState>, headers: HeaderMap) -> impl IntoResponse {
+    let user = match optional_user_from_headers(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
     let matches = {
         let store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        match store.list_replayable_matches() {
+        match store.list_replayable_matches_for_user(user.as_ref().map(|user| user.id)) {
             Ok(matches) => matches,
             Err(error) => return store_error_response(error),
         }
@@ -270,7 +416,15 @@ async fn list_matches(State(state): State<SharedState>) -> impl IntoResponse {
     .into_response()
 }
 
-async fn create_match(State(state): State<SharedState>, body: Bytes) -> impl IntoResponse {
+async fn create_match(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    let user = match optional_user_from_headers(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
     let wizard_type = if body.is_empty() || body.iter().all(|byte| byte.is_ascii_whitespace()) {
         None
     } else {
@@ -294,8 +448,11 @@ async fn create_match(State(state): State<SharedState>, body: Bytes) -> impl Int
             .lock()
             .expect("store lock should not be poisoned");
         let result = match wizard_type {
-            Some(wizard_type) => store.create_match_with_wizard_type(wizard_type),
-            None => store.create_match(),
+            Some(wizard_type) => {
+                store.create_match_for_user(wizard_type, user.as_ref().map(|user| user.id))
+            }
+            None => store
+                .create_match_for_user(WizardType::default(), user.as_ref().map(|user| user.id)),
         };
         match result {
             Ok(created) => created,
@@ -675,26 +832,29 @@ fn unix_timestamp() -> i64 {
 
 async fn load_match(
     State(state): State<SharedState>,
+    headers: HeaderMap,
     Path(match_id): Path<String>,
 ) -> impl IntoResponse {
+    let user = match optional_user_from_headers(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
     let loaded = {
         let store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        match store.load_match(&match_id) {
+        let loaded = match store.load_match(&match_id) {
             Ok(Some(loaded)) => loaded,
             Ok(None) => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(ApiError {
-                        message: format!("Match {match_id} was not found"),
-                    }),
-                )
-                    .into_response();
+                return match_not_found_response(&match_id);
             }
             Err(error) => return store_error_response(error),
+        };
+        if !match_is_accessible(&store, &match_id, user.as_ref()) {
+            return match_not_found_response(&match_id);
         }
+        loaded
     };
 
     Json(MatchResponse::from(loaded)).into_response()
@@ -702,26 +862,29 @@ async fn load_match(
 
 async fn load_replay(
     State(state): State<SharedState>,
+    headers: HeaderMap,
     Path(match_id): Path<String>,
 ) -> impl IntoResponse {
+    let user = match optional_user_from_headers(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
     let replay = {
         let store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        match store.load_replay(&match_id) {
+        let replay = match store.load_replay(&match_id) {
             Ok(Some(replay)) => replay,
             Ok(None) => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(ApiError {
-                        message: format!("Replay for match {match_id} was not found"),
-                    }),
-                )
-                    .into_response();
+                return replay_not_found_response(&match_id);
             }
             Err(error) => return store_error_response(error),
+        };
+        if !match_is_accessible(&store, &match_id, user.as_ref()) {
+            return replay_not_found_response(&match_id);
         }
+        replay
     };
 
     if replay.summary.state.mode == MatchMode::Shared && replay.summary.state.winner.is_none() {
@@ -758,9 +921,14 @@ async fn load_replay(
 
 async fn apply_match_action(
     State(state): State<SharedState>,
+    headers: HeaderMap,
     Path(match_id): Path<String>,
     Json(request): Json<MatchActionRequest>,
 ) -> impl IntoResponse {
+    let user = match optional_user_from_headers(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
     let saved = {
         let mut store = state
             .store
@@ -779,6 +947,9 @@ async fn apply_match_action(
             }
             Err(error) => return store_error_response(error),
         };
+        if !match_is_accessible(&store, &match_id, user.as_ref()) {
+            return match_not_found_response(&match_id);
+        }
 
         let action_index = match store.next_action_index(&match_id) {
             Ok(action_index) => action_index,
@@ -827,6 +998,46 @@ fn store_error_response(error: MatchStoreError) -> axum::response::Response {
         .into_response()
 }
 
+fn invalid_credentials_response() -> axum::response::Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(ApiError {
+            message: "Email or password is incorrect.".to_string(),
+        }),
+    )
+        .into_response()
+}
+
+fn unauthorized_response() -> axum::response::Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(ApiError {
+            message: "Sign in to continue.".to_string(),
+        }),
+    )
+        .into_response()
+}
+
+fn match_not_found_response(match_id: &str) -> axum::response::Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ApiError {
+            message: format!("Match {match_id} was not found"),
+        }),
+    )
+        .into_response()
+}
+
+fn replay_not_found_response(match_id: &str) -> axum::response::Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ApiError {
+            message: format!("Replay for match {match_id} was not found"),
+        }),
+    )
+        .into_response()
+}
+
 fn shared_not_found_response() -> axum::response::Response {
     (
         StatusCode::NOT_FOUND,
@@ -835,6 +1046,83 @@ fn shared_not_found_response() -> axum::response::Response {
         }),
     )
         .into_response()
+}
+
+fn normalized_email(email: &str) -> Option<(String, String)> {
+    let trimmed = email.trim();
+    if trimmed.is_empty() || !trimmed.contains('@') {
+        return None;
+    }
+    let normalized = trimmed.to_ascii_lowercase();
+    Some((trimmed.to_string(), normalized))
+}
+
+fn bearer_token_from_headers(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    value
+        .strip_prefix("Bearer ")
+        .filter(|token| !token.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn optional_user_from_headers(
+    state: &SharedState,
+    headers: &HeaderMap,
+) -> Result<Option<StoredUser>, axum::response::Response> {
+    let Some(token) = bearer_token_from_headers(headers) else {
+        return Ok(None);
+    };
+
+    let user = {
+        let store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        match store.load_user_by_session(&token) {
+            Ok(user) => user,
+            Err(error) => return Err(store_error_response(error)),
+        }
+    };
+
+    user.map(Some).ok_or_else(unauthorized_response)
+}
+
+fn required_user_from_headers(
+    state: &SharedState,
+    headers: &HeaderMap,
+) -> Result<StoredUser, axum::response::Response> {
+    optional_user_from_headers(state, headers)?.ok_or_else(unauthorized_response)
+}
+
+fn match_is_accessible(
+    store: &SqliteMatchStore,
+    match_id: &str,
+    user: Option<&StoredUser>,
+) -> bool {
+    match store.match_owner_user_id(match_id) {
+        Ok(Some(Some(owner_user_id))) => user.is_some_and(|user| user.id == owner_user_id),
+        Ok(Some(None)) => true,
+        Ok(None) => false,
+        Err(_) => false,
+    }
+}
+
+impl From<StoredUser> for AuthUserResponse {
+    fn from(user: StoredUser) -> Self {
+        Self {
+            id: user.id,
+            email: user.email,
+        }
+    }
+}
+
+impl From<CreatedAuthSession> for AuthSessionResponse {
+    fn from(session: CreatedAuthSession) -> Self {
+        Self {
+            token: session.token,
+            user: AuthUserResponse::from(session.user),
+        }
+    }
 }
 
 impl From<StoredMatch> for MatchResponse {
@@ -962,6 +1250,114 @@ mod tests {
         url.rsplit('/')
             .next()
             .expect("seat URL should end in token")
+    }
+
+    async fn register_test_account(app: Router, email: &str) -> String {
+        let (status, body) = json_request(
+            app,
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(format!(
+                    r#"{{"email":"{email}","password":"password123"}}"#
+                )))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        body["token"]
+            .as_str()
+            .expect("token should exist")
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn account_registration_creates_a_session_for_current_user() {
+        let path = test_db_path("auth-register");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let token = register_test_account(app.clone(), "player@example.com").await;
+        assert!(!token.is_empty());
+
+        let (status, current_user) = json_request(
+            app,
+            Request::builder()
+                .uri("/api/auth/me")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(current_user["email"], "player@example.com");
+        assert!(current_user["id"].as_i64().unwrap() > 0);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn signed_in_match_archive_only_lists_that_users_matches() {
+        let path = test_db_path("auth-archive-scope");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let first_token = register_test_account(app.clone(), "first@example.com").await;
+        let second_token = register_test_account(app.clone(), "second@example.com").await;
+
+        let (_, first_match) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .header("authorization", format!("Bearer {first_token}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        let first_match_id = first_match["matchId"].as_str().unwrap().to_string();
+
+        let (_, second_match) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .header("authorization", format!("Bearer {second_token}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        let second_match_id = second_match["matchId"].as_str().unwrap().to_string();
+
+        let (status, first_archive) = json_request(
+            app.clone(),
+            Request::builder()
+                .uri("/api/matches")
+                .header("authorization", format!("Bearer {first_token}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(first_archive["matches"].as_array().unwrap().len(), 1);
+        assert_eq!(first_archive["matches"][0]["matchId"], first_match_id);
+
+        let (status, second_load_from_first_user) = json_request(
+            app,
+            Request::builder()
+                .uri(format!("/api/matches/{second_match_id}"))
+                .header("authorization", format!("Bearer {first_token}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(
+            second_load_from_first_user["message"],
+            format!("Match {second_match_id} was not found")
+        );
+
+        let _ = fs::remove_file(path);
     }
 
     #[tokio::test]

@@ -12,6 +12,8 @@ import {
   House,
   Layers,
   LibraryBig,
+  LogIn,
+  LogOut,
   Play,
   Plus,
   RotateCcw,
@@ -20,6 +22,7 @@ import {
   Sparkles,
   Sword,
   Users,
+  UserPlus,
   WandSparkles,
   Wifi,
   X,
@@ -28,20 +31,29 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   attack,
+  clearAuthToken,
   createMatch,
   createSharedMatch,
   endTurn,
+  getAuthToken,
   joinSharedMatch,
+  loadCurrentAccount,
   loadCatalog,
   loadMatch,
   loadMatches,
   loadReplay,
   loadSharedMatch,
+  loginAccount,
+  logoutAccount,
   movePiece,
   playCard,
+  registerAccount,
+  saveAuthToken,
   sharedMatchWebSocketUrl,
 } from "./api";
 import type {
+  AuthSessionResponse,
+  AuthUser,
   Card,
   CatalogCard,
   HexCoord,
@@ -94,6 +106,11 @@ type SharedLoadState =
   | { status: "ready"; shared: SharedMatchResponse }
   | { status: "error"; message: string };
 
+type AuthState =
+  | { status: "loading" }
+  | { status: "signedOut" }
+  | { status: "signedIn"; user: AuthUser };
+
 type Selection =
   | { type: "card"; cardId: string }
   | { type: "piece"; pieceId: string }
@@ -123,6 +140,11 @@ type WizardOption = {
   ap: number;
   text: string;
   token: string;
+};
+
+type AccountProps = {
+  currentUser: AuthUser;
+  onSignOut: () => void;
 };
 
 const WIZARD_OPTIONS = [
@@ -180,6 +202,9 @@ const WIZARD_OPTIONS = [
 
 export function App() {
   const [path, setPath] = useState(() => window.location.pathname);
+  const [authState, setAuthState] = useState<AuthState>(() =>
+    getAuthToken() ? { status: "loading" } : { status: "signedOut" },
+  );
 
   useEffect(() => {
     const handlePopState = () => setPath(window.location.pathname);
@@ -187,26 +212,92 @@ export function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
+  useEffect(() => {
+    if (!getAuthToken()) {
+      setAuthState({ status: "signedOut" });
+      return;
+    }
+
+    let cancelled = false;
+    loadCurrentAccount()
+      .then((user) => {
+        if (!cancelled) {
+          setAuthState({ status: "signedIn", user });
+        }
+      })
+      .catch(() => {
+        clearAuthToken();
+        if (!cancelled) {
+          setAuthState({ status: "signedOut" });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function navigate(to: string) {
     window.history.pushState(null, "", to);
     setPath(window.location.pathname);
   }
 
-  if (path === "/" || path === "") {
-    return <MatchPicker onNavigate={navigate} />;
+  function handleAuthenticated(session: AuthSessionResponse) {
+    saveAuthToken(session.token);
+    setAuthState({ status: "signedIn", user: session.user });
   }
 
-  if (path.replace(/\/+$/, "") === "/catalog") {
+  async function handleSignOut() {
+    try {
+      await logoutAccount();
+    } catch {
+      // Local sign-out should still clear stale sessions if the server is unavailable.
+    }
+    clearAuthToken();
+    setAuthState({ status: "signedOut" });
+    navigate("/");
+  }
+
+  const normalizedPath = path.replace(/\/+$/, "");
+  if (normalizedPath === "/catalog") {
     return <CatalogPage onNavigate={navigate} />;
   }
 
-  if (path.replace(/\/+$/, "") === "/matches") {
-    return <MatchArchivePage onNavigate={navigate} />;
+  if (authState.status === "loading") {
+    return <ShellMessage title="Rune Lanes" message="Checking account" />;
+  }
+
+  if (authState.status === "signedOut") {
+    return <AuthPage onAuthenticated={handleAuthenticated} />;
+  }
+
+  const currentUser = authState.user;
+
+  if (path === "/" || path === "") {
+    return <MatchPicker onNavigate={navigate} currentUser={currentUser} onSignOut={handleSignOut} />;
+  }
+
+  if (normalizedPath === "/matches") {
+    return (
+      <MatchArchivePage
+        onNavigate={navigate}
+        currentUser={currentUser}
+        onSignOut={handleSignOut}
+      />
+    );
   }
 
   const replayRoute = replayRouteFromPath(path);
   if (replayRoute) {
-    return <ReplayPage key={replayRoute} matchId={replayRoute} onNavigate={navigate} />;
+    return (
+      <ReplayPage
+        key={replayRoute}
+        matchId={replayRoute}
+        onNavigate={navigate}
+        currentUser={currentUser}
+        onSignOut={handleSignOut}
+      />
+    );
   }
 
   const sharedMatchRoute = sharedMatchRouteFromPath(path);
@@ -217,13 +308,23 @@ export function App() {
         matchId={sharedMatchRoute.matchId}
         seatToken={sharedMatchRoute.seatToken}
         onNavigate={navigate}
+        currentUser={currentUser}
+        onSignOut={handleSignOut}
       />
     );
   }
 
   const matchRoute = matchRouteFromPath(path);
   if (matchRoute) {
-    return <MatchPage key={matchRoute} matchId={matchRoute} onNavigate={navigate} />;
+    return (
+      <MatchPage
+        key={matchRoute}
+        matchId={matchRoute}
+        onNavigate={navigate}
+        currentUser={currentUser}
+        onSignOut={handleSignOut}
+      />
+    );
   }
 
   return (
@@ -477,7 +578,105 @@ function DetailStat({ label, value }: { label: string; value: string | number })
   );
 }
 
-function MatchPicker({ onNavigate }: { onNavigate: (to: string) => void }) {
+function AuthPage({
+  onAuthenticated,
+}: {
+  onAuthenticated: (session: AuthSessionResponse) => void;
+}) {
+  const [mode, setMode] = useState<"register" | "login">("register");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setNotice(null);
+    try {
+      const session =
+        mode === "register"
+          ? await registerAccount(email, password)
+          : await loginAccount(email, password);
+      onAuthenticated(session);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not authenticate");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="app-shell picker-shell">
+      <section className="match-picker auth-panel" aria-label="Account access">
+        <div>
+          <p className="eyebrow">Rune Lanes</p>
+          <h1>{mode === "register" ? "Create Account" : "Sign In"}</h1>
+        </div>
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <label htmlFor="auth-email">Email</label>
+          <input
+            id="auth-email"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            autoComplete="email"
+            required
+          />
+          <label htmlFor="auth-password">Password</label>
+          <input
+            id="auth-password"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete={mode === "register" ? "new-password" : "current-password"}
+            minLength={
+              mode === "register" && !email.trim().toLocaleLowerCase().endsWith("@local.dev")
+                ? 8
+                : 1
+            }
+            required
+          />
+          <button className="primary-button" type="submit" disabled={busy}>
+            {mode === "register" ? <UserPlus size={18} /> : <LogIn size={18} />}
+            {mode === "register" ? "Create Account" : "Sign In"}
+          </button>
+        </form>
+        <button
+          className="secondary-link"
+          type="button"
+          onClick={() => {
+            setMode(mode === "register" ? "login" : "register");
+            setNotice(null);
+          }}
+          disabled={busy}
+        >
+          {mode === "register" ? "I already have an account" : "Create a new account"}
+        </button>
+        {notice ? <p className="notice">{notice}</p> : null}
+      </section>
+    </main>
+  );
+}
+
+function AccountActions({ currentUser, onSignOut }: AccountProps) {
+  return (
+    <div className="account-actions">
+      <span>{currentUser.email}</span>
+      <button className="icon-button" type="button" onClick={onSignOut} title="Sign out">
+        <LogOut size={18} />
+      </button>
+    </div>
+  );
+}
+
+function MatchPicker({
+  onNavigate,
+  currentUser,
+  onSignOut,
+}: {
+  onNavigate: (to: string) => void;
+} & AccountProps) {
   const [matchId, setMatchId] = useState("");
   const [selectedWizardType, setSelectedWizardType] = useState<WizardType>("runekeeper");
   const [busy, setBusy] = useState(false);
@@ -527,10 +726,13 @@ function MatchPicker({ onNavigate }: { onNavigate: (to: string) => void }) {
   return (
     <main className="app-shell picker-shell">
       <section className="match-picker" aria-label="Match picker">
-        <div>
-          <p className="eyebrow">Rune Lanes</p>
-          <h1>Choose Your Wizard</h1>
-        </div>
+        <header className="picker-header">
+          <div>
+            <p className="eyebrow">Rune Lanes</p>
+            <h1>Choose Your Wizard</h1>
+          </div>
+          <AccountActions currentUser={currentUser} onSignOut={onSignOut} />
+        </header>
         <fieldset className="wizard-picker" aria-label="Wizard type">
           <legend>Wizard Type</legend>
           <div className="wizard-options">
@@ -618,7 +820,13 @@ function MatchPicker({ onNavigate }: { onNavigate: (to: string) => void }) {
   );
 }
 
-function MatchArchivePage({ onNavigate }: { onNavigate: (to: string) => void }) {
+function MatchArchivePage({
+  onNavigate,
+  currentUser,
+  onSignOut,
+}: {
+  onNavigate: (to: string) => void;
+} & AccountProps) {
   const [loadState, setLoadState] = useState<MatchArchiveLoadState>({ status: "loading" });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -674,6 +882,7 @@ function MatchArchivePage({ onNavigate }: { onNavigate: (to: string) => void }) 
             <h1>Match Archive</h1>
           </div>
           <div className="actions">
+            <AccountActions currentUser={currentUser} onSignOut={onSignOut} />
             <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Match picker">
               <House size={18} />
             </button>
@@ -823,10 +1032,12 @@ function LobbySeatStatus({
 function MatchPage({
   matchId,
   onNavigate,
+  currentUser,
+  onSignOut,
 }: {
   matchId: string;
   onNavigate: (to: string) => void;
-}) {
+} & AccountProps) {
   const viewerSide: Side = "player";
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
@@ -1057,6 +1268,7 @@ function MatchPage({
             <p className="match-id">Match {matchId}</p>
           </div>
           <div className="actions">
+            <AccountActions currentUser={currentUser} onSignOut={onSignOut} />
             <button
               className="icon-button"
               type="button"
@@ -1176,11 +1388,13 @@ function SharedMatchPage({
   matchId,
   seatToken,
   onNavigate,
+  currentUser,
+  onSignOut,
 }: {
   matchId: string;
   seatToken: string;
   onNavigate: (to: string) => void;
-}) {
+} & AccountProps) {
   const [loadState, setLoadState] = useState<SharedLoadState>({ status: "loading" });
   const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
@@ -1500,11 +1714,14 @@ function SharedMatchPage({
     return (
       <main className="app-shell picker-shell">
         <section className="match-picker" aria-label="Shared match setup">
-          <div>
-            <p className="eyebrow">Rune Lanes Multiplayer</p>
-            <h1>Lobby</h1>
-            <p className="match-id">Match {matchId}</p>
-          </div>
+          <header className="picker-header">
+            <div>
+              <p className="eyebrow">Rune Lanes Multiplayer</p>
+              <h1>Lobby</h1>
+              <p className="match-id">Match {matchId}</p>
+            </div>
+            <AccountActions currentUser={currentUser} onSignOut={onSignOut} />
+          </header>
           {viewerSide === "player" ? (
             <div className="share-panel">
               <span>Invite Link</span>
@@ -1571,6 +1788,7 @@ function SharedMatchPage({
             <p className="match-id">Match {matchId}</p>
           </div>
           <div className="actions">
+            <AccountActions currentUser={currentUser} onSignOut={onSignOut} />
             <button
               className="icon-button"
               type="button"
@@ -1703,10 +1921,12 @@ function SharedMatchPage({
 function ReplayPage({
   matchId,
   onNavigate,
+  currentUser,
+  onSignOut,
 }: {
   matchId: string;
   onNavigate: (to: string) => void;
-}) {
+} & AccountProps) {
   const [loadState, setLoadState] = useState<ReplayLoadState>({ status: "loading" });
   const [frameIndex, setFrameIndex] = useState(0);
 
@@ -1757,6 +1977,7 @@ function ReplayPage({
             <p className="match-id">Match {matchId}</p>
           </div>
           <div className="actions">
+            <AccountActions currentUser={currentUser} onSignOut={onSignOut} />
             <button
               className="icon-button"
               type="button"

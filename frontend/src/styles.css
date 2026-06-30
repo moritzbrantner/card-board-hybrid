@@ -90,6 +90,61 @@ button {
   margin: 0 auto;
 }
 
+.picker-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.auth-panel {
+  width: min(460px, 100%);
+}
+
+.auth-form {
+  display: grid;
+  gap: 8px;
+}
+
+.auth-form label {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.auth-form input {
+  min-height: 42px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: #fffaf0;
+  background: var(--panel);
+  font: inherit;
+}
+
+.auth-form .primary-button {
+  margin-top: 6px;
+}
+
+.account-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.account-actions > span {
+  max-width: min(240px, 32vw);
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .picker-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1199,9 +1254,18 @@ h1 {
 
   .top-bar,
   .score-row,
-  .hand-and-log {
+  .hand-and-log,
+  .picker-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .account-actions {
+    justify-content: space-between;
+  }
+
+  .account-actions > span {
+    max-width: calc(100vw - 100px);
   }
 
   h1 {

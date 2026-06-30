@@ -66,6 +66,16 @@ export type CatalogResponse = {
   cards: CatalogCard[];
 };
 
+export type AuthUser = {
+  id: number;
+  email: string;
+};
+
+export type AuthSessionResponse = {
+  token: string;
+  user: AuthUser;
+};
+
 export type Wizard = {
   id: string;
   side: Side;
