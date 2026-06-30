@@ -157,6 +157,10 @@ export type SharedMatchResponse = {
   mode: "shared";
   status: SharedMatchStatus;
   viewerSide: Side;
+  viewerWizardType: WizardType | null;
+  opponentWizardType: WizardType | null;
+  viewerReady: boolean;
+  opponentReady: boolean;
   activeSide: Side | null;
   opponentConnected: boolean;
   canClaimForfeitAt: number | null;

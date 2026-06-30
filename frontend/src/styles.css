@@ -238,6 +238,39 @@ button {
   font-size: 0.9rem;
 }
 
+.lobby-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lobby-seat-status {
+  display: grid;
+  gap: 5px;
+  min-height: 70px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--panel);
+}
+
+.lobby-seat-status.ready {
+  border-color: rgba(119, 179, 111, 0.72);
+}
+
+.lobby-seat-status span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.lobby-seat-status strong {
+  overflow-wrap: anywhere;
+  color: #fffaf0;
+  line-height: 1.15;
+}
+
 .top-bar,
 .score-row,
 .hand-and-log {

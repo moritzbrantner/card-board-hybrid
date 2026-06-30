@@ -505,6 +505,7 @@ function MatchPicker({ onNavigate }: { onNavigate: (to: string) => void }) {
         `rune-lanes-invite:${created.matchId}`,
         `${window.location.origin}${created.inviteSeatUrl}`,
       );
+      sessionStorage.setItem(`rune-lanes-wizard:${created.matchId}`, selectedWizardType);
       onNavigate(created.playerSeatUrl);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not create multiplayer match");
@@ -799,6 +800,23 @@ function WizardPicker({
         ))}
       </div>
     </fieldset>
+  );
+}
+
+function LobbySeatStatus({
+  label,
+  ready,
+  wizardName,
+}: {
+  label: string;
+  ready: boolean;
+  wizardName: string | null;
+}) {
+  return (
+    <div className={`lobby-seat-status ${ready ? "ready" : ""}`}>
+      <span>{label}</span>
+      <strong>{ready ? (wizardName ?? "Ready") : "Choosing"}</strong>
+    </div>
   );
 }
 
@@ -1169,7 +1187,10 @@ function SharedMatchPage({
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [unitModalPieceId, setUnitModalPieceId] = useState<string | null>(null);
   const [unitContextMenu, setUnitContextMenu] = useState<UnitContextMenu>(null);
-  const [selectedWizardType, setSelectedWizardType] = useState<WizardType>("runekeeper");
+  const [selectedWizardType, setSelectedWizardType] = useState<WizardType>(() => {
+    const stored = sessionStorage.getItem(`rune-lanes-wizard:${matchId}`);
+    return isWizardType(stored) ? stored : "runekeeper";
+  });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
@@ -1254,6 +1275,12 @@ function SharedMatchPage({
   const viewerSide = shared?.viewerSide ?? "player";
   const isActiveViewer = Boolean(match && shared?.activeSide === viewerSide);
 
+  useEffect(() => {
+    if (shared?.status === "setup" && shared.viewerWizardType) {
+      setSelectedWizardType(shared.viewerWizardType);
+    }
+  }, [shared?.status, shared?.viewerWizardType]);
+
   const selectedCard = useMemo(() => {
     if (!match || selection?.type !== "card") {
       return null;
@@ -1334,12 +1361,18 @@ function SharedMatchPage({
     setNotice(null);
     try {
       const joined = await joinSharedMatch(matchId, seatToken, selectedWizardType);
+      sessionStorage.setItem(`rune-lanes-wizard:${matchId}`, selectedWizardType);
       setLoadState({ status: "ready", shared: joined });
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not join match");
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleSelectLobbyWizard(wizardType: WizardType) {
+    setSelectedWizardType(wizardType);
+    sessionStorage.setItem(`rune-lanes-wizard:${matchId}`, wizardType);
   }
 
   function handleTileClick(tile: HexTile) {
@@ -1452,48 +1485,71 @@ function SharedMatchPage({
     const inviteUrl =
       sessionStorage.getItem(`rune-lanes-invite:${matchId}`) ??
       "Invite link unavailable after reload.";
+    const hasUnsavedWizardChoice = shared.viewerWizardType !== selectedWizardType;
+    const savedWizard = shared.viewerWizardType ? wizardOptionByType(shared.viewerWizardType) : null;
+    const opponentWizard = shared.opponentWizardType
+      ? wizardOptionByType(shared.opponentWizardType)
+      : null;
+    const lobbyActionLabel = shared.viewerReady
+      ? hasUnsavedWizardChoice
+        ? "Update Wizard"
+        : "Ready"
+      : viewerSide === "player"
+        ? "Ready"
+        : "Join Lobby";
     return (
       <main className="app-shell picker-shell">
         <section className="match-picker" aria-label="Shared match setup">
           <div>
             <p className="eyebrow">Rune Lanes Multiplayer</p>
-            <h1>{viewerSide === "player" ? "Invite Player" : "Choose Your Wizard"}</h1>
+            <h1>Lobby</h1>
             <p className="match-id">Match {matchId}</p>
           </div>
           {viewerSide === "player" ? (
-            <>
-              <div className="share-panel">
-                <span>Invite Link</span>
-                <strong>{inviteUrl}</strong>
-                <button
-                  className="primary-button"
-                  type="button"
-                  onClick={() => void navigator.clipboard?.writeText(inviteUrl)}
-                >
-                  <Copy size={18} />
-                  Copy
-                </button>
-              </div>
-              <p className="notice">Waiting for the invited player to choose a wizard.</p>
-            </>
-          ) : (
-            <>
-              <WizardPicker
-                selectedWizardType={selectedWizardType}
-                busy={busy}
-                onSelect={setSelectedWizardType}
-              />
+            <div className="share-panel">
+              <span>Invite Link</span>
+              <strong>{inviteUrl}</strong>
               <button
                 className="primary-button"
                 type="button"
-                onClick={() => void handleJoinSharedMatch()}
-                disabled={busy}
+                onClick={() => void navigator.clipboard?.writeText(inviteUrl)}
               >
-                <Users size={18} />
-                Join Match
+                <Copy size={18} />
+                Copy
               </button>
-            </>
-          )}
+            </div>
+          ) : null}
+          <WizardPicker
+            selectedWizardType={selectedWizardType}
+            busy={busy}
+            onSelect={handleSelectLobbyWizard}
+          />
+          <div className="lobby-status-grid" aria-label="Lobby status">
+            <LobbySeatStatus
+              label="You"
+              ready={shared.viewerReady}
+              wizardName={savedWizard?.name ?? null}
+            />
+            <LobbySeatStatus
+              label="Opponent"
+              ready={shared.opponentReady}
+              wizardName={opponentWizard?.name ?? null}
+            />
+          </div>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => void handleJoinSharedMatch()}
+            disabled={busy || (shared.viewerReady && !hasUnsavedWizardChoice)}
+          >
+            <Users size={18} />
+            {lobbyActionLabel}
+          </button>
+          <p className="notice">
+            {shared.viewerReady
+              ? "Waiting for both players to be ready."
+              : "Choose a wizard to enter the lobby."}
+          </p>
           {notice ? <p className="notice">{notice}</p> : null}
         </section>
       </main>
@@ -2450,6 +2506,10 @@ function eventDetail(event: ReplayEvent) {
 
 function wizardOptionByType(wizardType: WizardType) {
   return WIZARD_OPTIONS.find((wizard) => wizard.id === wizardType) ?? WIZARD_OPTIONS[0];
+}
+
+function isWizardType(value: string | null): value is WizardType {
+  return WIZARD_OPTIONS.some((wizard) => wizard.id === value);
 }
 
 function wizardTypeLabel(wizardType: WizardType) {

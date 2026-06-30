@@ -134,6 +134,10 @@ struct SharedMatchResponse {
     mode: &'static str,
     status: &'static str,
     viewer_side: Side,
+    viewer_wizard_type: Option<WizardType>,
+    opponent_wizard_type: Option<WizardType>,
+    viewer_ready: bool,
+    opponent_ready: bool,
     active_side: Option<Side>,
     opponent_connected: bool,
     can_claim_forfeit_at: Option<i64>,
@@ -304,14 +308,14 @@ async fn create_match(State(state): State<SharedState>, body: Bytes) -> impl Int
 
 async fn create_shared_match(
     State(state): State<SharedState>,
-    Json(request): Json<CreateMatchRequest>,
+    Json(_request): Json<CreateMatchRequest>,
 ) -> impl IntoResponse {
     let created = {
         let mut store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        match store.create_shared_match(request.wizard_type) {
+        match store.create_shared_match() {
             Ok(created) => created,
             Err(error) => return store_error_response(error),
         }
@@ -884,6 +888,10 @@ impl From<StoredSharedMatch> for SharedMatchResponse {
             mode: "shared",
             status: shared.status.as_str(),
             viewer_side: shared.viewer_seat.side,
+            viewer_wizard_type: shared.viewer_seat.wizard_type,
+            opponent_wizard_type: shared.opposing_seat.wizard_type,
+            viewer_ready: shared.viewer_seat.joined_at.is_some(),
+            opponent_ready: shared.opposing_seat.joined_at.is_some(),
             active_side,
             opponent_connected,
             can_claim_forfeit_at,
@@ -1309,6 +1317,7 @@ mod tests {
         assert_eq!(created["mode"], "shared");
         assert_eq!(created["status"], "setup");
         assert_eq!(created["viewerSide"], "player");
+        assert!(created.get("viewerWizardType").is_none());
         assert_ne!(created["playerSeatUrl"], created["inviteSeatUrl"]);
         assert!(
             created["playerSeatUrl"]
@@ -1376,6 +1385,10 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(setup["status"], "setup");
+        assert_eq!(setup["viewerReady"], false);
+        assert_eq!(setup["opponentReady"], false);
+        assert!(setup["viewerWizardType"].is_null());
+        assert!(setup["opponentWizardType"].is_null());
         assert!(setup["matchState"].is_null());
 
         let (status, joined) = json_request(
@@ -1387,6 +1400,44 @@ mod tests {
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(r#"{"wizardType":"pyromancer"}"#))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(joined["status"], "setup");
+        assert_eq!(joined["viewerSide"], "opponent");
+        assert_eq!(joined["viewerReady"], true);
+        assert_eq!(joined["opponentReady"], false);
+        assert_eq!(joined["viewerWizardType"], "pyromancer");
+        assert!(joined["matchState"].is_null());
+
+        let (status, activated) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/shared-matches/{match_id}/seats/{player_token}/join"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(activated["status"], "active");
+        assert_eq!(activated["viewerSide"], "player");
+        assert_eq!(activated["viewerReady"], true);
+        assert_eq!(activated["opponentReady"], true);
+        assert_eq!(activated["viewerWizardType"], "chronomancer");
+        assert_eq!(activated["opponentWizardType"], "pyromancer");
+
+        let (status, joined) = json_request(
+            app.clone(),
+            Request::builder()
+                .uri(format!(
+                    "/api/shared-matches/{match_id}/seats/{opponent_token}"
+                ))
+                .body(Body::empty())
                 .expect("request should build"),
         )
         .await;

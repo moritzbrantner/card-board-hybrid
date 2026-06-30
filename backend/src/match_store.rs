@@ -258,10 +258,7 @@ impl SqliteMatchStore {
         Ok(StoredMatch { id, state })
     }
 
-    pub fn create_shared_match(
-        &mut self,
-        player_wizard_type: WizardType,
-    ) -> Result<CreatedSharedMatch, MatchStoreError> {
+    pub fn create_shared_match(&mut self) -> Result<CreatedSharedMatch, MatchStoreError> {
         for attempt in 0..8 {
             let match_id = readable_match_id(attempt);
             let player_token = random_seat_token();
@@ -286,8 +283,8 @@ impl SqliteMatchStore {
                     &match_id,
                     Side::Player,
                     &player_token,
-                    Some(player_wizard_type),
-                    true,
+                    None,
+                    false,
                 )?;
                 insert_shared_seat(
                     &transaction,
@@ -366,53 +363,66 @@ impl SqliteMatchStore {
         let Some(shared) = self.load_shared_match_for_seat(id, seat_token)? else {
             return Ok(None);
         };
-        if shared.viewer_seat.side != Side::Opponent || shared.status != SharedMatchStatus::Setup {
+        if shared.status != SharedMatchStatus::Setup {
             return Ok(Some(shared));
         }
-        let Some(player_wizard_type) = shared.opposing_seat.wizard_type else {
-            return Ok(Some(shared));
-        };
 
-        let state = MatchState::new_shared_with_wizard_types(player_wizard_type, wizard_type);
-        let snapshot = state.to_snapshot_json()?;
-        let initial_frame = state.initial_replay_frame();
-        let event_json = serde_json::to_string(&initial_frame.event)?;
         let transaction = self.connection.transaction()?;
-        transaction.execute(
-            "
-            INSERT INTO matches (
-                id,
-                snapshot_json,
-                initial_snapshot_json,
-                mode,
-                created_at,
-                updated_at
-            )
-            VALUES (?1, ?2, ?2, 'shared', unixepoch(), unixepoch())
-            ",
-            params![id, snapshot],
-        )?;
-        insert_replay_frame(&transaction, id, 0, &initial_frame, &event_json)?;
         transaction.execute(
             "
             UPDATE match_seats
             SET wizard_type = ?3,
-                joined_at = unixepoch(),
+                joined_at = COALESCE(joined_at, unixepoch()),
                 last_seen_at = unixepoch(),
                 disconnected_at = NULL
             WHERE match_id = ?1 AND seat_token = ?2
             ",
             params![id, seat_token, wizard_type.to_db()],
         )?;
-        transaction.execute(
-            "
-            UPDATE shared_matches
-            SET status = 'active',
-                updated_at = unixepoch()
-            WHERE match_id = ?1
-            ",
-            params![id],
-        )?;
+
+        if let Some((player_wizard_type, opponent_wizard_type)) =
+            ready_shared_wizard_types(&transaction, id)?
+        {
+            let state =
+                MatchState::new_shared_with_wizard_types(player_wizard_type, opponent_wizard_type);
+            let snapshot = state.to_snapshot_json()?;
+            let initial_frame = state.initial_replay_frame();
+            let event_json = serde_json::to_string(&initial_frame.event)?;
+            transaction.execute(
+                "
+                INSERT INTO matches (
+                    id,
+                    snapshot_json,
+                    initial_snapshot_json,
+                    mode,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?1, ?2, ?2, 'shared', unixepoch(), unixepoch())
+                ",
+                params![id, snapshot],
+            )?;
+            insert_replay_frame(&transaction, id, 0, &initial_frame, &event_json)?;
+            transaction.execute(
+                "
+                UPDATE shared_matches
+                SET status = 'active',
+                    updated_at = unixepoch()
+                WHERE match_id = ?1
+                ",
+                params![id],
+            )?;
+        } else {
+            transaction.execute(
+                "
+                UPDATE shared_matches
+                SET updated_at = unixepoch()
+                WHERE match_id = ?1
+                ",
+                params![id],
+            )?;
+        }
+
         transaction.commit()?;
 
         self.load_shared_match_for_seat(id, seat_token)
@@ -847,6 +857,45 @@ fn insert_shared_seat(
         ],
     )?;
     Ok(())
+}
+
+fn ready_shared_wizard_types(
+    transaction: &Transaction<'_>,
+    match_id: &str,
+) -> Result<Option<(WizardType, WizardType)>, MatchStoreError> {
+    let mut statement = transaction.prepare(
+        "
+        SELECT side, wizard_type, joined_at
+        FROM match_seats
+        WHERE match_id = ?1
+        ",
+    )?;
+    let rows = statement.query_map(params![match_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, Option<i64>>(2)?,
+        ))
+    })?;
+
+    let mut player_wizard_type = None;
+    let mut opponent_wizard_type = None;
+    for row in rows {
+        let (side, wizard_type, joined_at) = row?;
+        if joined_at.is_none() {
+            continue;
+        }
+        let Some(wizard_type) = wizard_type.as_deref().and_then(wizard_type_from_db) else {
+            continue;
+        };
+        match side_from_db(&side) {
+            Some(Side::Player) => player_wizard_type = Some(wizard_type),
+            Some(Side::Opponent) => opponent_wizard_type = Some(wizard_type),
+            None => {}
+        }
+    }
+
+    Ok(player_wizard_type.zip(opponent_wizard_type))
 }
 
 fn add_column_if_missing(
