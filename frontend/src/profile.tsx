@@ -1,7 +1,8 @@
 import { History, House, LogOut, Play, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { loadProfileMatches, updateProfile } from "./api";
-import type { AccountProfile, GeneratedAvatar, MatchSummary } from "./types";
+import type { AccountProfile, GeneratedAvatar, MatchSummary, WizardType } from "./types";
+import { WIZARD_OPTIONS } from "./wizards";
 
 type ProfilePageProps = {
   currentUser: AccountProfile;
@@ -26,6 +27,9 @@ export function ProfilePage({
 }: ProfilePageProps) {
   const [displayName, setDisplayName] = useState(currentUser.displayName);
   const [avatar, setAvatar] = useState<GeneratedAvatar>(currentUser.avatar);
+  const [preferredWizardType, setPreferredWizardType] = useState<WizardType>(
+    currentUser.preferredWizardType,
+  );
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [matchesState, setMatchesState] = useState<ProfileMatchesState>({ status: "loading" });
@@ -55,10 +59,11 @@ export function ProfilePage({
     setBusy(true);
     setNotice(null);
     try {
-      const updated = await updateProfile(displayName, avatar);
+      const updated = await updateProfile(displayName, avatar, preferredWizardType);
       onProfileUpdated(updated);
       setDisplayName(updated.displayName);
       setAvatar(updated.avatar);
+      setPreferredWizardType(updated.preferredWizardType);
       setNotice("Profile saved.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not save profile");
@@ -130,6 +135,20 @@ export function ProfilePage({
               </div>
             </fieldset>
           </div>
+          <label className="preferred-wizard-control" htmlFor="profile-preferred-wizard">
+            <span>Preferred Wizard</span>
+            <select
+              id="profile-preferred-wizard"
+              value={preferredWizardType}
+              onChange={(event) => setPreferredWizardType(event.target.value as WizardType)}
+            >
+              {WIZARD_OPTIONS.map((wizard) => (
+                <option key={wizard.id} value={wizard.id}>
+                  {wizard.name} · {wizard.role}
+                </option>
+              ))}
+            </select>
+          </label>
           <button className="primary-button" type="button" onClick={() => void handleSave()} disabled={busy}>
             <Save size={18} />
             Save Profile

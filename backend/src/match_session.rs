@@ -19,11 +19,14 @@ pub struct MatchState {
     pub round: u32,
     pub phase: Phase,
     pub active_side: Side,
+    pub priority_side: Option<Side>,
     pub player: PlayerState,
     pub opponent: PlayerState,
     pub board: HexBoard,
+    pub action_stack: Vec<StackItem>,
     pub log: Vec<String>,
     pub winner: Option<Side>,
+    next_stack_item_id: u32,
     next_unit_id: u32,
 }
 
@@ -79,6 +82,10 @@ pub enum ReplayEvent {
         side: Side,
         card: CardSummary,
         target: ActionTarget,
+    },
+    ActionQueued {
+        side: Side,
+        item: StackItem,
     },
     UnitSummoned {
         side: Side,
@@ -137,11 +144,12 @@ impl Serialize for MatchState {
     where
         S: serde::Serializer,
     {
-        let mut state = serializer.serialize_struct("MatchState", 9)?;
+        let mut state = serializer.serialize_struct("MatchState", 11)?;
         state.serialize_field("mode", &self.mode)?;
         state.serialize_field("round", &self.round)?;
         state.serialize_field("phase", &self.phase)?;
         state.serialize_field("activeSide", &self.active_side)?;
+        state.serialize_field("prioritySide", &self.priority_side)?;
         state.serialize_field(
             "player",
             &PublicPlayerState {
@@ -157,6 +165,7 @@ impl Serialize for MatchState {
             },
         )?;
         state.serialize_field("board", &self.board)?;
+        state.serialize_field("actionStack", &self.action_stack)?;
         state.serialize_field("log", &self.log)?;
         state.serialize_field("winner", &self.winner)?;
         state.end()
@@ -348,8 +357,17 @@ pub enum Rarity {
     rename_all_fields = "camelCase"
 )]
 pub enum CardKind {
-    Unit { attack: i32, armor: i32, max_ap: u8 },
-    Spell { range: u8, effect: SpellEffect },
+    Unit {
+        attack: i32,
+        armor: i32,
+        max_ap: u8,
+    },
+    Spell {
+        range: u8,
+        #[serde(default)]
+        priority: u8,
+        effect: SpellEffect,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -380,6 +398,7 @@ pub enum MatchActionRequest {
         target_id: String,
     },
     EndTurn,
+    PassPriority,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -397,6 +416,7 @@ pub enum ActionTarget {
 pub enum MatchError {
     MatchOver,
     NotActiveSide,
+    NotPrioritySide,
     CardNotFound,
     NotEnoughMana,
     NoActionPoints,
@@ -407,6 +427,44 @@ pub enum MatchError {
     NotYourPiece,
     NotAdjacent,
     AlreadyAttacked,
+    StackPending,
+    EmptyStack,
+    PriorityTooLow,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StackItem {
+    pub id: String,
+    pub side: Side,
+    pub priority: u8,
+    pub action: StackAction,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum StackAction {
+    PlayUnit {
+        card: CardSummary,
+        coord: HexCoord,
+    },
+    CastSpell {
+        card: CardSummary,
+        target_id: String,
+    },
+    MovePiece {
+        piece_id: String,
+        from: HexCoord,
+        to: HexCoord,
+    },
+    Attack {
+        attacker_id: String,
+        target_id: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -424,6 +482,7 @@ impl fmt::Display for MatchError {
         let message = match self {
             Self::MatchOver => "the match is over",
             Self::NotActiveSide => "it is not your turn",
+            Self::NotPrioritySide => "you do not have priority",
             Self::CardNotFound => "card is no longer in hand",
             Self::NotEnoughMana => "not enough mana",
             Self::NoActionPoints => "not enough action points",
@@ -434,6 +493,9 @@ impl fmt::Display for MatchError {
             Self::NotYourPiece => "that piece is not yours",
             Self::NotAdjacent => "target is not adjacent",
             Self::AlreadyAttacked => "that piece has already attacked this turn",
+            Self::StackPending => "resolve the stack before taking that action",
+            Self::EmptyStack => "there are no pending actions to resolve",
+            Self::PriorityTooLow => "spell priority must be greater than the pending action",
         };
 
         f.write_str(message)
@@ -498,9 +560,11 @@ impl MatchState {
             "round": self.round,
             "phase": self.phase,
             "activeSide": self.active_side,
+            "prioritySide": self.priority_side,
             "player": self.player.replay_value(true),
             "opponent": self.opponent.replay_value(visibility == ReplayVisibility::Revealed),
             "board": self.board,
+            "actionStack": self.action_stack,
             "log": self.log,
             "winner": self.winner,
         })
@@ -545,8 +609,11 @@ impl MatchState {
                 opponent_wizard_type,
             ),
             board: HexBoard::new(BOARD_RADIUS),
+            action_stack: Vec::new(),
+            priority_side: None,
             log: vec!["The wizards enter the hex arena.".to_string()],
             winner: None,
+            next_stack_item_id: 1,
             next_unit_id: 1,
         };
 
@@ -612,9 +679,11 @@ impl MatchState {
             "round": self.round,
             "phase": self.phase,
             "activeSide": self.active_side,
+            "prioritySide": self.priority_side,
             "player": self.player.replay_value(viewer_side == Side::Player),
             "opponent": self.opponent.replay_value(viewer_side == Side::Opponent),
             "board": self.board,
+            "actionStack": self.action_stack,
             "log": self.log,
             "winner": self.winner,
         })
@@ -629,9 +698,6 @@ impl MatchState {
         if self.phase == Phase::MatchOver {
             return Err(MatchError::MatchOver);
         }
-        if self.mode == MatchMode::Shared && side != self.active_side {
-            return Err(MatchError::NotActiveSide);
-        }
 
         let mut frames = Vec::new();
         match request {
@@ -639,13 +705,21 @@ impl MatchState {
                 self.play_card_for_side(side, card_id, target, &mut frames, action_index)
             }
             MatchActionRequest::MovePiece { piece_id, to } => {
+                self.require_turn_action_side(side)?;
                 self.move_piece_for_side(side, &piece_id, to, &mut frames, action_index)
             }
             MatchActionRequest::Attack {
                 attacker_id,
                 target_id,
-            } => self.attack_for_side(side, &attacker_id, &target_id, &mut frames, action_index),
+            } => {
+                self.require_turn_action_side(side)?;
+                self.attack_for_side(side, &attacker_id, &target_id, &mut frames, action_index)
+            }
             MatchActionRequest::EndTurn => {
+                self.require_turn_action_side(side)?;
+                if !self.action_stack.is_empty() {
+                    return Err(MatchError::StackPending);
+                }
                 if self.mode == MatchMode::Shared {
                     self.end_shared_turn(side, &mut frames, action_index);
                 } else {
@@ -653,9 +727,22 @@ impl MatchState {
                 }
                 Ok(())
             }
+            MatchActionRequest::PassPriority => {
+                self.pass_priority_for_side(side, &mut frames, action_index)
+            }
         }?;
 
         Ok(frames)
+    }
+
+    fn require_turn_action_side(&self, side: Side) -> Result<(), MatchError> {
+        if !self.action_stack.is_empty() {
+            return Err(MatchError::StackPending);
+        }
+        if self.mode == MatchMode::Shared && side != self.active_side {
+            return Err(MatchError::NotActiveSide);
+        }
+        Ok(())
     }
 
     fn record_replay_frame(
@@ -764,12 +851,29 @@ impl MatchState {
             }
         }
 
+        if self.action_stack.is_empty() {
+            if self.mode == MatchMode::Shared && side != self.active_side {
+                return Err(MatchError::NotActiveSide);
+            }
+        } else {
+            if self.priority_side != Some(side) {
+                return Err(MatchError::NotPrioritySide);
+            }
+            let CardKind::Spell { priority, .. } = &card.kind else {
+                return Err(MatchError::StackPending);
+            };
+            let pending_priority = self
+                .action_stack
+                .last()
+                .map(|item| item.priority)
+                .unwrap_or_default();
+            if *priority <= pending_priority {
+                return Err(MatchError::PriorityTooLow);
+            }
+        }
+
         match &card.kind {
-            CardKind::Unit {
-                attack,
-                armor,
-                max_ap,
-            } => {
+            CardKind::Unit { .. } => {
                 let ActionTarget::Hex { coord } = target else {
                     return Err(MatchError::InvalidTarget);
                 };
@@ -785,25 +889,18 @@ impl MatchState {
                 }
 
                 self.spend_card_resources(side, &card_id, &card)?;
-                let unit = Unit {
-                    id: self.next_unit_id(side),
+                self.log.insert(
+                    0,
+                    format!("{} put {} on the stack.", side.label(), card.name),
+                );
+                let item = self.push_stack_item(
                     side,
-                    name: card.name.clone(),
-                    template_id: Some(card.template_id.clone()),
-                    attack: *attack,
-                    armor: *armor,
-                    max_armor: *armor,
-                    position: coord,
-                    ap_remaining: max_ap / 2,
-                    max_ap: *max_ap,
-                    has_attacked: false,
-                };
-                let unit_id = unit.id.clone();
-                let unit_name = unit.name.clone();
-                let unit_position = unit.position;
-                self.board.units.push(unit);
-                self.log
-                    .insert(0, format!("{} summoned {}.", side.label(), card.name));
+                    0,
+                    StackAction::PlayUnit {
+                        card: CardSummary::from(&card),
+                        coord,
+                    },
+                );
                 self.record_replay_frame(
                     frames,
                     action_index,
@@ -816,15 +913,14 @@ impl MatchState {
                 self.record_replay_frame(
                     frames,
                     action_index,
-                    ReplayEvent::UnitSummoned {
-                        side,
-                        unit_id,
-                        name: unit_name,
-                        position: unit_position,
-                    },
+                    ReplayEvent::ActionQueued { side, item },
                 );
             }
-            CardKind::Spell { range, effect } => {
+            CardKind::Spell {
+                range,
+                priority,
+                effect,
+            } => {
                 let ActionTarget::Piece { piece_id } = target else {
                     return Err(MatchError::InvalidTarget);
                 };
@@ -837,7 +933,18 @@ impl MatchState {
                 }
                 self.validate_spell_target(side, effect, &target)?;
                 self.spend_card_resources(side, &card_id, &card)?;
-                self.apply_spell(side, effect, &target.id, &card.name, frames, action_index);
+                self.log.insert(
+                    0,
+                    format!("{} put {} on the stack.", side.label(), card.name),
+                );
+                let item = self.push_stack_item(
+                    side,
+                    *priority,
+                    StackAction::CastSpell {
+                        card: CardSummary::from(&card),
+                        target_id: target.id.clone(),
+                    },
+                );
                 self.record_replay_frame(
                     frames,
                     action_index,
@@ -849,9 +956,17 @@ impl MatchState {
                         },
                     },
                 );
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::ActionQueued { side, item },
+                );
             }
         }
 
+        if self.mode == MatchMode::Solo {
+            self.resolve_all_stack(frames, action_index);
+        }
         self.check_winner(frames, action_index);
         self.truncate_log();
         Ok(())
@@ -975,6 +1090,159 @@ impl MatchState {
         }
     }
 
+    fn push_stack_item(&mut self, side: Side, priority: u8, action: StackAction) -> StackItem {
+        let item = StackItem {
+            id: format!("stack-{}", self.next_stack_item_id),
+            side,
+            priority,
+            action,
+        };
+        self.next_stack_item_id += 1;
+        self.action_stack.push(item.clone());
+        self.priority_side = Some(side.opponent());
+        item
+    }
+
+    fn pass_priority_for_side(
+        &mut self,
+        side: Side,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) -> Result<(), MatchError> {
+        if self.action_stack.is_empty() {
+            return Err(MatchError::EmptyStack);
+        }
+        if self.priority_side != Some(side) {
+            return Err(MatchError::NotPrioritySide);
+        }
+
+        self.resolve_top_stack_item(frames, action_index);
+        self.check_winner(frames, action_index);
+        self.truncate_log();
+        Ok(())
+    }
+
+    fn resolve_all_stack(
+        &mut self,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        while !self.action_stack.is_empty() && self.phase != Phase::MatchOver {
+            self.resolve_top_stack_item(frames, action_index);
+            self.check_winner(frames, action_index);
+        }
+    }
+
+    fn resolve_top_stack_item(
+        &mut self,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        let Some(item) = self.action_stack.pop() else {
+            self.priority_side = None;
+            return;
+        };
+
+        match item.action {
+            StackAction::PlayUnit { card, coord } => {
+                self.resolve_unit_card(item.side, card, coord, frames, action_index);
+            }
+            StackAction::CastSpell { card, target_id } => {
+                self.resolve_spell_card(item.side, card, &target_id, frames, action_index);
+            }
+            StackAction::MovePiece { piece_id, from, to } => {
+                self.resolve_move(item.side, &piece_id, from, to, frames, action_index);
+            }
+            StackAction::Attack {
+                attacker_id,
+                target_id,
+            } => {
+                self.resolve_attack(item.side, &attacker_id, &target_id, frames, action_index);
+            }
+        }
+
+        self.priority_side = self.action_stack.last().map(|item| item.side.opponent());
+    }
+
+    fn resolve_unit_card(
+        &mut self,
+        side: Side,
+        card: CardSummary,
+        coord: HexCoord,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        let CardKind::Unit {
+            attack,
+            armor,
+            max_ap,
+        } = &card.kind
+        else {
+            return;
+        };
+
+        if !self.board.is_valid(coord) || self.is_occupied(coord) {
+            self.log
+                .insert(0, format!("{} could not resolve.", card.name));
+            return;
+        }
+
+        let unit = Unit {
+            id: self.next_unit_id(side),
+            side,
+            name: card.name.clone(),
+            template_id: Some(card.template_id.clone()),
+            attack: *attack,
+            armor: *armor,
+            max_armor: *armor,
+            position: coord,
+            ap_remaining: *max_ap / 2,
+            max_ap: *max_ap,
+            has_attacked: false,
+        };
+        let unit_id = unit.id.clone();
+        let unit_name = unit.name.clone();
+        let unit_position = unit.position;
+        self.board.units.push(unit);
+        self.log
+            .insert(0, format!("{} summoned {}.", side.label(), card.name));
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::UnitSummoned {
+                side,
+                unit_id,
+                name: unit_name,
+                position: unit_position,
+            },
+        );
+    }
+
+    fn resolve_spell_card(
+        &mut self,
+        side: Side,
+        card: CardSummary,
+        target_id: &str,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        let CardKind::Spell { effect, .. } = &card.kind else {
+            return;
+        };
+        let Some(target) = self.piece_view(target_id) else {
+            self.log
+                .insert(0, format!("{} had no legal target.", card.name));
+            return;
+        };
+        if self.validate_spell_target(side, effect, &target).is_err() {
+            self.log
+                .insert(0, format!("{} had no legal target.", card.name));
+            return;
+        }
+
+        self.apply_spell(side, effect, target_id, &card.name, frames, action_index);
+    }
+
     fn move_piece_for_side(
         &mut self,
         side: Side,
@@ -1001,14 +1269,66 @@ impl MatchState {
         }
 
         if self.player.wizard.id == piece_id {
-            self.player.wizard.position = to;
             self.player.wizard.ap_remaining -= 1;
         } else if self.opponent.wizard.id == piece_id {
-            self.opponent.wizard.position = to;
             self.opponent.wizard.ap_remaining -= 1;
         } else if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
-            unit.position = to;
             unit.ap_remaining -= 1;
+        }
+
+        self.log
+            .insert(0, format!("{} put a move on the stack.", side.label()));
+        let item = self.push_stack_item(
+            side,
+            0,
+            StackAction::MovePiece {
+                piece_id: piece_id.to_string(),
+                from: piece.position,
+                to,
+            },
+        );
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::ActionQueued { side, item },
+        );
+        if self.mode == MatchMode::Solo {
+            self.resolve_all_stack(frames, action_index);
+        }
+        self.truncate_log();
+        Ok(())
+    }
+
+    fn resolve_move(
+        &mut self,
+        side: Side,
+        piece_id: &str,
+        from: HexCoord,
+        to: HexCoord,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        let Some(piece) = self.piece_view(piece_id) else {
+            self.log
+                .insert(0, format!("Move by {} had no legal piece.", piece_id));
+            return;
+        };
+        if piece.side != side
+            || piece.position != from
+            || !self.board.is_valid(to)
+            || self.is_occupied(to)
+        {
+            self.log
+                .insert(0, format!("Move by {} had no legal path.", piece_id));
+            return;
+        }
+
+        if self.player.wizard.id == piece_id {
+            self.player.wizard.position = to;
+        } else if self.opponent.wizard.id == piece_id {
+            self.opponent.wizard.position = to;
+        } else if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
+            unit.position = to;
         }
 
         self.log
@@ -1019,12 +1339,10 @@ impl MatchState {
             ReplayEvent::PieceMoved {
                 side,
                 piece_id: piece_id.to_string(),
-                from: piece.position,
+                from,
                 to,
             },
         );
-        self.truncate_log();
-        Ok(())
     }
 
     fn attack_for_side(
@@ -1059,6 +1377,59 @@ impl MatchState {
         }
 
         self.mark_attacker_spent(attacker_id);
+        self.log
+            .insert(0, format!("{} put an attack on the stack.", side.label()));
+        let item = self.push_stack_item(
+            side,
+            0,
+            StackAction::Attack {
+                attacker_id: attacker_id.to_string(),
+                target_id: target_id.to_string(),
+            },
+        );
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::ActionQueued { side, item },
+        );
+        if self.mode == MatchMode::Solo {
+            self.resolve_all_stack(frames, action_index);
+        }
+        self.check_winner(frames, action_index);
+        self.truncate_log();
+        Ok(())
+    }
+
+    fn resolve_attack(
+        &mut self,
+        side: Side,
+        attacker_id: &str,
+        target_id: &str,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        let Some(attacker) = self.piece_view(attacker_id) else {
+            self.log.insert(
+                0,
+                format!("Attack by {} had no legal attacker.", attacker_id),
+            );
+            return;
+        };
+        let Some(target) = self.piece_view(target_id) else {
+            self.log
+                .insert(0, format!("Attack by {} had no legal target.", attacker_id));
+            return;
+        };
+
+        if attacker.side != side
+            || target.side == side
+            || !attacker.position.is_adjacent(target.position)
+        {
+            self.log
+                .insert(0, format!("Attack by {} had no legal target.", attacker_id));
+            return;
+        }
+
         self.damage_piece(target_id, attacker.attack);
         self.damage_piece(attacker_id, target.attack);
         self.record_replay_frame(
@@ -1082,9 +1453,6 @@ impl MatchState {
                 attacker_id
             ),
         );
-        self.check_winner(frames, action_index);
-        self.truncate_log();
-        Ok(())
     }
 
     fn run_opponent_turn(
@@ -1190,7 +1558,7 @@ impl MatchState {
             .iter()
             .filter(|card| card.cost <= opponent.mana)
         {
-            let CardKind::Spell { range, effect } = &card.kind else {
+            let CardKind::Spell { range, effect, .. } = &card.kind else {
                 continue;
             };
 
@@ -1550,11 +1918,17 @@ struct MatchSnapshot {
     phase: Phase,
     #[serde(default = "default_active_side")]
     active_side: Side,
+    #[serde(default)]
+    priority_side: Option<Side>,
     player: PlayerState,
     opponent: PlayerState,
     board: HexBoard,
+    #[serde(default)]
+    action_stack: Vec<StackItem>,
     log: Vec<String>,
     winner: Option<Side>,
+    #[serde(default = "default_next_stack_item_id")]
+    next_stack_item_id: u32,
     next_unit_id: u32,
 }
 
@@ -1565,11 +1939,14 @@ impl From<&MatchState> for MatchSnapshot {
             mode: match_state.mode,
             phase: match_state.phase.clone(),
             active_side: match_state.active_side,
+            priority_side: match_state.priority_side,
             player: match_state.player.clone(),
             opponent: match_state.opponent.clone(),
             board: match_state.board.clone(),
+            action_stack: match_state.action_stack.clone(),
             log: match_state.log.clone(),
             winner: match_state.winner,
+            next_stack_item_id: match_state.next_stack_item_id,
             next_unit_id: match_state.next_unit_id,
         }
     }
@@ -1582,11 +1959,14 @@ impl From<MatchSnapshot> for MatchState {
             mode: snapshot.mode,
             phase: snapshot.phase,
             active_side: snapshot.active_side,
+            priority_side: snapshot.priority_side,
             player: snapshot.player,
             opponent: snapshot.opponent,
             board: snapshot.board,
+            action_stack: snapshot.action_stack,
             log: snapshot.log,
             winner: snapshot.winner,
+            next_stack_item_id: snapshot.next_stack_item_id,
             next_unit_id: snapshot.next_unit_id,
         }
     }
@@ -1598,6 +1978,10 @@ fn default_match_mode() -> MatchMode {
 
 fn default_active_side() -> Side {
     Side::Player
+}
+
+fn default_next_stack_item_id() -> u32 {
+    1
 }
 
 impl HexBoard {
@@ -1888,6 +2272,12 @@ mod tests {
         id
     }
 
+    fn put_card_in_side_hand(game: &mut MatchState, side: Side, card: Card) -> String {
+        let id = card.id.clone();
+        game.player_mut(side).hand.push(card);
+        id
+    }
+
     #[test]
     fn radius_three_board_has_thirty_seven_tiles() {
         let game = MatchState::new_with_seed(7);
@@ -1953,6 +2343,13 @@ mod tests {
 
         assert!(value["kind"].get("maxAp").is_some());
         assert!(value["kind"].get("max_ap").is_none());
+
+        let spell = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "arcane-parry")
+            .expect("starter deck should contain a spell");
+        let value = serde_json::to_value(spell).expect("spell should serialize");
+        assert_eq!(value["kind"]["priority"], 4);
     }
 
     #[test]
@@ -1978,7 +2375,7 @@ mod tests {
         assert!(value["opponent"].get("hand").is_none());
         assert!(value["opponent"].get("deck").is_none());
         assert!(value["opponent"].get("discard").is_none());
-        assert_eq!(value["opponent"]["deckCount"], 46);
+        assert_eq!(value["opponent"]["deckCount"], 63);
     }
 
     #[test]
@@ -2103,31 +2500,31 @@ mod tests {
             .chain(game.player.deck.iter())
             .collect();
 
-        assert_eq!(all_cards.len(), 50);
+        assert_eq!(all_cards.len(), 67);
         assert_eq!(
             all_cards
                 .iter()
                 .filter(|card| card.rarity == Rarity::Basic)
                 .count(),
-            32
+            40
         );
         assert_eq!(
             all_cards
                 .iter()
                 .filter(|card| card.rarity == Rarity::Advanced)
                 .count(),
-            16
+            24
         );
         assert_eq!(
             all_cards
                 .iter()
                 .filter(|card| card.rarity == Rarity::Rare)
                 .count(),
-            2
+            3
         );
-        assert_eq!(starter_card_templates().len(), 10);
+        assert_eq!(starter_card_templates().len(), 14);
         assert_eq!(game.player.hand.len(), 4);
-        assert_eq!(game.player.deck_count, 46);
+        assert_eq!(game.player.deck_count, 63);
     }
 
     #[test]
@@ -2387,6 +2784,170 @@ mod tests {
         assert_eq!(game.active_side, Side::Player);
         assert_eq!(game.round, 2);
         assert_eq!(game.player.hand.len(), 5);
+    }
+
+    #[test]
+    fn shared_spell_responses_require_higher_priority_and_resolve_lifo() {
+        let mut game = MatchState::new_with_seed_wizard_types_and_mode(
+            7,
+            WizardType::Runekeeper,
+            WizardType::Pyromancer,
+            MatchMode::Shared,
+        );
+        game.player.mana = 8;
+        game.opponent.mana = 8;
+        game.player.wizard.ap_remaining = 3;
+        game.opponent.wizard.ap_remaining = 3;
+        game.opponent.wizard.position = hex(0, -2);
+        game.board.units.push(Unit {
+            id: "guard".to_string(),
+            side: Side::Opponent,
+            name: "Stoneguard".to_string(),
+            template_id: Some("stoneguard".to_string()),
+            attack: 1,
+            armor: 4,
+            max_armor: 4,
+            position: hex(0, 0),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+        });
+
+        let bolt = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "starfire-bolt")
+            .expect("damage spell exists");
+        let parry = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "arcane-parry")
+            .expect("priority response spell exists");
+        let bolt_id = put_card_in_side_hand(&mut game, Side::Player, bolt);
+        let parry_id = put_card_in_side_hand(&mut game, Side::Opponent, parry);
+
+        game.apply_action_recording_for_side(
+            Side::Player,
+            MatchActionRequest::PlayCard {
+                card_id: bolt_id,
+                target: ActionTarget::Piece {
+                    piece_id: "guard".to_string(),
+                },
+            },
+            0,
+        )
+        .expect("active player can put a spell on the stack");
+
+        assert_eq!(game.action_stack.len(), 1);
+        assert_eq!(game.priority_side, Some(Side::Opponent));
+        assert_eq!(
+            game.board
+                .units
+                .iter()
+                .find(|unit| unit.id == "guard")
+                .map(|unit| unit.armor),
+            Some(4)
+        );
+
+        game.apply_action_recording_for_side(
+            Side::Opponent,
+            MatchActionRequest::PlayCard {
+                card_id: parry_id,
+                target: ActionTarget::Piece {
+                    piece_id: "guard".to_string(),
+                },
+            },
+            1,
+        )
+        .expect("opponent can answer with higher priority");
+
+        assert_eq!(game.action_stack.len(), 2);
+        assert_eq!(game.priority_side, Some(Side::Player));
+
+        game.apply_action_recording_for_side(Side::Player, MatchActionRequest::PassPriority, 2)
+            .expect("player can pass to resolve the response");
+        assert_eq!(
+            game.board
+                .units
+                .iter()
+                .find(|unit| unit.id == "guard")
+                .map(|unit| (unit.armor, unit.max_armor)),
+            Some((6, 6))
+        );
+        assert_eq!(game.priority_side, Some(Side::Opponent));
+
+        game.apply_action_recording_for_side(Side::Opponent, MatchActionRequest::PassPriority, 3)
+            .expect("opponent can pass to resolve the original spell");
+        assert_eq!(game.action_stack.len(), 0);
+        assert_eq!(game.priority_side, None);
+        assert_eq!(
+            game.board
+                .units
+                .iter()
+                .find(|unit| unit.id == "guard")
+                .map(|unit| unit.armor),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn lower_priority_spells_cannot_answer_pending_actions() {
+        let mut game = MatchState::new_with_seed_wizard_types_and_mode(
+            7,
+            WizardType::Runekeeper,
+            WizardType::Pyromancer,
+            MatchMode::Shared,
+        );
+        game.player.mana = 8;
+        game.opponent.mana = 8;
+        game.opponent.wizard.position = hex(0, -2);
+        game.board.units.push(Unit {
+            id: "guard".to_string(),
+            side: Side::Opponent,
+            name: "Stoneguard".to_string(),
+            template_id: Some("stoneguard".to_string()),
+            attack: 1,
+            armor: 4,
+            max_armor: 4,
+            position: hex(0, 0),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+        });
+
+        let bolt = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "starfire-bolt")
+            .expect("higher priority damage spell exists");
+        let chant = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "war-chant")
+            .expect("lower priority spell exists");
+        let bolt_id = put_card_in_side_hand(&mut game, Side::Player, bolt);
+        let chant_id = put_card_in_side_hand(&mut game, Side::Opponent, chant);
+
+        game.apply_action_recording_for_side(
+            Side::Player,
+            MatchActionRequest::PlayCard {
+                card_id: bolt_id,
+                target: ActionTarget::Piece {
+                    piece_id: "guard".to_string(),
+                },
+            },
+            0,
+        )
+        .expect("active player can put a spell on the stack");
+
+        let result = game.apply_action_recording_for_side(
+            Side::Opponent,
+            MatchActionRequest::PlayCard {
+                card_id: chant_id,
+                target: ActionTarget::Piece {
+                    piece_id: "guard".to_string(),
+                },
+            },
+            1,
+        );
+
+        assert_eq!(result.err(), Some(MatchError::PriorityTooLow));
     }
 
     #[test]

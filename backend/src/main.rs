@@ -81,6 +81,7 @@ struct AuthUserResponse {
     email: String,
     display_name: String,
     avatar: GeneratedAvatarResponse,
+    preferred_wizard_type: WizardType,
 }
 
 #[derive(Serialize)]
@@ -108,6 +109,8 @@ struct GeneratedAvatarResponse {
 struct UpdateProfileRequest {
     display_name: String,
     avatar: GeneratedAvatarRequest,
+    #[serde(default)]
+    preferred_wizard_type: Option<WizardType>,
 }
 
 #[derive(Deserialize)]
@@ -444,6 +447,9 @@ async fn update_profile(
                 symbol: request.avatar.symbol,
                 color: request.avatar.color,
             },
+            request
+                .preferred_wizard_type
+                .unwrap_or(profile.preferred_wizard_type),
         ) {
             Ok(Some(profile)) => profile,
             Ok(None) => return unauthorized_response(),
@@ -557,15 +563,16 @@ async fn create_match(
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        let result = match wizard_type {
-            Some(wizard_type) => {
-                store.create_match_for_user(wizard_type, profile.as_ref().map(|profile| profile.id))
-            }
-            None => store.create_match_for_user(
-                WizardType::default(),
-                profile.as_ref().map(|profile| profile.id),
-            ),
-        };
+        let player_wizard_type = wizard_type.unwrap_or_else(|| {
+            profile
+                .as_ref()
+                .map(|profile| profile.preferred_wizard_type)
+                .unwrap_or_default()
+        });
+        let result = store.create_match_for_user(
+            player_wizard_type,
+            profile.as_ref().map(|profile| profile.id),
+        );
         match result {
             Ok(created) => created,
             Err(error) => return store_error_response(error),
@@ -1232,6 +1239,7 @@ impl From<AccountProfile> for AuthUserResponse {
                 symbol: profile.avatar.symbol,
                 color: profile.avatar.color,
             },
+            preferred_wizard_type: profile.preferred_wizard_type,
         }
     }
 }
@@ -1415,6 +1423,7 @@ mod tests {
         assert_eq!(current_user["displayName"], "player");
         assert!(current_user["avatar"]["symbol"].as_str().is_some());
         assert!(current_user["avatar"]["color"].as_str().is_some());
+        assert_eq!(current_user["preferredWizardType"], "runekeeper");
         assert!(current_user["id"].as_i64().unwrap() > 0);
 
         let _ = fs::remove_file(path);
@@ -1434,7 +1443,7 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"displayName":"Rune Pilot","avatar":{"symbol":"shield","color":"indigo"}}"#,
+                    r#"{"displayName":"Rune Pilot","avatar":{"symbol":"shield","color":"indigo"},"preferredWizardType":"chronomancer"}"#,
                 ))
                 .expect("request should build"),
         )
@@ -1444,6 +1453,7 @@ mod tests {
         assert_eq!(updated["displayName"], "Rune Pilot");
         assert_eq!(updated["avatar"]["symbol"], "shield");
         assert_eq!(updated["avatar"]["color"], "indigo");
+        assert_eq!(updated["preferredWizardType"], "chronomancer");
 
         let (status, loaded) = json_request(
             app,
@@ -1459,6 +1469,7 @@ mod tests {
         assert_eq!(loaded["displayName"], "Rune Pilot");
         assert_eq!(loaded["avatar"]["symbol"], "shield");
         assert_eq!(loaded["avatar"]["color"], "indigo");
+        assert_eq!(loaded["preferredWizardType"], "chronomancer");
 
         let _ = fs::remove_file(path);
     }
@@ -1477,7 +1488,7 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"displayName":"Avatar","avatar":{"symbol":"dragon","color":"void"}}"#,
+                    r#"{"displayName":"Avatar","avatar":{"symbol":"dragon","color":"void"},"preferredWizardType":"runekeeper"}"#,
                 ))
                 .expect("request should build"),
         )
@@ -1485,6 +1496,31 @@ mod tests {
 
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["message"], "Choose a valid generated avatar.");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn profile_rejects_unknown_preferred_wizard_type() {
+        let path = test_db_path("profile-wizard-invalid");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "wizard-invalid@example.com").await;
+
+        let (status, _body) = json_request(
+            app,
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/profile")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"displayName":"Avatar","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"stormcaller"}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
         let _ = fs::remove_file(path);
     }
@@ -2266,12 +2302,13 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         let cards = body["cards"].as_array().expect("cards should be an array");
-        assert_eq!(cards.len(), 10);
+        assert_eq!(cards.len(), 14);
         assert_eq!(cards[0]["id"], "ember-squire");
-        assert_eq!(cards[9]["id"], "starfire-bolt");
+        assert_eq!(cards[13]["id"], "eclipse-strike");
         assert_eq!(cards[0]["copyCount"], 8);
         assert_eq!(cards[4]["copyCount"], 4);
-        assert_eq!(cards[8]["copyCount"], 1);
+        assert_eq!(cards[11]["copyCount"], 1);
+        assert_eq!(cards[10]["kind"]["priority"], 4);
         assert_eq!(
             cards
                 .iter()
@@ -2279,7 +2316,7 @@ mod tests {
                     .as_u64()
                     .expect("copy count should be numeric"))
                 .sum::<u64>(),
-            50
+            67
         );
         assert!(cards.iter().all(|card| {
             card["artPath"]

@@ -50,6 +50,7 @@ import {
 } from "./api";
 import { ProfilePage } from "./profile";
 import { clearAuthToken, getAuthToken, saveAuthToken } from "./session";
+import { WIZARD_OPTIONS } from "./wizards";
 import type {
   AuthSessionResponse,
   AuthUser,
@@ -68,6 +69,7 @@ import type {
   SharedMatchResponse,
   SharedServerMessage,
   Side,
+  StackItem,
   Unit,
   Wizard,
   WizardType,
@@ -130,75 +132,11 @@ type CatalogUnitCard = CatalogCard & {
   kind: Extract<CatalogCard["kind"], { type: "unit" }>;
 };
 
-type WizardOption = {
-  id: WizardType;
-  name: string;
-  role: string;
-  hp: number;
-  attack: number;
-  ap: number;
-  text: string;
-  token: string;
-};
-
 type AccountProps = {
   currentUser: AuthUser | null;
   onSignOut: () => void;
   onNavigate: (to: string) => void;
 };
-
-const WIZARD_OPTIONS = [
-  {
-    id: "runekeeper",
-    name: "Runekeeper",
-    role: "Balanced",
-    hp: 20,
-    attack: 1,
-    ap: 3,
-    text: "Steady stats for flexible card play.",
-    token: "Run",
-  },
-  {
-    id: "pyromancer",
-    name: "Pyromancer",
-    role: "Aggressive",
-    hp: 18,
-    attack: 2,
-    ap: 3,
-    text: "Higher melee damage with a smaller health pool.",
-    token: "Pyr",
-  },
-  {
-    id: "chronomancer",
-    name: "Chronomancer",
-    role: "Mobile",
-    hp: 16,
-    attack: 1,
-    ap: 4,
-    text: "Extra action point for repositioning and summons.",
-    token: "Chr",
-  },
-  {
-    id: "warden",
-    name: "Warden",
-    role: "Defensive",
-    hp: 24,
-    attack: 1,
-    ap: 2,
-    text: "Durable but slower across the board.",
-    token: "War",
-  },
-  {
-    id: "battlemage",
-    name: "Battlemage",
-    role: "Bruiser",
-    hp: 20,
-    attack: 2,
-    ap: 2,
-    text: "Tougher frontline duelist with fewer actions.",
-    token: "Bat",
-  },
-] as const satisfies readonly WizardOption[];
 
 export function App() {
   const [path, setPath] = useState(() => window.location.pathname);
@@ -570,6 +508,7 @@ function CatalogDetail({ card }: { card: CatalogCard | null }) {
           ) : (
             <>
               <DetailStat label="Range" value={card.kind.range} />
+              <DetailStat label="Priority" value={card.kind.priority} />
               <DetailStat label="Effect" value={spellEffectLabel(card)} />
             </>
           )}
@@ -705,7 +644,9 @@ function MatchPicker({
   onNavigate: (to: string) => void;
 } & AccountProps) {
   const [matchId, setMatchId] = useState("");
-  const [selectedWizardType, setSelectedWizardType] = useState<WizardType>("runekeeper");
+  const [selectedWizardType, setSelectedWizardType] = useState<WizardType>(
+    () => currentUser?.preferredWizardType ?? "runekeeper",
+  );
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -1224,7 +1165,7 @@ function MatchPage({
         void runAction(() => movePiece(matchId, selectedPiece.id, tile.coord));
         return;
       }
-      if (piece && isLegalAttack(viewerSide, selectedPiece, piece)) {
+      if (piece && isLegalAttack(match, viewerSide, selectedPiece, piece)) {
         void runAction(() => attack(matchId, selectedPiece.id, piece.id));
         return;
       }
@@ -1309,7 +1250,7 @@ function MatchPage({
               className="primary-button"
               type="button"
               onClick={() => void runAction(() => endTurn(matchId))}
-              disabled={busy || match.phase === "matchOver"}
+              disabled={busy || match.phase === "matchOver" || match.actionStack.length > 0}
             >
               <Play size={18} />
               End Turn
@@ -1366,6 +1307,7 @@ function MatchPage({
 
         <section className="hand-and-log">
           <div className="player-zone">
+            <StackDisplay stack={match.actionStack} prioritySide={match.prioritySide} />
             <section className="pile-row" aria-label="Player card piles">
               <PileDisplay
                 icon={<Layers size={19} />}
@@ -1430,7 +1372,7 @@ function SharedMatchPage({
   const [unitContextMenu, setUnitContextMenu] = useState<UnitContextMenu>(null);
   const [selectedWizardType, setSelectedWizardType] = useState<WizardType>(() => {
     const stored = sessionStorage.getItem(`rune-lanes-wizard:${matchId}`);
-    return isWizardType(stored) ? stored : "runekeeper";
+    return isWizardType(stored) ? stored : (currentUser?.preferredWizardType ?? "runekeeper");
   });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -1515,6 +1457,9 @@ function SharedMatchPage({
   const match = shared?.matchState ?? null;
   const viewerSide = shared?.viewerSide ?? "player";
   const isActiveViewer = Boolean(match && shared?.activeSide === viewerSide);
+  const hasPendingStack = Boolean(match && match.actionStack.length > 0);
+  const isPriorityViewer = Boolean(match && match.prioritySide === viewerSide);
+  const canAct = Boolean(match && (hasPendingStack ? isPriorityViewer : isActiveViewer));
 
   useEffect(() => {
     if (shared?.status === "setup" && shared.viewerWizardType) {
@@ -1617,7 +1562,7 @@ function SharedMatchPage({
   }
 
   function handleTileClick(tile: HexTile) {
-    if (!match || busy || match.phase === "matchOver" || !isActiveViewer) {
+    if (!match || busy || match.phase === "matchOver" || !canAct) {
       return;
     }
 
@@ -1639,7 +1584,7 @@ function SharedMatchPage({
         sendSharedAction({ type: "movePiece", pieceId: selectedPiece.id, to: tile.coord });
         return;
       }
-      if (piece && isLegalAttack(viewerSide, selectedPiece, piece)) {
+      if (piece && isLegalAttack(match, viewerSide, selectedPiece, piece)) {
         sendSharedAction({ type: "attack", attackerId: selectedPiece.id, targetId: piece.id });
         return;
       }
@@ -1666,7 +1611,7 @@ function SharedMatchPage({
   }
 
   function handleCardDrop(tile: HexTile, cardId: string) {
-    if (!match || busy || match.phase === "matchOver" || !isActiveViewer) {
+    if (!match || busy || match.phase === "matchOver" || !canAct) {
       return;
     }
 
@@ -1834,11 +1779,22 @@ function SharedMatchPage({
               className="primary-button"
               type="button"
               onClick={() => sendSharedAction({ type: "endTurn" })}
-              disabled={busy || match.phase === "matchOver" || !isActiveViewer}
+              disabled={busy || match.phase === "matchOver" || !isActiveViewer || hasPendingStack}
             >
               <Play size={18} />
               End Turn
             </button>
+            {hasPendingStack ? (
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => sendSharedAction({ type: "passPriority" })}
+                disabled={busy || match.phase === "matchOver" || !isPriorityViewer}
+              >
+                <Zap size={18} />
+                Pass Priority
+              </button>
+            ) : null}
           </div>
         </header>
 
@@ -1848,7 +1804,9 @@ function SharedMatchPage({
             <Wifi size={16} />
             {match.phase === "matchOver"
               ? `${sideLabel(match.winner)} wins`
-              : isActiveViewer
+              : hasPendingStack
+                ? `${sideLabel(match.prioritySide)} priority`
+                : isActiveViewer
                 ? "Your turn"
                 : "Waiting"}
           </div>
@@ -1861,7 +1819,7 @@ function SharedMatchPage({
             viewerSide={viewerSide}
             selectedCard={selectedCard}
             selectedPiece={selectedPiece}
-            disabled={busy || match.phase === "matchOver" || !isActiveViewer}
+            disabled={busy || match.phase === "matchOver" || !canAct}
             onTileClick={handleTileClick}
             onTileDrop={handleCardDrop}
             onUnitContextMenu={handleUnitContextMenu}
@@ -1874,7 +1832,7 @@ function SharedMatchPage({
                   card={card}
                   selected={selection?.type === "card" && card.id === selection.cardId}
                   dragging={draggedCardId === card.id}
-                  disabled={busy || !isActiveViewer || !isPlayableCard(match, viewerSide, card)}
+                  disabled={busy || !canAct || !isPlayableCard(match, viewerSide, card)}
                   onClick={() => {
                     setUnitContextMenu(null);
                     setSelection(
@@ -1895,6 +1853,7 @@ function SharedMatchPage({
 
         <section className="hand-and-log">
           <div className="player-zone">
+            <StackDisplay stack={match.actionStack} prioritySide={match.prioritySide} />
             <section className="pile-row" aria-label="Player card piles">
               <PileDisplay
                 icon={<Layers size={19} />}
@@ -2241,6 +2200,35 @@ function PileDisplay({
   );
 }
 
+function StackDisplay({
+  stack,
+  prioritySide,
+}: {
+  stack: StackItem[];
+  prioritySide: Side | null;
+}) {
+  if (stack.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="stack-panel" aria-label="Pending stack">
+      <div className="stack-panel-header">
+        <span>Stack</span>
+        <strong>{sideLabel(prioritySide)} priority</strong>
+      </div>
+      <ol>
+        {[...stack].reverse().map((item) => (
+          <li key={item.id}>
+            <span>{stackItemTitle(item)}</span>
+            <strong>Priority {item.priority}</strong>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 function ShellMessage({
   title,
   message,
@@ -2345,7 +2333,7 @@ function Board({
                   isLegalCardTarget(match, viewerSide, selectedCard, tile.coord, piece)) ||
                   (selectedPiece &&
                     ((!piece && isLegalMove(match, viewerSide, selectedPiece, tile.coord)) ||
-                      (piece && isLegalAttack(viewerSide, selectedPiece, piece)))));
+                      (piece && isLegalAttack(match, viewerSide, selectedPiece, piece)))));
               const isSelected = piece?.id === selectedPiece?.id;
 
               return (
@@ -2541,6 +2529,18 @@ function handForSide(match: MatchState, side: Side): Card[] {
 
 function isPlayableCard(match: MatchState, viewerSide: Side, card: Card) {
   const participant = participantBySide(match, viewerSide);
+  const pending = topStackItem(match);
+  if (pending) {
+    return (
+      match.phase !== "matchOver" &&
+      match.prioritySide === viewerSide &&
+      card.kind.type === "spell" &&
+      participant.mana >= card.cost &&
+      participant.wizard.apRemaining > 0 &&
+      card.kind.priority > pending.priority
+    );
+  }
+
   return (
     match.phase !== "matchOver" &&
     match.activeSide === viewerSide &&
@@ -2600,6 +2600,7 @@ function isLegalCardTarget(
 
 function isLegalMove(match: MatchState, viewerSide: Side, piece: BoardPiece, coord: HexCoord) {
   return (
+    match.actionStack.length === 0 &&
     match.activeSide === viewerSide &&
     piece.side === viewerSide &&
     piece.apRemaining > 0 &&
@@ -2608,14 +2609,25 @@ function isLegalMove(match: MatchState, viewerSide: Side, piece: BoardPiece, coo
   );
 }
 
-function isLegalAttack(viewerSide: Side, attacker: BoardPiece, target: BoardPiece) {
+function isLegalAttack(
+  match: MatchState,
+  viewerSide: Side,
+  attacker: BoardPiece,
+  target: BoardPiece,
+) {
   return (
+    match.actionStack.length === 0 &&
+    match.activeSide === viewerSide &&
     attacker.side === viewerSide &&
     target.side !== viewerSide &&
     attacker.apRemaining > 0 &&
     !attacker.hasAttacked &&
     distance(attacker.position, target.position) === 1
   );
+}
+
+function topStackItem(match: MatchState) {
+  return match.actionStack[match.actionStack.length - 1] ?? null;
 }
 
 function distance(a: HexCoord, b: HexCoord) {
@@ -2638,7 +2650,7 @@ function kindSummary(card: Card | CatalogCard) {
     return `${card.kind.attack}/${card.kind.armor} ap ${card.kind.maxAp}`;
   }
 
-  return `${spellEffectLabel(card)} rng ${card.kind.range}`;
+  return `${spellEffectLabel(card)} rng ${card.kind.range} pri ${card.kind.priority}`;
 }
 
 function spellEffectLabel(card: Card | CatalogCard) {
@@ -2653,6 +2665,19 @@ function spellEffectLabel(card: Card | CatalogCard) {
       return `+${card.kind.effect.attack}/+${card.kind.effect.armor}`;
     case "damage":
       return `damage ${card.kind.effect.amount}`;
+  }
+}
+
+function stackItemTitle(item: StackItem) {
+  switch (item.action.type) {
+    case "playUnit":
+      return `${sideLabel(item.side)} summons ${item.action.card.name}`;
+    case "castSpell":
+      return `${sideLabel(item.side)} casts ${item.action.card.name}`;
+    case "movePiece":
+      return `${sideLabel(item.side)} moves ${item.action.pieceId}`;
+    case "attack":
+      return `${sideLabel(item.side)} attacks with ${item.action.attackerId}`;
   }
 }
 
@@ -2698,6 +2723,8 @@ function eventTitle(event: ReplayEvent) {
       return event.card ? `${event.card.name} drawn` : "Hidden card drawn";
     case "cardPlayed":
       return `${event.card.name} played`;
+    case "actionQueued":
+      return "Action queued";
     case "unitSummoned":
       return `${event.name} summoned`;
     case "pieceMoved":
@@ -2733,6 +2760,8 @@ function eventDetail(event: ReplayEvent) {
         : `${sideLabel(event.side)} drew a hidden card.`;
     case "cardPlayed":
       return `${sideLabel(event.side)} played ${event.card.name}.`;
+    case "actionQueued":
+      return `${stackItemTitle(event.item)} at priority ${event.item.priority}.`;
     case "unitSummoned":
       return `${sideLabel(event.side)} summoned ${event.name} at q ${event.position.q}, r ${event.position.r}.`;
     case "pieceMoved":

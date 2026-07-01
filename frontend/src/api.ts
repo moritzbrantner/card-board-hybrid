@@ -65,10 +65,14 @@ export function loadProfile() {
   return request<AccountProfile>("/api/profile");
 }
 
-export function updateProfile(displayName: string, avatar: GeneratedAvatar) {
+export function updateProfile(
+  displayName: string,
+  avatar: GeneratedAvatar,
+  preferredWizardType: WizardType,
+) {
   return request<AccountProfile>("/api/profile", {
     method: "PATCH",
-    body: JSON.stringify({ displayName, avatar }),
+    body: JSON.stringify({ displayName, avatar, preferredWizardType }),
   });
 }
 
@@ -156,4 +160,8 @@ export function attack(matchId: string, attackerId: string, targetId: string) {
 
 export function endTurn(matchId: string) {
   return matchAction(matchId, { type: "endTurn" });
+}
+
+export function passPriority(matchId: string) {
+  return matchAction(matchId, { type: "passPriority" });
 }

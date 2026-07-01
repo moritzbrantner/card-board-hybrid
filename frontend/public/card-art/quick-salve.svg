@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520" role="img" aria-hidden="true">
+  <defs>
+    <radialGradient id="glow" cx=".46" cy=".48" r=".62"><stop stop-color="#fff6bd"/><stop offset=".42" stop-color="#6fd8a4"/><stop offset="1" stop-color="#102925"/></radialGradient>
+    <filter id="paint"><feTurbulence type="fractalNoise" baseFrequency=".014" numOctaves="4"/><feDisplacementMap in="SourceGraphic" scale="14"/></filter>
+  </defs>
+  <rect width="800" height="520" fill="url(#glow)"/>
+  <path d="M0 410 C138 342 280 370 420 306 C566 240 682 270 800 210 L800 520 L0 520 Z" fill="#0f1f1c" opacity=".75"/>
+  <g filter="url(#paint)">
+    <path d="M292 390 C318 270 370 180 438 110 C430 238 468 326 548 430 C444 410 358 398 292 390 Z" fill="#f7ffd4" opacity=".9"/>
+    <path d="M214 284 C312 246 492 246 596 284 C492 338 318 338 214 284 Z" fill="#62c994" opacity=".88"/>
+    <path d="M354 166 L446 166 L446 238 L518 238 L518 330 L446 330 L446 402 L354 402 L354 330 L282 330 L282 238 L354 238 Z" fill="#fff8bd" opacity=".86"/>
+    <circle cx="400" cy="284" r="42" fill="#285b4d"/>
+  </g>
+</svg>

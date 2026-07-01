@@ -36,6 +36,7 @@ export type CardKind =
   | {
       type: "spell";
       range: number;
+      priority: number;
       effect: SpellEffect;
     };
 
@@ -71,6 +72,7 @@ export type AuthUser = {
   email: string;
   displayName: string;
   avatar: GeneratedAvatar;
+  preferredWizardType: WizardType;
 };
 
 export type AuthSessionResponse = {
@@ -148,12 +150,44 @@ export type MatchState = {
   round: number;
   phase: Phase;
   activeSide: Side;
+  prioritySide: Side | null;
   player: MatchPlayerState;
   opponent: MatchParticipantState;
   board: HexBoard;
+  actionStack: StackItem[];
   log: string[];
   winner: Side | null;
 };
+
+export type StackItem = {
+  id: string;
+  side: Side;
+  priority: number;
+  action: StackAction;
+};
+
+export type StackAction =
+  | {
+      type: "playUnit";
+      card: CardSummary;
+      coord: HexCoord;
+    }
+  | {
+      type: "castSpell";
+      card: CardSummary;
+      targetId: string;
+    }
+  | {
+      type: "movePiece";
+      pieceId: string;
+      from: HexCoord;
+      to: HexCoord;
+    }
+  | {
+      type: "attack";
+      attackerId: string;
+      targetId: string;
+    };
 
 export type MatchResponse = {
   matchId: string;
@@ -230,6 +264,9 @@ export type MatchActionRequest =
     }
   | {
       type: "endTurn";
+    }
+  | {
+      type: "passPriority";
     };
 
 export type SharedClientMessage =
@@ -307,6 +344,11 @@ export type ReplayEvent =
       side: Side;
       card: CardSummary;
       target: ActionTarget;
+    }
+  | {
+      type: "actionQueued";
+      side: Side;
+      item: StackItem;
     }
   | {
       type: "unitSummoned";

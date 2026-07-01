@@ -120,11 +120,22 @@ pub fn starter_card_templates() -> Vec<Card> {
             },
         ),
         spell_card(
+            "quick-salve",
+            "Quick Salve",
+            Rarity::Basic,
+            1,
+            "Priority 2. Range 2. Heal 2 to an allied unit or wizard.",
+            2,
+            2,
+            SpellEffect::Heal { amount: 2 },
+        ),
+        spell_card(
             "mending-rune",
             "Mending Rune",
             Rarity::Advanced,
             2,
-            "Range 2. Heal 3 to an allied unit or wizard.",
+            "Priority 2. Range 2. Heal 3 to an allied unit or wizard.",
+            2,
             2,
             SpellEffect::Heal { amount: 3 },
         ),
@@ -133,11 +144,35 @@ pub fn starter_card_templates() -> Vec<Card> {
             "War Chant",
             Rarity::Advanced,
             3,
-            "Range 2. An allied unit gains +1 attack and +1 armor.",
+            "Priority 1. Range 2. An allied unit gains +1 attack and +1 armor.",
             2,
+            1,
             SpellEffect::Buff {
                 attack: 1,
                 armor: 1,
+            },
+        ),
+        spell_card(
+            "ember-lance",
+            "Ember Lance",
+            Rarity::Advanced,
+            3,
+            "Priority 3. Range 3. Deal 2 damage to an enemy unit or wizard.",
+            3,
+            3,
+            SpellEffect::Damage { amount: 2 },
+        ),
+        spell_card(
+            "arcane-parry",
+            "Arcane Parry",
+            Rarity::Advanced,
+            2,
+            "Priority 4. Range 2. An allied unit gains +2 armor.",
+            2,
+            4,
+            SpellEffect::Buff {
+                attack: 0,
+                armor: 2,
             },
         ),
         unit_card(
@@ -157,9 +192,20 @@ pub fn starter_card_templates() -> Vec<Card> {
             "Starfire Bolt",
             Rarity::Rare,
             5,
-            "Range 3. Deal 4 damage to an enemy unit or wizard.",
+            "Priority 3. Range 3. Deal 4 damage to an enemy unit or wizard.",
+            3,
             3,
             SpellEffect::Damage { amount: 4 },
+        ),
+        spell_card(
+            "eclipse-strike",
+            "Eclipse Strike",
+            Rarity::Rare,
+            4,
+            "Priority 5. Range 3. Deal 3 damage to an enemy unit or wizard.",
+            3,
+            5,
+            SpellEffect::Damage { amount: 3 },
         ),
     ]
 }
@@ -208,6 +254,7 @@ fn spell_card(
     cost: u8,
     text: &str,
     range: u8,
+    priority: u8,
     effect: SpellEffect,
 ) -> Card {
     Card {
@@ -217,6 +264,10 @@ fn spell_card(
         rarity,
         cost,
         text: text.to_string(),
-        kind: CardKind::Spell { range, effect },
+        kind: CardKind::Spell {
+            range,
+            priority,
+            effect,
+        },
     }
 }

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520" role="img" aria-hidden="true">
+  <defs>
+    <radialGradient id="eclipse" cx=".54" cy=".42" r=".66"><stop stop-color="#fff0a8"/><stop offset=".18" stop-color="#262234"/><stop offset=".55" stop-color="#5b4478"/><stop offset="1" stop-color="#090b14"/></radialGradient>
+    <filter id="paint"><feTurbulence type="fractalNoise" baseFrequency=".012" numOctaves="4"/><feDisplacementMap in="SourceGraphic" scale="15"/></filter>
+  </defs>
+  <rect width="800" height="520" fill="url(#eclipse)"/>
+  <path d="M0 414 C142 346 278 376 420 310 C574 238 690 276 800 212 L800 520 L0 520 Z" fill="#070911" opacity=".78"/>
+  <g filter="url(#paint)">
+    <circle cx="468" cy="180" r="112" fill="#fff2a8" opacity=".92"/>
+    <circle cx="426" cy="174" r="112" fill="#171421"/>
+    <path d="M146 426 C302 314 452 224 690 106 C542 276 392 388 146 426 Z" fill="#f7e7a0"/>
+    <path d="M220 454 C360 332 482 246 662 160 C528 316 410 420 220 454 Z" fill="#8b6cc0" opacity=".78"/>
+  </g>
+</svg>

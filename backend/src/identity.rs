@@ -7,12 +7,15 @@ use rand::RngCore;
 use rand::rngs::OsRng;
 use rusqlite::{Connection, OptionalExtension, params};
 
+use crate::match_session::WizardType;
+
 #[derive(Clone, Debug)]
 pub struct AccountProfile {
     pub id: i64,
     pub email: String,
     pub display_name: String,
     pub avatar: GeneratedAvatar,
+    pub preferred_wizard_type: WizardType,
 }
 
 #[derive(Clone, Debug)]
@@ -84,9 +87,10 @@ impl<'a> IdentityModule<'a> {
                 display_name,
                 avatar_symbol,
                 avatar_color,
+                preferred_wizard_type,
                 created_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, unixepoch())
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, unixepoch())
             ",
             params![
                 email,
@@ -94,7 +98,8 @@ impl<'a> IdentityModule<'a> {
                 password_hash,
                 default_display_name(email),
                 avatar.symbol,
-                avatar.color
+                avatar.color,
+                wizard_type_to_db(WizardType::default())
             ],
         )?;
 
@@ -113,11 +118,11 @@ impl<'a> IdentityModule<'a> {
         normalized_email: &str,
         password: &str,
     ) -> Result<Option<CreatedAuthSession>, IdentityError> {
-        let row: Option<(i64, String, String, String, String, String)> = self
+        let row: Option<(i64, String, String, String, String, String, String)> = self
             .connection
             .query_row(
                 "
-                SELECT id, email, password_hash, display_name, avatar_symbol, avatar_color
+                SELECT id, email, password_hash, display_name, avatar_symbol, avatar_color, preferred_wizard_type
                 FROM users
                 WHERE email_normalized = ?1
                 ",
@@ -130,12 +135,21 @@ impl<'a> IdentityModule<'a> {
                         row.get(3)?,
                         row.get(4)?,
                         row.get(5)?,
+                        row.get(6)?,
                     ))
                 },
             )
             .optional()?;
 
-        let Some((id, email, password_hash, display_name, avatar_symbol, avatar_color)) = row
+        let Some((
+            id,
+            email,
+            password_hash,
+            display_name,
+            avatar_symbol,
+            avatar_color,
+            preferred_wizard_type,
+        )) = row
         else {
             return Ok(None);
         };
@@ -152,6 +166,7 @@ impl<'a> IdentityModule<'a> {
                 symbol: avatar_symbol,
                 color: avatar_color,
             },
+            preferred_wizard_type: wizard_type_from_db(&preferred_wizard_type),
         })
         .map(Some)
     }
@@ -163,7 +178,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT users.id, users.email, users.display_name, users.avatar_symbol, users.avatar_color
+                SELECT users.id, users.email, users.display_name, users.avatar_symbol, users.avatar_color, users.preferred_wizard_type
                 FROM auth_sessions
                 JOIN users ON users.id = auth_sessions.user_id
                 WHERE auth_sessions.token = ?1
@@ -179,6 +194,7 @@ impl<'a> IdentityModule<'a> {
                             symbol: row.get(3)?,
                             color: row.get(4)?,
                         },
+                        preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(5)?),
                     })
                 },
             )
@@ -191,16 +207,24 @@ impl<'a> IdentityModule<'a> {
         user_id: i64,
         display_name: &str,
         avatar: GeneratedAvatar,
+        preferred_wizard_type: WizardType,
     ) -> Result<Option<AccountProfile>, IdentityError> {
         self.connection.execute(
             "
             UPDATE users
             SET display_name = ?2,
                 avatar_symbol = ?3,
-                avatar_color = ?4
+                avatar_color = ?4,
+                preferred_wizard_type = ?5
             WHERE id = ?1
             ",
-            params![user_id, display_name, avatar.symbol, avatar.color],
+            params![
+                user_id,
+                display_name,
+                avatar.symbol,
+                avatar.color,
+                wizard_type_to_db(preferred_wizard_type)
+            ],
         )?;
         self.load_profile_by_id(user_id)
     }
@@ -241,7 +265,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT id, email, display_name, avatar_symbol, avatar_color
+                SELECT id, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type
                 FROM users
                 WHERE email_normalized = ?1
                 ",
@@ -255,6 +279,7 @@ impl<'a> IdentityModule<'a> {
                             symbol: row.get(3)?,
                             color: row.get(4)?,
                         },
+                        preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(5)?),
                     })
                 },
             )
@@ -266,7 +291,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT id, email, display_name, avatar_symbol, avatar_color
+                SELECT id, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type
                 FROM users
                 WHERE id = ?1
                 ",
@@ -280,6 +305,7 @@ impl<'a> IdentityModule<'a> {
                             symbol: row.get(3)?,
                             color: row.get(4)?,
                         },
+                        preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(5)?),
                     })
                 },
             )
@@ -299,6 +325,7 @@ pub fn migrate(connection: &Connection) -> Result<(), IdentityError> {
             display_name TEXT NOT NULL DEFAULT '',
             avatar_symbol TEXT NOT NULL DEFAULT 'sparkles',
             avatar_color TEXT NOT NULL DEFAULT 'emerald',
+            preferred_wizard_type TEXT NOT NULL DEFAULT 'runekeeper',
             created_at INTEGER NOT NULL DEFAULT (unixepoch())
         );
         CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -329,6 +356,12 @@ pub fn migrate(connection: &Connection) -> Result<(), IdentityError> {
         "users",
         "avatar_color",
         "TEXT NOT NULL DEFAULT 'emerald'",
+    )?;
+    add_column_if_missing(
+        connection,
+        "users",
+        "preferred_wizard_type",
+        "TEXT NOT NULL DEFAULT 'runekeeper'",
     )?;
     connection.execute(
         "
@@ -369,6 +402,26 @@ fn generated_avatar_for_email(normalized_email: &str) -> GeneratedAvatar {
     GeneratedAvatar {
         symbol: SYMBOLS[sum % SYMBOLS.len()].to_string(),
         color: COLORS[(sum / SYMBOLS.len()) % COLORS.len()].to_string(),
+    }
+}
+
+fn wizard_type_to_db(wizard_type: WizardType) -> &'static str {
+    match wizard_type {
+        WizardType::Runekeeper => "runekeeper",
+        WizardType::Pyromancer => "pyromancer",
+        WizardType::Chronomancer => "chronomancer",
+        WizardType::Warden => "warden",
+        WizardType::Battlemage => "battlemage",
+    }
+}
+
+fn wizard_type_from_db(value: &str) -> WizardType {
+    match value {
+        "pyromancer" => WizardType::Pyromancer,
+        "chronomancer" => WizardType::Chronomancer,
+        "warden" => WizardType::Warden,
+        "battlemage" => WizardType::Battlemage,
+        _ => WizardType::Runekeeper,
     }
 }
 
