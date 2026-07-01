@@ -147,7 +147,7 @@ function matchAction(matchId: string, action: MatchActionRequest) {
   return request<MatchResponse>(`/api/matches/${encodeURIComponent(matchId)}/actions`, {
     method: "POST",
     body: JSON.stringify(action),
-  }).then((response) => response.matchState);
+  });
 }
 
 export function createMatch(options?: {

@@ -29,7 +29,8 @@ use identity::{
 };
 use match_access::{Actor, MatchAccess};
 use match_session::{
-    MatchActionRequest, MatchMode, MatchState, ReplayEvent, ReplayVisibility, Side, WizardType,
+    MatchActionRequest, MatchMode, MatchState, RecordedReplayFrame, ReplayEvent, ReplayVisibility,
+    Side, WizardType,
 };
 use match_store::{
     CreatedSharedMatch, MatchStoreError, SharedMatchStatus, SqliteMatchStore, StoredMatch,
@@ -167,6 +168,8 @@ struct JoinSharedMatchRequest {
 struct MatchResponse {
     match_id: String,
     match_state: MatchState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    replay_frames: Vec<ReplayFrameResponse>,
 }
 
 #[derive(Serialize)]
@@ -1298,7 +1301,7 @@ async fn apply_match_action(
         Ok(profile) => profile,
         Err(response) => return response,
     };
-    let saved = {
+    let (saved, replay_frames) = {
         let mut store = state
             .store
             .lock()
@@ -1352,10 +1355,14 @@ async fn apply_match_action(
             return store_error_response(error);
         }
 
-        stored_match
+        (stored_match, frames)
     };
 
-    Json(MatchResponse::from(saved)).into_response()
+    Json(MatchResponse::from_stored_with_replay_frames(
+        saved,
+        replay_frames,
+    ))
+    .into_response()
 }
 
 fn store_error_response(error: MatchStoreError) -> axum::response::Response {
@@ -1618,6 +1625,24 @@ impl From<StoredMatch> for MatchResponse {
         Self {
             match_id: stored_match.id,
             match_state: stored_match.state,
+            replay_frames: Vec::new(),
+        }
+    }
+}
+
+impl MatchResponse {
+    fn from_stored_with_replay_frames(
+        stored_match: StoredMatch,
+        replay_frames: Vec<RecordedReplayFrame>,
+    ) -> Self {
+        Self {
+            match_id: stored_match.id,
+            match_state: stored_match.state,
+            replay_frames: replay_frames
+                .iter()
+                .enumerate()
+                .map(|(index, frame)| ReplayFrameResponse::from_recorded(index as u32, frame))
+                .collect(),
         }
     }
 }
@@ -1691,6 +1716,17 @@ impl From<StoredMatchSummary> for MatchSummary {
 }
 
 impl ReplayFrameResponse {
+    fn from_recorded(frame_index: u32, frame: &RecordedReplayFrame) -> Self {
+        Self {
+            frame_index,
+            action_index: frame.action_index,
+            event: frame.event.for_visibility(ReplayVisibility::Public),
+            match_state: MatchState::from_snapshot_json(&frame.snapshot_json)
+                .expect("recorded replay frame snapshot should deserialize")
+                .replay_value(ReplayVisibility::Public),
+        }
+    }
+
     fn from_stored(frame: StoredReplayFrame, visibility: ReplayVisibility) -> Self {
         Self {
             frame_index: frame.frame_index,
@@ -2625,6 +2661,42 @@ mod tests {
         assert_eq!(
             frames.last().expect("last frame exists")["matchState"],
             loaded["matchState"]
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn match_action_response_includes_replay_frames_for_live_playback() {
+        let path = test_db_path("action-live-frames");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (_, created) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        let match_id = created["matchId"].as_str().expect("match id should exist");
+
+        let (status, _) = post_match_action(app.clone(), match_id, r#"{"type":"endTurn"}"#).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, advanced) =
+            post_match_action(app.clone(), match_id, r#"{"type":"advanceAi"}"#).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let frames = advanced["replayFrames"]
+            .as_array()
+            .expect("live replay frames should exist");
+        assert!(frames.iter().any(|frame| {
+            frame["event"]["type"] == "actionQueued" && frame["event"]["side"] == "opponent"
+        }));
+        assert_eq!(
+            frames.last().expect("last frame should exist")["matchState"],
+            advanced["matchState"]
         );
 
         let _ = fs::remove_file(path);

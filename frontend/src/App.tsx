@@ -60,6 +60,7 @@ import {
 import { ProfilePage } from "./profile";
 import { clearAuthToken, getAuthToken, saveAuthToken } from "./session";
 import { WIZARD_OPTIONS } from "./wizards";
+import { LIVE_AI_FRAME_DELAY_MS, liveAiPlaybackFrames } from "./livePlayback";
 import {
   createMatchVisualCatalog,
   type CardVisualIdentity,
@@ -80,6 +81,7 @@ import type {
   HexCoord,
   HexTile,
   MatchReplayResponse,
+  MatchResponse,
   MatchActionRequest,
   MatchSummary,
   MatchParticipantState,
@@ -1630,17 +1632,17 @@ function MatchPage({
     return piece?.pieceType === "unit" ? piece : null;
   }, [loadState, unitContextMenu]);
 
-  async function runAction(action: () => Promise<MatchState>) {
+  async function runAction(action: () => Promise<MatchResponse>) {
     setBusy(true);
     setNotice(null);
 
     try {
-      const match = await action();
-      setLoadState({ status: "ready", match });
       setSelection(null);
       setDraggedCardId(null);
       setUnitModalPieceId(null);
       setUnitContextMenu(null);
+      const response = await action();
+      await playLiveActionResponse(response);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Action failed");
     } finally {
@@ -1648,12 +1650,28 @@ function MatchPage({
     }
   }
 
+  async function playLiveActionResponse(response: MatchResponse) {
+    const playbackFrames = liveAiPlaybackFrames(response.replayFrames ?? []);
+
+    if (playbackFrames.length === 0) {
+      setLoadState({ status: "ready", match: response.matchState });
+      return;
+    }
+
+    for (const frame of playbackFrames) {
+      await delay(LIVE_AI_FRAME_DELAY_MS);
+      setLoadState({ status: "ready", match: frame.matchState });
+    }
+
+    setLoadState({ status: "ready", match: response.matchState });
+  }
+
   useEffect(() => {
     if (!readyMatch || busy || readyMatch.phase === "matchOver") {
       return;
     }
 
-    let action: (() => Promise<MatchState>) | null = null;
+    let action: (() => Promise<MatchResponse>) | null = null;
     if (readyMatch.actionStack.length > 0) {
       if (readyMatch.prioritySide === "player" && !playerHasPriorityResponse) {
         action = () => passPriority(matchId);
@@ -3001,11 +3019,13 @@ function Board({
                     ((!piece && isLegalMove(match, viewerSide, selectedPiece, tile.coord)) ||
                       (piece && isLegalAttack(match, viewerSide, selectedPiece, piece)))));
               const isSelected = piece?.id === selectedPiece?.id;
+              const occupantClass = piece ? `occupied occupied-${piece.side}` : "";
+              const title = tileTitle(tile, piece, viewerSide);
 
               return (
                 <button
                   key={coordKey(tile.coord)}
-                  className={`hex-tile ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""}`}
+                  className={`hex-tile ${occupantClass} ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""}`}
                   type="button"
                   disabled={disabled && !readOnly}
                   tabIndex={readOnly ? -1 : undefined}
@@ -3037,9 +3057,24 @@ function Board({
                     event.preventDefault();
                     onUnitContextMenu(piece, { x: event.clientX, y: event.clientY });
                   }}
-                  title={`q ${tile.coord.q}, r ${tile.coord.r}`}
+                  title={title}
+                  aria-label={title}
                 >
-                  {piece ? <PieceToken piece={piece} visualCatalog={visualCatalog} /> : null}
+                  {piece ? (
+                    <>
+                      <span
+                        className={`hex-occupant-marker ${piece.side}`}
+                        aria-hidden="true"
+                      >
+                        {viewerSideShortLabel(piece.side, viewerSide)}
+                      </span>
+                      <PieceToken
+                        piece={piece}
+                        viewerSide={viewerSide}
+                        visualCatalog={visualCatalog}
+                      />
+                    </>
+                  ) : null}
                 </button>
               );
             })}
@@ -3052,9 +3087,11 @@ function Board({
 
 function PieceToken({
   piece,
+  viewerSide,
   visualCatalog,
 }: {
   piece: BoardPiece;
+  viewerSide: Side;
   visualCatalog: MatchVisualCatalog;
 }) {
   let visualIdentity: UnitVisualIdentity | WizardVisualIdentity;
@@ -3075,6 +3112,9 @@ function PieceToken({
       className={`piece-token portrait ${piece.side} ${piece.pieceType} ${accentClass} ${unknownClass}`}
       title={visualIdentity.name}
     >
+      <span className={`piece-side-badge ${piece.side}`}>
+        {viewerSideShortLabel(piece.side, viewerSide)}
+      </span>
       <span className="piece-token-portrait" aria-hidden="true">
         {visualIdentity.portraitPath ? (
           <img src={visualIdentity.portraitPath} alt="" />
@@ -3183,6 +3223,16 @@ function pieceAt(match: MatchState, coord: HexCoord): BoardPiece | null {
 
   const unit = match.board.units.find((candidate) => sameCoord(candidate.position, coord));
   return unit ? { ...unit, pieceType: "unit" } : null;
+}
+
+function tileTitle(tile: HexTile, piece: BoardPiece | null, viewerSide: Side) {
+  const coordLabel = `q ${tile.coord.q}, r ${tile.coord.r}`;
+  if (!piece) {
+    return `${coordLabel}, empty hex`;
+  }
+
+  const owner = viewerSideLabel(piece.side, viewerSide);
+  return `${coordLabel}, occupied by ${owner} ${piece.pieceType}`;
 }
 
 function pieceById(match: MatchState, pieceId: string): BoardPiece | null {
@@ -3358,6 +3408,10 @@ function sameCoord(a: HexCoord, b: HexCoord) {
   return a.q === b.q && a.r === b.r;
 }
 
+function delay(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
 function coordKey(coord: HexCoord) {
   return `${coord.q}:${coord.r}`;
 }
@@ -3526,4 +3580,12 @@ function sideLabel(side: Side | null) {
     return "Opponent";
   }
   return "Nobody";
+}
+
+function viewerSideLabel(side: Side, viewerSide: Side) {
+  return side === viewerSide ? "your" : "the opponent's";
+}
+
+function viewerSideShortLabel(side: Side, viewerSide: Side) {
+  return side === viewerSide ? "YOU" : "OPP";
 }

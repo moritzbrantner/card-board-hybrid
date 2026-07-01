@@ -257,6 +257,7 @@ export type StackAction =
 export type MatchResponse = {
   matchId: string;
   matchState: MatchState;
+  replayFrames?: ReplayFrame[];
 };
 
 export type CreateSharedMatchResponse = {
