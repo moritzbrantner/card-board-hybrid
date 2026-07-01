@@ -854,6 +854,7 @@ impl MatchState {
 
         if self.phase == Phase::Planning {
             self.round += 1;
+            self.reset_unit_armor_for_new_round();
             self.start_turn(Side::Player, frames, action_index);
             self.log.insert(0, format!("Round {} begins.", self.round));
             self.truncate_log();
@@ -886,6 +887,7 @@ impl MatchState {
 
         if side == Side::Opponent {
             self.round += 1;
+            self.reset_unit_armor_for_new_round();
             self.log.insert(0, format!("Round {} begins.", self.round));
             self.truncate_log();
             self.record_replay_frame(
@@ -897,6 +899,12 @@ impl MatchState {
 
         self.start_turn(side.opponent(), frames, action_index);
         self.truncate_log();
+    }
+
+    fn reset_unit_armor_for_new_round(&mut self) {
+        for unit in self.board.units.iter_mut().filter(|unit| unit.armor > 0) {
+            unit.armor = unit.max_armor;
+        }
     }
 
     fn play_card_for_side(
@@ -2811,6 +2819,58 @@ mod tests {
     }
 
     #[test]
+    fn solo_round_start_resets_surviving_unit_armor_to_max_armor() {
+        let mut game = MatchState::new_with_seed(7);
+        game.opponent.hand.clear();
+        game.board.units.push(Unit {
+            id: "player-guard".to_string(),
+            side: Side::Player,
+            name: "Stoneguard".to_string(),
+            template_id: Some("stoneguard".to_string()),
+            attack: 1,
+            armor: 1,
+            max_armor: 4,
+            position: hex(0, 2),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+        });
+        game.board.units.push(Unit {
+            id: "opponent-guard".to_string(),
+            side: Side::Opponent,
+            name: "Stoneguard".to_string(),
+            template_id: Some("stoneguard".to_string()),
+            attack: 1,
+            armor: 2,
+            max_armor: 6,
+            position: hex(0, -2),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+        });
+
+        game.apply_action(MatchActionRequest::EndTurn)
+            .expect("ending turn should advance to the next round");
+
+        assert_eq!(
+            game.board
+                .units
+                .iter()
+                .find(|unit| unit.id == "player-guard")
+                .map(|unit| unit.armor),
+            Some(4)
+        );
+        assert_eq!(
+            game.board
+                .units
+                .iter()
+                .find(|unit| unit.id == "opponent-guard")
+                .map(|unit| unit.armor),
+            Some(6)
+        );
+    }
+
+    #[test]
     fn shared_matches_reject_inactive_side_actions() {
         let mut game = MatchState::new_with_seed_wizard_types_and_mode(
             7,
@@ -2847,6 +2907,52 @@ mod tests {
         assert_eq!(game.active_side, Side::Player);
         assert_eq!(game.round, 2);
         assert_eq!(game.player.hand.len(), 5);
+    }
+
+    #[test]
+    fn shared_round_start_resets_surviving_unit_armor_to_max_armor() {
+        let mut game = MatchState::new_with_seed_wizard_types_and_mode(
+            7,
+            WizardType::Runekeeper,
+            WizardType::Pyromancer,
+            MatchMode::Shared,
+        );
+        game.board.units.push(Unit {
+            id: "guard".to_string(),
+            side: Side::Player,
+            name: "Stoneguard".to_string(),
+            template_id: Some("stoneguard".to_string()),
+            attack: 1,
+            armor: 1,
+            max_armor: 5,
+            position: hex(0, 2),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+        });
+
+        game.apply_action_recording_for_side(Side::Player, MatchActionRequest::EndTurn, 0)
+            .expect("player can end their active turn");
+        assert_eq!(
+            game.board
+                .units
+                .iter()
+                .find(|unit| unit.id == "guard")
+                .map(|unit| unit.armor),
+            Some(1)
+        );
+
+        game.apply_action_recording_for_side(Side::Opponent, MatchActionRequest::EndTurn, 1)
+            .expect("opponent can end their active turn");
+
+        assert_eq!(
+            game.board
+                .units
+                .iter()
+                .find(|unit| unit.id == "guard")
+                .map(|unit| unit.armor),
+            Some(5)
+        );
     }
 
     #[test]
