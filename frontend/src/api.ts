@@ -5,6 +5,7 @@ import type {
   CatalogResponse,
   CreateSharedMatchResponse,
   DeckCardCount,
+  DeckLegality,
   DeckListResponse,
   DeckRecipeDetail,
   DeckRecipeSummary,
@@ -110,6 +111,13 @@ export function updateDeck(
   return request<DeckRecipeSummary>(`/api/decks/${encodeURIComponent(deckId)}`, {
     method: "PATCH",
     body: JSON.stringify({ name, cards, isDefault }),
+  });
+}
+
+export function previewDeckLegality(cards: DeckCardCount[]) {
+  return request<DeckLegality>("/api/decks/legality-preview", {
+    method: "POST",
+    body: JSON.stringify({ cards }),
   });
 }
 

@@ -1,5 +1,6 @@
 mod card_catalog;
 mod deck_library;
+mod deck_recipe_legality;
 mod identity;
 mod match_access;
 mod match_session;
@@ -21,6 +22,7 @@ use deck_library::{
     DeckLibrary, DeckLibraryError, DeckRecipeSnapshot, SaveDeckRequest, starter_deck_snapshot,
     system_deck_by_id, system_deck_response, system_deck_snapshot,
 };
+use deck_recipe_legality::DeckLegalityPreviewRequest;
 use futures_util::StreamExt;
 use identity::{
     AccountProfile, CreatedAuthSession, GeneratedAvatar, IdentityError, IdentityModule,
@@ -299,6 +301,7 @@ fn create_app(store: SqliteMatchStore) -> Router {
         .route("/api/catalog/cards", get(catalog_cards))
         .route("/api/system-decks", get(system_decks))
         .route("/api/decks", get(list_decks).post(create_deck))
+        .route("/api/decks/legality-preview", post(preview_deck_legality))
         .route(
             "/api/decks/{deck_id}",
             get(load_deck).patch(update_deck).delete(delete_deck),
@@ -396,6 +399,18 @@ async fn create_deck(
         }
     };
     Json(deck).into_response()
+}
+
+async fn preview_deck_legality(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(request): Json<DeckLegalityPreviewRequest>,
+) -> impl IntoResponse {
+    if let Err(response) = required_profile_from_headers(&state, &headers) {
+        return response;
+    }
+
+    Json(deck_recipe_legality::preview_requested_cards(request.cards)).into_response()
 }
 
 async fn load_deck(
@@ -1789,6 +1804,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn signed_out_deck_legality_preview_requires_an_account() {
+        let path = test_db_path("decks-preview-auth");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, body) = json_request(
+            app,
+            Request::builder()
+                .method("POST")
+                .uri("/api/decks/legality-preview")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"cards":[]}"#))
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["message"], "Sign in to continue.");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn deck_legality_preview_returns_draft_legality_for_unsaved_counts() {
+        let path = test_db_path("decks-preview");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "preview@example.com").await;
+
+        let (status, preview) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/decks/legality-preview")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"cards":[{"templateId":"ember-squire","count":5}]}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(preview["legal"], false);
+        assert_eq!(preview["totalCards"], 5);
+        assert!(
+            preview["messages"]
+                .as_array()
+                .expect("messages should be an array")
+                .iter()
+                .any(|message| message
+                    .as_str()
+                    .is_some_and(|message| message.contains("at least 60")))
+        );
+
+        let (status, preview) = json_request(
+            app,
+            Request::builder()
+                .method("POST")
+                .uri("/api/decks/legality-preview")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"cards":[{"templateId":"missing-card","count":60},{"templateId":"ember-squire","count":-1}]}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(preview["legal"], false);
+        assert_eq!(preview["totalCards"], 60);
+        let messages = preview["messages"]
+            .as_array()
+            .expect("messages should be an array");
+        assert!(messages.iter().any(|message| {
+            message
+                .as_str()
+                .is_some_and(|message| message.contains("not in the card catalog"))
+        }));
+        assert!(messages.iter().any(|message| {
+            message
+                .as_str()
+                .is_some_and(|message| message.contains("must not be negative"))
+        }));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
     async fn deck_library_creates_starter_copy_and_allows_drafts() {
         let path = test_db_path("decks-starter-draft");
         let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
@@ -1826,6 +1930,57 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(draft["name"], "Tiny Draft");
         assert_eq!(draft["legality"]["legal"], false);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn deck_save_still_rejects_malformed_card_counts() {
+        let path = test_db_path("decks-save-strict");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "strict@example.com").await;
+
+        let (status, body) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/decks")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"name":"Bad Deck","cards":[{"templateId":"missing-card","count":1}]}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            body["message"]
+                .as_str()
+                .expect("message should be a string")
+                .contains("Unknown card template")
+        );
+
+        let (status, body) = json_request(
+            app,
+            Request::builder()
+                .method("POST")
+                .uri("/api/decks")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"name":"Negative Deck","cards":[{"templateId":"ember-squire","count":-1}]}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            body["message"]
+                .as_str()
+                .expect("message should be a string")
+                .contains("must not be negative")
+        );
 
         let _ = fs::remove_file(path);
     }

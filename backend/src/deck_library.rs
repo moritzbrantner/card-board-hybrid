@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 
@@ -6,51 +5,19 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::card_catalog::card_template_by_id;
-use crate::match_session::{Card, Rarity, Side, WizardType};
+use crate::deck_recipe_legality::{self, DeckRecipeLegalityError, normalize_requested_cards};
+use crate::match_session::{Card, Side, WizardType};
 
 pub const DECK_LIMIT_PER_ACCOUNT: usize = 30;
-pub const MIN_DECK_CARDS: u16 = 60;
-pub const BASIC_COPY_LIMIT: u16 = 5;
-pub const ADVANCED_COPY_LIMIT: u16 = 4;
-pub const RARE_COPY_LIMIT: u16 = 3;
-pub const ADVANCED_TOTAL_LIMIT: u16 = 24;
-pub const RARE_TOTAL_LIMIT: u16 = 12;
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeckRules {
-    pub max_decks_per_account: usize,
-    pub min_cards: u16,
-    pub basic_copy_limit: u16,
-    pub advanced_copy_limit: u16,
-    pub rare_copy_limit: u16,
-    pub advanced_total_limit: u16,
-    pub rare_total_limit: u16,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct DeckCardCount {
-    pub template_id: String,
-    pub count: u16,
-}
+pub use crate::deck_recipe_legality::{
+    DeckCardCount, DeckCardCountRequest, DeckLegality, DeckRules, validate_recipe,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeckRecipeSnapshot {
     pub name: String,
     pub cards: Vec<DeckCardCount>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeckLegality {
-    pub legal: bool,
-    pub total_cards: u16,
-    pub basic_cards: u16,
-    pub advanced_cards: u16,
-    pub rare_cards: u16,
-    pub messages: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -87,13 +54,6 @@ pub struct SystemDeckRecipe {
 pub struct SystemDeckListResponse {
     pub rules: DeckRules,
     pub decks: Vec<SystemDeckRecipe>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeckCardCountRequest {
-    pub template_id: String,
-    pub count: i32,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -153,6 +113,17 @@ impl From<rusqlite::Error> for DeckLibraryError {
 impl From<serde_json::Error> for DeckLibraryError {
     fn from(error: serde_json::Error) -> Self {
         Self::Snapshot(error)
+    }
+}
+
+impl From<DeckRecipeLegalityError> for DeckLibraryError {
+    fn from(error: DeckRecipeLegalityError) -> Self {
+        match error {
+            DeckRecipeLegalityError::UnknownTemplate(template_id) => {
+                Self::UnknownTemplate(template_id)
+            }
+            DeckRecipeLegalityError::NegativeCount(template_id) => Self::NegativeCount(template_id),
+        }
     }
 }
 
@@ -477,15 +448,7 @@ pub fn migrate(connection: &Connection) -> Result<(), DeckLibraryError> {
 }
 
 pub fn deck_rules() -> DeckRules {
-    DeckRules {
-        max_decks_per_account: DECK_LIMIT_PER_ACCOUNT,
-        min_cards: MIN_DECK_CARDS,
-        basic_copy_limit: BASIC_COPY_LIMIT,
-        advanced_copy_limit: ADVANCED_COPY_LIMIT,
-        rare_copy_limit: RARE_COPY_LIMIT,
-        advanced_total_limit: ADVANCED_TOTAL_LIMIT,
-        rare_total_limit: RARE_TOTAL_LIMIT,
-    }
+    deck_recipe_legality::deck_rules(DECK_LIMIT_PER_ACCOUNT)
 }
 
 pub fn system_deck_response() -> SystemDeckListResponse {
@@ -549,80 +512,6 @@ pub fn deck_from_counts(
         }
     }
     Ok(cards)
-}
-
-pub fn validate_recipe(cards: &[DeckCardCount]) -> DeckLegality {
-    let mut messages = Vec::new();
-    let mut total_cards = 0_u16;
-    let mut basic_cards = 0_u16;
-    let mut advanced_cards = 0_u16;
-    let mut rare_cards = 0_u16;
-
-    for card_count in cards {
-        let Some(template) = card_template_by_id(&card_count.template_id) else {
-            messages.push(format!(
-                "{} is not in the card catalog.",
-                card_count.template_id
-            ));
-            total_cards = total_cards.saturating_add(card_count.count);
-            continue;
-        };
-        total_cards = total_cards.saturating_add(card_count.count);
-        match template.rarity {
-            Rarity::Basic => {
-                basic_cards = basic_cards.saturating_add(card_count.count);
-                if card_count.count > BASIC_COPY_LIMIT {
-                    messages.push(format!(
-                        "{} has {} copies; Basic cards allow at most {}.",
-                        template.name, card_count.count, BASIC_COPY_LIMIT
-                    ));
-                }
-            }
-            Rarity::Advanced => {
-                advanced_cards = advanced_cards.saturating_add(card_count.count);
-                if card_count.count > ADVANCED_COPY_LIMIT {
-                    messages.push(format!(
-                        "{} has {} copies; Advanced cards allow at most {}.",
-                        template.name, card_count.count, ADVANCED_COPY_LIMIT
-                    ));
-                }
-            }
-            Rarity::Rare => {
-                rare_cards = rare_cards.saturating_add(card_count.count);
-                if card_count.count > RARE_COPY_LIMIT {
-                    messages.push(format!(
-                        "{} has {} copies; Rare cards allow at most {}.",
-                        template.name, card_count.count, RARE_COPY_LIMIT
-                    ));
-                }
-            }
-        }
-    }
-
-    if total_cards < MIN_DECK_CARDS {
-        messages.push(format!(
-            "Deck has {total_cards} cards; at least {MIN_DECK_CARDS} are required."
-        ));
-    }
-    if advanced_cards > ADVANCED_TOTAL_LIMIT {
-        messages.push(format!(
-            "Deck has {advanced_cards} Advanced cards; at most {ADVANCED_TOTAL_LIMIT} are allowed."
-        ));
-    }
-    if rare_cards > RARE_TOTAL_LIMIT {
-        messages.push(format!(
-            "Deck has {rare_cards} Rare cards; at most {RARE_TOTAL_LIMIT} are allowed."
-        ));
-    }
-
-    DeckLegality {
-        legal: messages.is_empty(),
-        total_cards,
-        basic_cards,
-        advanced_cards,
-        rare_cards,
-        messages,
-    }
 }
 
 fn system_decks() -> Vec<SystemDeckRecipe> {
@@ -772,30 +661,6 @@ fn normalize_deck_name(name: &str) -> Result<String, DeckLibraryError> {
         return Err(DeckLibraryError::NameTooLong);
     }
     Ok(normalized.to_string())
-}
-
-fn normalize_requested_cards(
-    cards: Vec<DeckCardCountRequest>,
-) -> Result<Vec<DeckCardCount>, DeckLibraryError> {
-    let mut counts = BTreeMap::<String, u16>::new();
-    for card in cards {
-        let template_id = card.template_id.trim().to_string();
-        if card.count < 0 {
-            return Err(DeckLibraryError::NegativeCount(template_id));
-        }
-        if card.count == 0 {
-            continue;
-        }
-        if card_template_by_id(&template_id).is_none() {
-            return Err(DeckLibraryError::UnknownTemplate(template_id));
-        }
-        let entry = counts.entry(template_id).or_default();
-        *entry = entry.saturating_add(card.count as u16);
-    }
-    Ok(counts
-        .into_iter()
-        .map(|(template_id, count)| DeckCardCount { template_id, count })
-        .collect())
 }
 
 fn replace_deck_cards(

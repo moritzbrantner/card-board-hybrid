@@ -50,6 +50,7 @@ import {
   logoutAccount,
   movePiece,
   playCard,
+  previewDeckLegality,
   registerAccount,
   sharedMatchWebSocketUrl,
   updateDeck,
@@ -66,7 +67,6 @@ import type {
   DeckLegality,
   DeckListResponse,
   DeckRecipeSummary,
-  DeckRules,
   HexCoord,
   HexTile,
   MatchReplayResponse,
@@ -563,10 +563,12 @@ function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { curr
   const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
   const [deckName, setDeckName] = useState("");
   const [cardCounts, setCardCounts] = useState<Record<string, number>>({});
+  const [previewLegality, setPreviewLegality] = useState<DeckLegality | null>(null);
   const [defaultDeck, setDefaultDeck] = useState(false);
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const legalityPreviewRequestRef = useRef(0);
 
   useEffect(() => {
     void reloadDecks();
@@ -604,14 +606,14 @@ function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { curr
     setDeckName(deck?.name ?? "New Deck");
     setDefaultDeck(deck?.isDefault ?? false);
     setCardCounts(countsFromCards(deck?.cards ?? []));
+    setPreviewLegality(deck?.legality ?? null);
     setNotice(null);
   }
 
   const decks = deckLoadState.status === "ready" ? deckLoadState.response.decks : [];
   const rules = deckLoadState.status === "ready" ? deckLoadState.response.rules : null;
   const catalogCards = catalogLoadState.status === "ready" ? catalogLoadState.cards : [];
-  const localCards = cardsFromCounts(cardCounts);
-  const localLegality = rules ? evaluateDeckLegality(localCards, catalogCards, rules) : null;
+  const localCards = useMemo(() => cardsFromCounts(cardCounts), [cardCounts]);
   const filteredCards = catalogCards.filter((card) => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     return (
@@ -620,6 +622,29 @@ function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { curr
       card.text.toLocaleLowerCase().includes(normalizedQuery)
     );
   });
+
+  useEffect(() => {
+    if (!selectedDeckId) {
+      return;
+    }
+
+    const requestId = ++legalityPreviewRequestRef.current;
+    const timeout = window.setTimeout(() => {
+      previewDeckLegality(localCards)
+        .then((legality) => {
+          if (legalityPreviewRequestRef.current === requestId) {
+            setPreviewLegality(legality);
+          }
+        })
+        .catch((error: unknown) => {
+          if (legalityPreviewRequestRef.current === requestId) {
+            setNotice(error instanceof Error ? error.message : "Could not preview deck legality");
+          }
+        });
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [localCards, selectedDeckId]);
 
   function adjustCount(templateId: string, delta: number) {
     setCardCounts((current) => {
@@ -774,7 +799,7 @@ function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { curr
             </button>
           </div>
 
-          {localLegality ? <DeckLegalityPanel legality={localLegality} /> : null}
+          {previewLegality ? <DeckLegalityPanel legality={previewLegality} /> : null}
           {notice ? <p className="notice">{notice}</p> : null}
 
           <label className="catalog-search deck-search" htmlFor="deck-card-search">
@@ -843,63 +868,6 @@ function cardsFromCounts(counts: Record<string, number>): DeckCardCount[] {
     .filter(([, count]) => count > 0)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([templateId, count]) => ({ templateId, count }));
-}
-
-function evaluateDeckLegality(
-  cards: DeckCardCount[],
-  catalogCards: CatalogCard[],
-  rules: DeckRules,
-): DeckLegality {
-  const catalogByTemplate = new Map(catalogCards.map((card) => [card.templateId, card]));
-  const messages: string[] = [];
-  let totalCards = 0;
-  let basicCards = 0;
-  let advancedCards = 0;
-  let rareCards = 0;
-
-  for (const cardCount of cards) {
-    const card = catalogByTemplate.get(cardCount.templateId);
-    totalCards += cardCount.count;
-    if (!card) {
-      messages.push(`${cardCount.templateId} is not in the card catalog.`);
-      continue;
-    }
-    if (card.rarity === "basic") {
-      basicCards += cardCount.count;
-      if (cardCount.count > rules.basicCopyLimit) {
-        messages.push(`${card.name} allows at most ${rules.basicCopyLimit} copies.`);
-      }
-    } else if (card.rarity === "advanced") {
-      advancedCards += cardCount.count;
-      if (cardCount.count > rules.advancedCopyLimit) {
-        messages.push(`${card.name} allows at most ${rules.advancedCopyLimit} copies.`);
-      }
-    } else {
-      rareCards += cardCount.count;
-      if (cardCount.count > rules.rareCopyLimit) {
-        messages.push(`${card.name} allows at most ${rules.rareCopyLimit} copies.`);
-      }
-    }
-  }
-
-  if (totalCards < rules.minCards) {
-    messages.push(`At least ${rules.minCards} cards are required.`);
-  }
-  if (advancedCards > rules.advancedTotalLimit) {
-    messages.push(`At most ${rules.advancedTotalLimit} Advanced cards are allowed.`);
-  }
-  if (rareCards > rules.rareTotalLimit) {
-    messages.push(`At most ${rules.rareTotalLimit} Rare cards are allowed.`);
-  }
-
-  return {
-    legal: messages.length === 0,
-    totalCards,
-    basicCards,
-    advancedCards,
-    rareCards,
-    messages,
-  };
 }
 
 function aiSelectionFromValue(
