@@ -52,6 +52,18 @@ _Avoid_: offline match
 A human-vs-human match reached through two private seat links.
 _Avoid_: online match, lobby match
 
+**Account**:
+A sign-in identity used for profile settings and owned match history.
+_Avoid_: seat
+
+**Profile**:
+The player-facing account presentation, including display name, generated avatar, and owned match history.
+_Avoid_: public player page
+
+**Generated avatar**:
+A profile avatar made from persisted symbol and color choices, not uploaded media.
+_Avoid_: avatar upload
+
 **Seat**:
 One side-specific player slot in a shared match, either Player or Opponent.
 _Avoid_: account, user

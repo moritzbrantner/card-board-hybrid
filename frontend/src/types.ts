@@ -69,12 +69,21 @@ export type CatalogResponse = {
 export type AuthUser = {
   id: number;
   email: string;
+  displayName: string;
+  avatar: GeneratedAvatar;
 };
 
 export type AuthSessionResponse = {
   token: string;
   user: AuthUser;
 };
+
+export type GeneratedAvatar = {
+  symbol: string;
+  color: string;
+};
+
+export type AccountProfile = AuthUser;
 
 export type Wizard = {
   id: string;

@@ -1,4 +1,6 @@
 mod card_catalog;
+mod identity;
+mod match_access;
 mod match_session;
 mod match_store;
 
@@ -15,12 +17,16 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use card_catalog::{CatalogResponse, starter_catalog};
 use futures_util::StreamExt;
+use identity::{
+    AccountProfile, CreatedAuthSession, GeneratedAvatar, IdentityError, IdentityModule,
+};
+use match_access::{Actor, MatchAccess};
 use match_session::{
     MatchActionRequest, MatchMode, MatchState, ReplayEvent, ReplayVisibility, Side, WizardType,
 };
 use match_store::{
-    CreatedAuthSession, CreatedSharedMatch, MatchStoreError, SharedMatchStatus, SqliteMatchStore,
-    StoredMatch, StoredMatchSummary, StoredReplayFrame, StoredSharedMatch, StoredUser,
+    CreatedSharedMatch, MatchStoreError, SharedMatchStatus, SqliteMatchStore, StoredMatch,
+    StoredMatchSummary, StoredReplayFrame, StoredSharedMatch,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -73,6 +79,8 @@ struct AuthRequest {
 struct AuthUserResponse {
     id: i64,
     email: String,
+    display_name: String,
+    avatar: GeneratedAvatarResponse,
 }
 
 #[derive(Serialize)]
@@ -86,6 +94,27 @@ struct AuthSessionResponse {
 #[serde(rename_all = "camelCase")]
 struct AuthMessageResponse {
     message: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GeneratedAvatarResponse {
+    symbol: String,
+    color: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateProfileRequest {
+    display_name: String,
+    avatar: GeneratedAvatarRequest,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GeneratedAvatarRequest {
+    symbol: String,
+    color: String,
 }
 
 #[derive(Deserialize)]
@@ -228,7 +257,7 @@ fn create_app(store: SqliteMatchStore) -> Router {
     });
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST])
+        .allow_methods([Method::GET, Method::POST, Method::PATCH])
         .allow_headers(Any);
 
     let static_files = ServeDir::new("frontend/dist")
@@ -241,6 +270,8 @@ fn create_app(store: SqliteMatchStore) -> Router {
         .route("/api/auth/login", post(login_account))
         .route("/api/auth/logout", post(logout_account))
         .route("/api/auth/me", get(current_account))
+        .route("/api/profile", get(load_profile).patch(update_profile))
+        .route("/api/profile/matches", get(list_profile_matches))
         .route("/api/matches", get(list_matches).post(create_match))
         .route("/api/matches/{match_id}", get(load_match))
         .route("/api/matches/{match_id}/replay", get(load_replay))
@@ -287,7 +318,7 @@ async fn register_account(
     State(state): State<SharedState>,
     Json(request): Json<AuthRequest>,
 ) -> impl IntoResponse {
-    let Some((email, normalized_email)) = normalized_email(&request.email) else {
+    let Some((email, normalized_email)) = identity::normalized_email(&request.email) else {
         return (
             StatusCode::BAD_REQUEST,
             Json(ApiError {
@@ -311,8 +342,9 @@ async fn register_account(
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        let user = match store.create_user(&email, &normalized_email, &request.password) {
-            Ok(Some(user)) => user,
+        let mut identity = IdentityModule::new(store.connection_mut());
+        match identity.register(&email, &normalized_email, &request.password) {
+            Ok(Some(session)) => session,
             Ok(None) => {
                 return (
                     StatusCode::CONFLICT,
@@ -322,11 +354,7 @@ async fn register_account(
                 )
                     .into_response();
             }
-            Err(error) => return store_error_response(error),
-        };
-        match store.create_auth_session(user) {
-            Ok(session) => session,
-            Err(error) => return store_error_response(error),
+            Err(error) => return identity_error_response(error),
         }
     };
 
@@ -337,7 +365,7 @@ async fn login_account(
     State(state): State<SharedState>,
     Json(request): Json<AuthRequest>,
 ) -> impl IntoResponse {
-    let Some((_, normalized_email)) = normalized_email(&request.email) else {
+    let Some((_, normalized_email)) = identity::normalized_email(&request.email) else {
         return invalid_credentials_response();
     };
 
@@ -346,14 +374,11 @@ async fn login_account(
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        let user = match store.authenticate_user(&normalized_email, &request.password) {
-            Ok(Some(user)) => user,
+        let mut identity = IdentityModule::new(store.connection_mut());
+        match identity.login(&normalized_email, &request.password) {
+            Ok(Some(session)) => session,
             Ok(None) => return invalid_credentials_response(),
-            Err(error) => return store_error_response(error),
-        };
-        match store.create_auth_session(user) {
-            Ok(session) => session,
-            Err(error) => return store_error_response(error),
+            Err(error) => return identity_error_response(error),
         }
     };
 
@@ -364,10 +389,94 @@ async fn current_account(
     State(state): State<SharedState>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    match required_user_from_headers(&state, &headers) {
+    match required_profile_from_headers(&state, &headers) {
         Ok(user) => Json(AuthUserResponse::from(user)).into_response(),
         Err(response) => response,
     }
+}
+
+async fn load_profile(State(state): State<SharedState>, headers: HeaderMap) -> impl IntoResponse {
+    match required_profile_from_headers(&state, &headers) {
+        Ok(profile) => Json(AuthUserResponse::from(profile)).into_response(),
+        Err(response) => response,
+    }
+}
+
+async fn update_profile(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(request): Json<UpdateProfileRequest>,
+) -> impl IntoResponse {
+    let profile = match required_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
+        Err(response) => return response,
+    };
+    let display_name = request.display_name.trim();
+    if display_name.is_empty() || display_name.len() > 32 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError {
+                message: "Display name must be between 1 and 32 characters.".to_string(),
+            }),
+        )
+            .into_response();
+    }
+    if !generated_avatar_is_valid(&request.avatar) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError {
+                message: "Choose a valid generated avatar.".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    let updated = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let mut identity = IdentityModule::new(store.connection_mut());
+        match identity.update_profile(
+            profile.id,
+            display_name,
+            GeneratedAvatar {
+                symbol: request.avatar.symbol,
+                color: request.avatar.color,
+            },
+        ) {
+            Ok(Some(profile)) => profile,
+            Ok(None) => return unauthorized_response(),
+            Err(error) => return identity_error_response(error),
+        }
+    };
+
+    Json(AuthUserResponse::from(updated)).into_response()
+}
+
+async fn list_profile_matches(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let profile = match required_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
+        Err(response) => return response,
+    };
+    let matches = {
+        let store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        match MatchAccess::new(&store).list_profile_matches(profile.id) {
+            Ok(matches) => matches,
+            Err(error) => return store_error_response(error),
+        }
+    };
+
+    Json(MatchArchiveResponse {
+        matches: matches.into_iter().map(MatchSummary::from).collect(),
+    })
+    .into_response()
 }
 
 async fn logout_account(State(state): State<SharedState>, headers: HeaderMap) -> impl IntoResponse {
@@ -383,8 +492,9 @@ async fn logout_account(State(state): State<SharedState>, headers: HeaderMap) ->
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        if let Err(error) = store.delete_auth_session(&token) {
-            return store_error_response(error);
+        let mut identity = IdentityModule::new(store.connection_mut());
+        if let Err(error) = identity.logout(&token) {
+            return identity_error_response(error);
         }
     }
 
@@ -395,8 +505,8 @@ async fn logout_account(State(state): State<SharedState>, headers: HeaderMap) ->
 }
 
 async fn list_matches(State(state): State<SharedState>, headers: HeaderMap) -> impl IntoResponse {
-    let user = match optional_user_from_headers(&state, &headers) {
-        Ok(user) => user,
+    let profile = match optional_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
         Err(response) => return response,
     };
     let matches = {
@@ -404,7 +514,7 @@ async fn list_matches(State(state): State<SharedState>, headers: HeaderMap) -> i
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        match store.list_replayable_matches_for_user(user.as_ref().map(|user| user.id)) {
+        match store.list_replayable_matches_for_user(profile.as_ref().map(|profile| profile.id)) {
             Ok(matches) => matches,
             Err(error) => return store_error_response(error),
         }
@@ -421,8 +531,8 @@ async fn create_match(
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
-    let user = match optional_user_from_headers(&state, &headers) {
-        Ok(user) => user,
+    let profile = match optional_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
         Err(response) => return response,
     };
     let wizard_type = if body.is_empty() || body.iter().all(|byte| byte.is_ascii_whitespace()) {
@@ -449,10 +559,12 @@ async fn create_match(
             .expect("store lock should not be poisoned");
         let result = match wizard_type {
             Some(wizard_type) => {
-                store.create_match_for_user(wizard_type, user.as_ref().map(|user| user.id))
+                store.create_match_for_user(wizard_type, profile.as_ref().map(|profile| profile.id))
             }
-            None => store
-                .create_match_for_user(WizardType::default(), user.as_ref().map(|user| user.id)),
+            None => store.create_match_for_user(
+                WizardType::default(),
+                profile.as_ref().map(|profile| profile.id),
+            ),
         };
         match result {
             Ok(created) => created,
@@ -465,14 +577,19 @@ async fn create_match(
 
 async fn create_shared_match(
     State(state): State<SharedState>,
+    headers: HeaderMap,
     Json(_request): Json<CreateMatchRequest>,
 ) -> impl IntoResponse {
+    let profile = match optional_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
+        Err(response) => return response,
+    };
     let created = {
         let mut store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        match store.create_shared_match() {
+        match store.create_shared_match(profile.as_ref().map(|profile| profile.id)) {
             Ok(created) => created,
             Err(error) => return store_error_response(error),
         }
@@ -835,8 +952,8 @@ async fn load_match(
     headers: HeaderMap,
     Path(match_id): Path<String>,
 ) -> impl IntoResponse {
-    let user = match optional_user_from_headers(&state, &headers) {
-        Ok(user) => user,
+    let profile = match optional_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
         Err(response) => return response,
     };
     let loaded = {
@@ -851,7 +968,8 @@ async fn load_match(
             }
             Err(error) => return store_error_response(error),
         };
-        if !match_is_accessible(&store, &match_id, user.as_ref()) {
+        let actor = Actor::from(profile.as_ref());
+        if !MatchAccess::new(&store).can_load_match(&actor, &match_id) {
             return match_not_found_response(&match_id);
         }
         loaded
@@ -865,8 +983,8 @@ async fn load_replay(
     headers: HeaderMap,
     Path(match_id): Path<String>,
 ) -> impl IntoResponse {
-    let user = match optional_user_from_headers(&state, &headers) {
-        Ok(user) => user,
+    let profile = match optional_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
         Err(response) => return response,
     };
     let replay = {
@@ -881,7 +999,8 @@ async fn load_replay(
             }
             Err(error) => return store_error_response(error),
         };
-        if !match_is_accessible(&store, &match_id, user.as_ref()) {
+        let actor = Actor::from(profile.as_ref());
+        if !MatchAccess::new(&store).can_load_replay(&actor, &match_id) {
             return replay_not_found_response(&match_id);
         }
         replay
@@ -925,8 +1044,8 @@ async fn apply_match_action(
     Path(match_id): Path<String>,
     Json(request): Json<MatchActionRequest>,
 ) -> impl IntoResponse {
-    let user = match optional_user_from_headers(&state, &headers) {
-        Ok(user) => user,
+    let profile = match optional_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
         Err(response) => return response,
     };
     let saved = {
@@ -947,7 +1066,8 @@ async fn apply_match_action(
             }
             Err(error) => return store_error_response(error),
         };
-        if !match_is_accessible(&store, &match_id, user.as_ref()) {
+        let actor = Actor::from(profile.as_ref());
+        if !MatchAccess::new(&store).can_apply_solo_action(&actor, &match_id) {
             return match_not_found_response(&match_id);
         }
 
@@ -989,6 +1109,16 @@ async fn apply_match_action(
 }
 
 fn store_error_response(error: MatchStoreError) -> axum::response::Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ApiError {
+            message: error.to_string(),
+        }),
+    )
+        .into_response()
+}
+
+fn identity_error_response(error: IdentityError) -> axum::response::Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(ApiError {
@@ -1048,13 +1178,10 @@ fn shared_not_found_response() -> axum::response::Response {
         .into_response()
 }
 
-fn normalized_email(email: &str) -> Option<(String, String)> {
-    let trimmed = email.trim();
-    if trimmed.is_empty() || !trimmed.contains('@') {
-        return None;
-    }
-    let normalized = trimmed.to_ascii_lowercase();
-    Some((trimmed.to_string(), normalized))
+fn generated_avatar_is_valid(avatar: &GeneratedAvatarRequest) -> bool {
+    const SYMBOLS: [&str; 6] = ["sparkles", "shield", "sword", "wand", "rune", "flame"];
+    const COLORS: [&str; 6] = ["emerald", "indigo", "rose", "amber", "sky", "slate"];
+    SYMBOLS.contains(&avatar.symbol.as_str()) && COLORS.contains(&avatar.color.as_str())
 }
 
 fn bearer_token_from_headers(headers: &HeaderMap) -> Option<String> {
@@ -1065,53 +1192,46 @@ fn bearer_token_from_headers(headers: &HeaderMap) -> Option<String> {
         .map(str::to_string)
 }
 
-fn optional_user_from_headers(
+fn optional_profile_from_headers(
     state: &SharedState,
     headers: &HeaderMap,
-) -> Result<Option<StoredUser>, axum::response::Response> {
+) -> Result<Option<AccountProfile>, axum::response::Response> {
     let Some(token) = bearer_token_from_headers(headers) else {
         return Ok(None);
     };
 
-    let user = {
-        let store = state
+    let profile = {
+        let mut store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        match store.load_user_by_session(&token) {
-            Ok(user) => user,
-            Err(error) => return Err(store_error_response(error)),
+        let identity = IdentityModule::new(store.connection_mut());
+        match identity.current_profile(&token) {
+            Ok(profile) => profile,
+            Err(error) => return Err(identity_error_response(error)),
         }
     };
 
-    user.map(Some).ok_or_else(unauthorized_response)
+    profile.map(Some).ok_or_else(unauthorized_response)
 }
 
-fn required_user_from_headers(
+fn required_profile_from_headers(
     state: &SharedState,
     headers: &HeaderMap,
-) -> Result<StoredUser, axum::response::Response> {
-    optional_user_from_headers(state, headers)?.ok_or_else(unauthorized_response)
+) -> Result<AccountProfile, axum::response::Response> {
+    optional_profile_from_headers(state, headers)?.ok_or_else(unauthorized_response)
 }
 
-fn match_is_accessible(
-    store: &SqliteMatchStore,
-    match_id: &str,
-    user: Option<&StoredUser>,
-) -> bool {
-    match store.match_owner_user_id(match_id) {
-        Ok(Some(Some(owner_user_id))) => user.is_some_and(|user| user.id == owner_user_id),
-        Ok(Some(None)) => true,
-        Ok(None) => false,
-        Err(_) => false,
-    }
-}
-
-impl From<StoredUser> for AuthUserResponse {
-    fn from(user: StoredUser) -> Self {
+impl From<AccountProfile> for AuthUserResponse {
+    fn from(profile: AccountProfile) -> Self {
         Self {
-            id: user.id,
-            email: user.email,
+            id: profile.id,
+            email: profile.email,
+            display_name: profile.display_name,
+            avatar: GeneratedAvatarResponse {
+                symbol: profile.avatar.symbol,
+                color: profile.avatar.color,
+            },
         }
     }
 }
@@ -1120,7 +1240,7 @@ impl From<CreatedAuthSession> for AuthSessionResponse {
     fn from(session: CreatedAuthSession) -> Self {
         Self {
             token: session.token,
-            user: AuthUserResponse::from(session.user),
+            user: AuthUserResponse::from(session.profile),
         }
     }
 }
@@ -1292,7 +1412,79 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(current_user["email"], "player@example.com");
+        assert_eq!(current_user["displayName"], "player");
+        assert!(current_user["avatar"]["symbol"].as_str().is_some());
+        assert!(current_user["avatar"]["color"].as_str().is_some());
         assert!(current_user["id"].as_i64().unwrap() > 0);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn profile_can_update_display_name_and_generated_avatar() {
+        let path = test_db_path("profile-update");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "profile@example.com").await;
+
+        let (status, updated) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/profile")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"displayName":"Rune Pilot","avatar":{"symbol":"shield","color":"indigo"}}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(updated["displayName"], "Rune Pilot");
+        assert_eq!(updated["avatar"]["symbol"], "shield");
+        assert_eq!(updated["avatar"]["color"], "indigo");
+
+        let (status, loaded) = json_request(
+            app,
+            Request::builder()
+                .uri("/api/profile")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(loaded["displayName"], "Rune Pilot");
+        assert_eq!(loaded["avatar"]["symbol"], "shield");
+        assert_eq!(loaded["avatar"]["color"], "indigo");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn profile_rejects_unknown_generated_avatar_values() {
+        let path = test_db_path("profile-avatar-invalid");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "avatar@example.com").await;
+
+        let (status, body) = json_request(
+            app,
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/profile")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"displayName":"Avatar","avatar":{"symbol":"dragon","color":"void"}}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["message"], "Choose a valid generated avatar.");
 
         let _ = fs::remove_file(path);
     }
@@ -1356,6 +1548,133 @@ mod tests {
             second_load_from_first_user["message"],
             format!("Match {second_match_id} was not found")
         );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn profile_matches_list_owned_solo_matches_only() {
+        let path = test_db_path("profile-solo-history");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let first_token = register_test_account(app.clone(), "history-first@example.com").await;
+        let second_token = register_test_account(app.clone(), "history-second@example.com").await;
+
+        let (_, first_match) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .header("authorization", format!("Bearer {first_token}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        let first_match_id = first_match["matchId"].as_str().unwrap().to_string();
+
+        let _ = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .header("authorization", format!("Bearer {second_token}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        let (status, profile_matches) = json_request(
+            app,
+            Request::builder()
+                .uri("/api/profile/matches")
+                .header("authorization", format!("Bearer {first_token}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(profile_matches["matches"].as_array().unwrap().len(), 1);
+        assert_eq!(profile_matches["matches"][0]["matchId"], first_match_id);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn profile_matches_include_completed_shared_matches_created_by_account() {
+        let path = test_db_path("profile-shared-history");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "shared-creator@example.com").await;
+
+        let (_, created) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/shared-matches")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
+                .expect("request should build"),
+        )
+        .await;
+        let match_id = created["matchId"].as_str().expect("match id should exist");
+        let player_token = seat_token_from_url(
+            created["playerSeatUrl"]
+                .as_str()
+                .expect("player URL exists"),
+        );
+        let opponent_token = seat_token_from_url(
+            created["inviteSeatUrl"]
+                .as_str()
+                .expect("invite URL exists"),
+        );
+
+        let _ = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/shared-matches/{match_id}/seats/{opponent_token}/join"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"wizardType":"pyromancer"}"#))
+                .expect("request should build"),
+        )
+        .await;
+        let _ = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/shared-matches/{match_id}/seats/{player_token}/join"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
+                .expect("request should build"),
+        )
+        .await;
+
+        let connection = rusqlite::Connection::open(&path).expect("test database should open");
+        connection
+            .execute(
+                "UPDATE shared_matches SET status = 'completed' WHERE match_id = ?1",
+                rusqlite::params![match_id],
+            )
+            .expect("shared match should be markable complete");
+
+        let (status, profile_matches) = json_request(
+            app,
+            Request::builder()
+                .uri("/api/profile/matches")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(profile_matches["matches"].as_array().unwrap().len(), 1);
+        assert_eq!(profile_matches["matches"][0]["matchId"], match_id);
 
         let _ = fs::remove_file(path);
     }

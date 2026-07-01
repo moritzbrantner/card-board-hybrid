@@ -12,25 +12,14 @@ import type {
   SharedMatchResponse,
   HexCoord,
   WizardType,
+  AccountProfile,
+  GeneratedAvatar,
 } from "./types";
+import { clearAuthToken, getAuthToken } from "./session";
 
 type ApiError = {
   message?: string;
 };
-
-const AUTH_TOKEN_STORAGE_KEY = "rune-lanes-auth-token";
-
-export function getAuthToken() {
-  return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
-}
-
-export function saveAuthToken(token: string) {
-  localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
-}
-
-export function clearAuthToken() {
-  localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getAuthToken();
@@ -70,6 +59,21 @@ export function loginAccount(email: string, password: string) {
 
 export function loadCurrentAccount() {
   return request<AuthUser>("/api/auth/me");
+}
+
+export function loadProfile() {
+  return request<AccountProfile>("/api/profile");
+}
+
+export function updateProfile(displayName: string, avatar: GeneratedAvatar) {
+  return request<AccountProfile>("/api/profile", {
+    method: "PATCH",
+    body: JSON.stringify({ displayName, avatar }),
+  });
+}
+
+export function loadProfileMatches() {
+  return request<MatchArchiveResponse>("/api/profile/matches");
 }
 
 export function logoutAccount() {

@@ -31,11 +31,9 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   attack,
-  clearAuthToken,
   createMatch,
   createSharedMatch,
   endTurn,
-  getAuthToken,
   joinSharedMatch,
   loadCurrentAccount,
   loadCatalog,
@@ -48,9 +46,10 @@ import {
   movePiece,
   playCard,
   registerAccount,
-  saveAuthToken,
   sharedMatchWebSocketUrl,
 } from "./api";
+import { ProfilePage } from "./profile";
+import { clearAuthToken, getAuthToken, saveAuthToken } from "./session";
 import type {
   AuthSessionResponse,
   AuthUser,
@@ -143,8 +142,9 @@ type WizardOption = {
 };
 
 type AccountProps = {
-  currentUser: AuthUser;
+  currentUser: AuthUser | null;
   onSignOut: () => void;
+  onNavigate: (to: string) => void;
 };
 
 const WIZARD_OPTIONS = [
@@ -267,11 +267,22 @@ export function App() {
     return <ShellMessage title="Rune Lanes" message="Checking account" />;
   }
 
-  if (authState.status === "signedOut") {
-    return <AuthPage onAuthenticated={handleAuthenticated} />;
-  }
+  const currentUser = authState.status === "signedIn" ? authState.user : null;
 
-  const currentUser = authState.user;
+  if (normalizedPath === "/profile") {
+    if (!currentUser) {
+      return <AuthPage onAuthenticated={handleAuthenticated} />;
+    }
+
+    return (
+      <ProfilePage
+        currentUser={currentUser}
+        onNavigate={navigate}
+        onProfileUpdated={(profile) => setAuthState({ status: "signedIn", user: profile })}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
 
   if (path === "/" || path === "") {
     return <MatchPicker onNavigate={navigate} currentUser={currentUser} onSignOut={handleSignOut} />;
@@ -659,10 +670,26 @@ function AuthPage({
   );
 }
 
-function AccountActions({ currentUser, onSignOut }: AccountProps) {
+function AccountActions({ currentUser, onSignOut, onNavigate }: AccountProps) {
+  if (!currentUser) {
+    return (
+      <div className="account-actions">
+        <button className="secondary-link" type="button" onClick={() => onNavigate("/profile")}>
+          <LogIn size={18} />
+          Sign In
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="account-actions">
-      <span>{currentUser.email}</span>
+      <button className="secondary-link" type="button" onClick={() => onNavigate("/profile")}>
+        <span className={`profile-avatar ${currentUser.avatar.color}`}>
+          {avatarSymbolLabel(currentUser.avatar.symbol)}
+        </span>
+        {currentUser.displayName}
+      </button>
       <button className="icon-button" type="button" onClick={onSignOut} title="Sign out">
         <LogOut size={18} />
       </button>
@@ -731,7 +758,7 @@ function MatchPicker({
             <p className="eyebrow">Rune Lanes</p>
             <h1>Choose Your Wizard</h1>
           </div>
-          <AccountActions currentUser={currentUser} onSignOut={onSignOut} />
+          <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
         </header>
         <fieldset className="wizard-picker" aria-label="Wizard type">
           <legend>Wizard Type</legend>
@@ -882,7 +909,7 @@ function MatchArchivePage({
             <h1>Match Archive</h1>
           </div>
           <div className="actions">
-            <AccountActions currentUser={currentUser} onSignOut={onSignOut} />
+            <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
             <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Match picker">
               <House size={18} />
             </button>
@@ -1268,7 +1295,7 @@ function MatchPage({
             <p className="match-id">Match {matchId}</p>
           </div>
           <div className="actions">
-            <AccountActions currentUser={currentUser} onSignOut={onSignOut} />
+            <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
             <button
               className="icon-button"
               type="button"
@@ -1720,7 +1747,7 @@ function SharedMatchPage({
               <h1>Lobby</h1>
               <p className="match-id">Match {matchId}</p>
             </div>
-            <AccountActions currentUser={currentUser} onSignOut={onSignOut} />
+            <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
           </header>
           {viewerSide === "player" ? (
             <div className="share-panel">
@@ -1788,7 +1815,7 @@ function SharedMatchPage({
             <p className="match-id">Match {matchId}</p>
           </div>
           <div className="actions">
-            <AccountActions currentUser={currentUser} onSignOut={onSignOut} />
+            <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
             <button
               className="icon-button"
               type="button"
@@ -1977,7 +2004,7 @@ function ReplayPage({
             <p className="match-id">Match {matchId}</p>
           </div>
           <div className="actions">
-            <AccountActions currentUser={currentUser} onSignOut={onSignOut} />
+            <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
             <button
               className="icon-button"
               type="button"
@@ -2739,6 +2766,10 @@ function wizardTypeLabel(wizardType: WizardType) {
 
 function wizardTokenLabel(wizardType: WizardType) {
   return wizardOptionByType(wizardType).token;
+}
+
+function avatarSymbolLabel(symbol: string) {
+  return symbol.slice(0, 1).toUpperCase();
 }
 
 function sideLabel(side: Side | null) {

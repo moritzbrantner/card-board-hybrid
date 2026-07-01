@@ -78,6 +78,13 @@ button {
   margin: 0 auto;
 }
 
+.profile-layout {
+  display: grid;
+  gap: 16px;
+  width: min(980px, 100%);
+  margin: 0 auto;
+}
+
 .picker-shell {
   display: grid;
   align-items: center;
@@ -143,6 +150,55 @@ button {
   font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.profile-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 250, 240, 0.28);
+  border-radius: 8px;
+  color: #fffaf0;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.profile-avatar.large {
+  width: 82px;
+  height: 82px;
+  font-size: 2rem;
+}
+
+.profile-avatar.emerald,
+.avatar-swatch.emerald {
+  background: #2f8f70;
+}
+
+.profile-avatar.indigo,
+.avatar-swatch.indigo {
+  background: #5867c7;
+}
+
+.profile-avatar.rose,
+.avatar-swatch.rose {
+  background: #b84e68;
+}
+
+.profile-avatar.amber,
+.avatar-swatch.amber {
+  background: #b8862f;
+}
+
+.profile-avatar.sky,
+.avatar-swatch.sky {
+  background: #3f8fb8;
+}
+
+.profile-avatar.slate,
+.avatar-swatch.slate {
+  background: #58616b;
 }
 
 .picker-actions {
@@ -807,6 +863,118 @@ h1 {
   font-weight: 800;
 }
 
+.profile-editor {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.profile-fields {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.profile-fields label,
+.avatar-controls legend {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.profile-fields input {
+  min-height: 42px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: #fffaf0;
+  background: rgba(255, 255, 255, 0.08);
+  font: inherit;
+}
+
+.profile-fields span {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.avatar-controls {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.avatar-controls fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.avatar-controls fieldset > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.avatar-controls button {
+  display: inline-grid;
+  place-items: center;
+  min-width: 42px;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #fffaf0;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.avatar-controls button.active {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(217, 184, 79, 0.22);
+}
+
+.avatar-swatch {
+  width: 42px;
+  padding: 0;
+}
+
+.profile-editor > .primary-button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.profile-editor > .notice {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.profile-history {
+  display: grid;
+  gap: 12px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-heading h2 {
+  margin: 0;
+}
+
 .match-list {
   display: grid;
   gap: 10px;
@@ -1306,6 +1474,11 @@ h1 {
 
   .match-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .profile-editor,
+  .avatar-controls {
+    grid-template-columns: 1fr;
   }
 
   .match-row-actions {

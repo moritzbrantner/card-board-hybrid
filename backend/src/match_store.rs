@@ -6,12 +6,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use argon2::Argon2;
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use rand::RngCore;
 use rand::rngs::OsRng;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+use crate::identity;
 use crate::match_session::{
     MatchActionRequest, MatchState, RecordedReplayFrame, ReplayEvent, Side, WizardType,
 };
@@ -80,18 +79,6 @@ pub struct CreatedSharedMatch {
     pub opponent_token: String,
 }
 
-#[derive(Clone, Debug)]
-pub struct StoredUser {
-    pub id: i64,
-    pub email: String,
-}
-
-#[derive(Clone, Debug)]
-pub struct CreatedAuthSession {
-    pub token: String,
-    pub user: StoredUser,
-}
-
 pub struct SqliteMatchStore {
     connection: Connection,
 }
@@ -101,7 +88,7 @@ pub enum MatchStoreError {
     Io(std::io::Error),
     Sqlite(rusqlite::Error),
     Snapshot(serde_json::Error),
-    PasswordHash(argon2::password_hash::Error),
+    Identity(identity::IdentityError),
 }
 
 impl fmt::Display for MatchStoreError {
@@ -110,9 +97,7 @@ impl fmt::Display for MatchStoreError {
             Self::Io(error) => write!(f, "could not prepare match database: {error}"),
             Self::Sqlite(error) => write!(f, "could not access match database: {error}"),
             Self::Snapshot(error) => write!(f, "could not read persisted match snapshot: {error}"),
-            Self::PasswordHash(error) => {
-                write!(f, "could not process password credentials: {error}")
-            }
+            Self::Identity(error) => write!(f, "{error}"),
         }
     }
 }
@@ -137,9 +122,9 @@ impl From<serde_json::Error> for MatchStoreError {
     }
 }
 
-impl From<argon2::password_hash::Error> for MatchStoreError {
-    fn from(error: argon2::password_hash::Error) -> Self {
-        Self::PasswordHash(error)
+impl From<identity::IdentityError> for MatchStoreError {
+    fn from(error: identity::IdentityError) -> Self {
+        Self::Identity(error)
     }
 }
 
@@ -186,6 +171,7 @@ impl SqliteMatchStore {
             CREATE TABLE IF NOT EXISTS shared_matches (
                 match_id TEXT PRIMARY KEY NOT NULL,
                 status TEXT NOT NULL,
+                creator_user_id INTEGER,
                 created_at INTEGER NOT NULL DEFAULT (unixepoch()),
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
                 forfeit_winner TEXT
@@ -200,24 +186,9 @@ impl SqliteMatchStore {
                 disconnected_at INTEGER,
                 PRIMARY KEY (match_id, side)
             );
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT NOT NULL,
-                email_normalized TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch())
-            );
-            CREATE TABLE IF NOT EXISTS auth_sessions (
-                token TEXT PRIMARY KEY NOT NULL,
-                user_id INTEGER NOT NULL,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                expires_at INTEGER NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-            );
-            CREATE INDEX IF NOT EXISTS auth_sessions_user_id_idx
-                ON auth_sessions(user_id);
             ",
         )?;
+        identity::migrate(&connection)?;
         add_column_if_missing(&connection, "matches", "initial_snapshot_json", "TEXT")?;
         add_column_if_missing(&connection, "matches", "completed_at", "INTEGER")?;
         add_column_if_missing(
@@ -227,136 +198,13 @@ impl SqliteMatchStore {
             "TEXT NOT NULL DEFAULT 'solo'",
         )?;
         add_column_if_missing(&connection, "matches", "owner_user_id", "INTEGER")?;
+        add_column_if_missing(&connection, "shared_matches", "creator_user_id", "INTEGER")?;
 
         Ok(Self { connection })
     }
 
-    pub fn create_user(
-        &mut self,
-        email: &str,
-        normalized_email: &str,
-        password: &str,
-    ) -> Result<Option<StoredUser>, MatchStoreError> {
-        let password_hash = hash_password(password)?;
-        let inserted = self.connection.execute(
-            "
-            INSERT OR IGNORE INTO users (
-                email,
-                email_normalized,
-                password_hash,
-                created_at
-            )
-            VALUES (?1, ?2, ?3, unixepoch())
-            ",
-            params![email, normalized_email, password_hash],
-        )?;
-
-        if inserted == 0 {
-            return Ok(None);
-        }
-
-        self.load_user_by_normalized_email(normalized_email)
-    }
-
-    pub fn authenticate_user(
-        &self,
-        normalized_email: &str,
-        password: &str,
-    ) -> Result<Option<StoredUser>, MatchStoreError> {
-        let row: Option<(i64, String, String)> = self
-            .connection
-            .query_row(
-                "
-                SELECT id, email, password_hash
-                FROM users
-                WHERE email_normalized = ?1
-                ",
-                params![normalized_email],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()?;
-
-        let Some((id, email, password_hash)) = row else {
-            return Ok(None);
-        };
-
-        if !password_matches(password, &password_hash) {
-            return Ok(None);
-        }
-
-        Ok(Some(StoredUser { id, email }))
-    }
-
-    pub fn create_auth_session(
-        &mut self,
-        user: StoredUser,
-    ) -> Result<CreatedAuthSession, MatchStoreError> {
-        let token = random_auth_token();
-        self.connection.execute(
-            "
-            INSERT INTO auth_sessions (
-                token,
-                user_id,
-                created_at,
-                expires_at
-            )
-            VALUES (?1, ?2, unixepoch(), unixepoch() + 2592000)
-            ",
-            params![token, user.id],
-        )?;
-
-        Ok(CreatedAuthSession { token, user })
-    }
-
-    pub fn load_user_by_session(&self, token: &str) -> Result<Option<StoredUser>, MatchStoreError> {
-        self.connection
-            .query_row(
-                "
-                SELECT users.id, users.email
-                FROM auth_sessions
-                JOIN users ON users.id = auth_sessions.user_id
-                WHERE auth_sessions.token = ?1
-                    AND auth_sessions.expires_at > unixepoch()
-                ",
-                params![token],
-                |row| {
-                    Ok(StoredUser {
-                        id: row.get(0)?,
-                        email: row.get(1)?,
-                    })
-                },
-            )
-            .optional()
-            .map_err(MatchStoreError::from)
-    }
-
-    pub fn delete_auth_session(&mut self, token: &str) -> Result<(), MatchStoreError> {
-        self.connection
-            .execute("DELETE FROM auth_sessions WHERE token = ?1", params![token])?;
-        Ok(())
-    }
-
-    fn load_user_by_normalized_email(
-        &self,
-        normalized_email: &str,
-    ) -> Result<Option<StoredUser>, MatchStoreError> {
-        self.connection
-            .query_row(
-                "
-                SELECT id, email
-                FROM users
-                WHERE email_normalized = ?1
-                ",
-                params![normalized_email],
-                |row| {
-                    Ok(StoredUser {
-                        id: row.get(0)?,
-                        email: row.get(1)?,
-                    })
-                },
-            )
-            .optional()
-            .map_err(MatchStoreError::from)
+    pub fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.connection
     }
 
     pub fn create_match_for_user(
@@ -428,7 +276,10 @@ impl SqliteMatchStore {
         Ok(StoredMatch { id, state })
     }
 
-    pub fn create_shared_match(&mut self) -> Result<CreatedSharedMatch, MatchStoreError> {
+    pub fn create_shared_match(
+        &mut self,
+        creator_user_id: Option<i64>,
+    ) -> Result<CreatedSharedMatch, MatchStoreError> {
         for attempt in 0..8 {
             let match_id = readable_match_id(attempt);
             let player_token = random_seat_token();
@@ -439,12 +290,13 @@ impl SqliteMatchStore {
                 INSERT OR IGNORE INTO shared_matches (
                     match_id,
                     status,
+                    creator_user_id,
                     created_at,
                     updated_at
                 )
-                VALUES (?1, 'setup', unixepoch(), unixepoch())
+                VALUES (?1, 'setup', ?2, unixepoch(), unixepoch())
                 ",
-                params![match_id],
+                params![match_id, creator_user_id],
             )?;
 
             if inserted == 1 {
@@ -840,6 +692,57 @@ impl SqliteMatchStore {
         Ok(summaries)
     }
 
+    pub fn list_profile_matches(
+        &self,
+        user_id: i64,
+    ) -> Result<Vec<StoredMatchSummary>, MatchStoreError> {
+        let mut statement = self.connection.prepare(
+            "
+            SELECT
+                matches.id,
+                matches.snapshot_json,
+                matches.created_at,
+                matches.updated_at,
+                COUNT(match_replay_frames.frame_index) AS frame_count
+            FROM matches
+            JOIN match_replay_frames ON match_replay_frames.match_id = matches.id
+            LEFT JOIN shared_matches ON shared_matches.match_id = matches.id
+            WHERE matches.initial_snapshot_json IS NOT NULL
+                AND (
+                    matches.owner_user_id = ?1
+                    OR (
+                        matches.mode = 'shared'
+                        AND shared_matches.creator_user_id = ?1
+                        AND shared_matches.status IN ('completed', 'forfeited')
+                    )
+                )
+            GROUP BY matches.id
+            HAVING frame_count > 0
+            ORDER BY matches.updated_at DESC
+            ",
+        )?;
+        let mut rows = statement.query(params![user_id])?;
+
+        let mut summaries = Vec::new();
+        while let Some(row) = rows.next()? {
+            let id = row.get::<_, String>(0)?;
+            let snapshot = row.get::<_, String>(1)?;
+            let created_at = row.get::<_, i64>(2)?;
+            let updated_at = row.get::<_, i64>(3)?;
+            let frame_count = row.get::<_, i64>(4)?;
+            let state = MatchState::from_snapshot_json(&snapshot)?;
+            summaries.push(StoredMatchSummary {
+                id,
+                created_at,
+                updated_at,
+                frame_count: frame_count as usize,
+                state,
+            });
+        }
+
+        Ok(summaries)
+    }
+
     pub fn load_replay(&self, id: &str) -> Result<Option<StoredReplay>, MatchStoreError> {
         let summary = self.load_replay_summary(id)?;
         let Some(summary) = summary else {
@@ -1180,10 +1083,6 @@ fn random_seat_token() -> String {
     random_hex_token(24)
 }
 
-fn random_auth_token() -> String {
-    random_hex_token(32)
-}
-
 fn random_hex_token(byte_count: usize) -> String {
     let mut bytes = [0_u8; 24];
     let mut dynamic_bytes;
@@ -1200,24 +1099,6 @@ fn random_hex_token(byte_count: usize) -> String {
         token.push_str(&format!("{byte:02x}"));
     }
     token
-}
-
-fn hash_password(password: &str) -> Result<String, MatchStoreError> {
-    let salt = SaltString::generate(&mut rand_core::OsRng);
-    Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
-        .map(|hash| hash.to_string())
-        .map_err(MatchStoreError::from)
-}
-
-fn password_matches(password: &str, password_hash: &str) -> bool {
-    let Ok(parsed_hash) = PasswordHash::new(password_hash) else {
-        return false;
-    };
-
-    Argon2::default()
-        .verify_password(password.as_bytes(), &parsed_hash)
-        .is_ok()
 }
 
 fn to_base36(mut value: u64) -> String {
