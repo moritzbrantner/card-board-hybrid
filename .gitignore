@@ -7,3 +7,5 @@ data/
 .env
 .env.local
 *.log
+playwright-report/
+test-results/

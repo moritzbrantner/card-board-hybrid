@@ -18,4 +18,7 @@ cargo test --workspace
 echo "==> Building frontend"
 bun run --cwd frontend build
 
+echo "==> Running Playwright e2e tests"
+bun run test:e2e
+
 echo "==> Local CI checks passed"
