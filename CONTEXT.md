@@ -17,7 +17,7 @@ A card that creates an immediate effect from the caster wizard instead of creati
 _Avoid_: tactic
 
 **Mana**:
-The per-turn resource spent to play cards.
+The per-round resource spent to play cards, granted from uncontested controlled hexes at the beginning of each round.
 _Avoid_: energy
 
 **Wizard action points**:

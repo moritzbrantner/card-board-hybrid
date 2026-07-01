@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -695,6 +696,7 @@ impl MatchState {
             game.player.draw();
             game.opponent.draw();
         }
+        game.grant_round_mana_from_control();
         let mut ignored_frames = Vec::new();
         game.start_turn(Side::Player, &mut ignored_frames, None);
 
@@ -855,6 +857,7 @@ impl MatchState {
         if self.phase == Phase::Planning {
             self.round += 1;
             self.reset_unit_armor_for_new_round();
+            self.grant_round_mana_from_control();
             self.start_turn(Side::Player, frames, action_index);
             self.log.insert(0, format!("Round {} begins.", self.round));
             self.truncate_log();
@@ -888,6 +891,7 @@ impl MatchState {
         if side == Side::Opponent {
             self.round += 1;
             self.reset_unit_armor_for_new_round();
+            self.grant_round_mana_from_control();
             self.log.insert(0, format!("Round {} begins.", self.round));
             self.truncate_log();
             self.record_replay_frame(
@@ -905,6 +909,38 @@ impl MatchState {
         for unit in self.board.units.iter_mut().filter(|unit| unit.armor > 0) {
             unit.armor = unit.max_armor;
         }
+    }
+
+    fn grant_round_mana_from_control(&mut self) {
+        let player_mana = self.mana_from_control(Side::Player);
+        let opponent_mana = self.mana_from_control(Side::Opponent);
+
+        self.player.max_mana = player_mana;
+        self.player.mana = player_mana;
+        self.opponent.max_mana = opponent_mana;
+        self.opponent.mana = opponent_mana;
+    }
+
+    fn mana_from_control(&self, side: Side) -> u8 {
+        let friendly_control = self.controlled_hexes(side);
+        let enemy_control = self.controlled_hexes(side.opponent());
+        friendly_control
+            .difference(&enemy_control)
+            .count()
+            .min(usize::from(MAX_MANA)) as u8
+    }
+
+    fn controlled_hexes(&self, side: Side) -> HashSet<HexCoord> {
+        let mut controlled = HashSet::new();
+        for piece in self.pieces_for_side(side) {
+            controlled.insert(piece.position);
+            for neighbor in piece.position.neighbors() {
+                if self.board.is_valid(neighbor) {
+                    controlled.insert(neighbor);
+                }
+            }
+        }
+        controlled
     }
 
     fn play_card_for_side(
@@ -1772,13 +1808,10 @@ impl MatchState {
         action_index: Option<u32>,
     ) {
         self.active_side = side;
-        let round_mana = (STARTING_MANA + (self.round - 1) as u8).min(MAX_MANA);
         let should_draw = self.player_ref(side).has_started_first_turn;
         let mut drawn = None;
         {
             let player = self.player_mut(side);
-            player.max_mana = round_mana;
-            player.mana = round_mana;
             player.wizard.ap_remaining = player.wizard.max_ap;
             player.wizard.has_attacked = false;
             if should_draw {
@@ -2611,7 +2644,7 @@ mod tests {
         .expect("unit should be playable next to wizard");
 
         let unit = game.board.units.first().expect("unit should be on board");
-        assert_eq!(game.player.mana, 1);
+        assert_eq!(game.player.mana, 3);
         assert_eq!(game.player.wizard.ap_remaining, 2);
         assert_eq!(unit.position, hex(0, 2));
         assert_eq!(unit.template_id.as_deref(), Some("ember-squire"));
@@ -2814,8 +2847,48 @@ mod tests {
             .expect("ending turn should work");
 
         assert_eq!(game.round, 2);
-        assert_eq!(game.player.max_mana, 3);
+        assert_eq!(game.player.max_mana, game.mana_from_control(Side::Player));
         assert_eq!(game.player.hand.len(), 5);
+    }
+
+    #[test]
+    fn round_start_mana_comes_from_uncontested_controlled_hexes() {
+        let mut game = MatchState::new_with_seed(7);
+        game.player.wizard.position = hex(0, 1);
+        game.opponent.wizard.position = hex(0, -1);
+
+        game.grant_round_mana_from_control();
+
+        assert_eq!(game.player.max_mana, 6);
+        assert_eq!(game.player.mana, 6);
+        assert_eq!(game.opponent.max_mana, 6);
+        assert_eq!(game.opponent.mana, 6);
+        assert!(game.controlled_hexes(Side::Player).contains(&hex(0, 0)));
+        assert!(game.controlled_hexes(Side::Opponent).contains(&hex(0, 0)));
+    }
+
+    #[test]
+    fn shared_mana_is_not_refreshed_when_turn_passes_within_same_round() {
+        let mut game = MatchState::new_with_seed_wizard_types_and_mode(
+            7,
+            WizardType::Runekeeper,
+            WizardType::Pyromancer,
+            MatchMode::Shared,
+        );
+        game.player.mana = 1;
+        game.player.max_mana = 4;
+        game.opponent.mana = 2;
+        game.opponent.max_mana = 4;
+
+        game.apply_action_recording_for_side(Side::Player, MatchActionRequest::EndTurn, 0)
+            .expect("player can end their active turn");
+
+        assert_eq!(game.round, 1);
+        assert_eq!(game.active_side, Side::Opponent);
+        assert_eq!(game.player.mana, 1);
+        assert_eq!(game.player.max_mana, 4);
+        assert_eq!(game.opponent.mana, 2);
+        assert_eq!(game.opponent.max_mana, 4);
     }
 
     #[test]
