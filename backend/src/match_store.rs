@@ -63,6 +63,7 @@ pub enum SharedMatchStatus {
 pub struct StoredSharedSeat {
     pub side: Side,
     pub seat_token: String,
+    pub participant_user_id: Option<i64>,
     pub wizard_type: Option<WizardType>,
     pub deck_recipe_name: Option<String>,
     pub deck_recipe_snapshot: Option<DeckRecipeSnapshot>,
@@ -217,6 +218,7 @@ impl SqliteMatchStore {
         )?;
         add_column_if_missing(&connection, "matches", "owner_user_id", "INTEGER")?;
         add_column_if_missing(&connection, "shared_matches", "creator_user_id", "INTEGER")?;
+        add_column_if_missing(&connection, "match_seats", "participant_user_id", "INTEGER")?;
         add_column_if_missing(&connection, "match_seats", "deck_recipe_name", "TEXT")?;
         add_column_if_missing(
             &connection,
@@ -441,6 +443,7 @@ impl SqliteMatchStore {
         seat_token: &str,
         wizard_type: WizardType,
         deck_recipe: DeckRecipeSnapshot,
+        participant_user_id: Option<i64>,
     ) -> Result<Option<StoredSharedMatch>, MatchStoreError> {
         let Some(shared) = self.load_shared_match_for_seat(id, seat_token)? else {
             return Ok(None);
@@ -456,6 +459,7 @@ impl SqliteMatchStore {
             SET wizard_type = ?3,
                 deck_recipe_name = ?4,
                 deck_recipe_snapshot_json = ?5,
+                participant_user_id = COALESCE(participant_user_id, ?6),
                 joined_at = COALESCE(joined_at, unixepoch()),
                 last_seen_at = unixepoch(),
                 disconnected_at = NULL
@@ -466,7 +470,8 @@ impl SqliteMatchStore {
                 seat_token,
                 wizard_type.to_db(),
                 deck_recipe.name,
-                serde_json::to_string(&deck_recipe)?
+                serde_json::to_string(&deck_recipe)?,
+                participant_user_id
             ],
         )?;
 
@@ -711,14 +716,9 @@ impl SqliteMatchStore {
 
     pub fn list_replayable_matches_for_user(
         &self,
-        owner_user_id: Option<i64>,
+        user_id: i64,
     ) -> Result<Vec<StoredMatchSummary>, MatchStoreError> {
-        let owner_clause = if owner_user_id.is_some() {
-            "(matches.owner_user_id = ?1 OR matches.mode = 'shared')"
-        } else {
-            "(matches.owner_user_id IS NULL OR matches.mode = 'shared')"
-        };
-        let mut statement = self.connection.prepare(&format!(
+        let mut statement = self.connection.prepare(
             "
             SELECT
                 matches.id,
@@ -734,17 +734,25 @@ impl SqliteMatchStore {
                     matches.mode = 'solo'
                     OR shared_matches.status IN ('completed', 'forfeited')
                 )
-                AND {owner_clause}
+                AND (
+                    matches.owner_user_id = ?1
+                    OR (
+                        matches.mode = 'shared'
+                        AND shared_matches.status IN ('completed', 'forfeited')
+                        AND EXISTS (
+                            SELECT 1
+                            FROM match_seats
+                            WHERE match_seats.match_id = matches.id
+                                AND match_seats.participant_user_id = ?1
+                        )
+                    )
+                )
             GROUP BY matches.id
             HAVING frame_count > 0
             ORDER BY matches.updated_at DESC
-            "
-        ))?;
-        let mut rows = if let Some(owner_user_id) = owner_user_id {
-            statement.query(params![owner_user_id])?
-        } else {
-            statement.query([])?
-        };
+            ",
+        )?;
+        let mut rows = statement.query(params![user_id])?;
 
         let mut summaries = Vec::new();
         while let Some(row) = rows.next()? {
@@ -786,8 +794,13 @@ impl SqliteMatchStore {
                     matches.owner_user_id = ?1
                     OR (
                         matches.mode = 'shared'
-                        AND shared_matches.creator_user_id = ?1
                         AND shared_matches.status IN ('completed', 'forfeited')
+                        AND EXISTS (
+                            SELECT 1
+                            FROM match_seats
+                            WHERE match_seats.match_id = matches.id
+                                AND match_seats.participant_user_id = ?1
+                        )
                     )
                 )
             GROUP BY matches.id
@@ -910,6 +923,7 @@ impl SqliteMatchStore {
             SELECT
                 side,
                 seat_token,
+                participant_user_id,
                 wizard_type,
                 deck_recipe_name,
                 deck_recipe_snapshot_json,
@@ -922,15 +936,15 @@ impl SqliteMatchStore {
         )?;
         let rows = statement.query_map(params![match_id], |row| {
             let side = row.get::<_, String>(0)?;
-            let wizard_type = row.get::<_, Option<String>>(2)?;
-            let snapshot_json = row.get::<_, Option<String>>(4)?;
+            let wizard_type = row.get::<_, Option<String>>(3)?;
+            let snapshot_json = row.get::<_, Option<String>>(5)?;
             let deck_recipe_snapshot = snapshot_json
                 .as_deref()
                 .map(serde_json::from_str)
                 .transpose()
                 .map_err(|error| {
                     rusqlite::Error::FromSqlConversionFailure(
-                        4,
+                        5,
                         rusqlite::types::Type::Text,
                         Box::new(error),
                     )
@@ -938,11 +952,12 @@ impl SqliteMatchStore {
             Ok(StoredSharedSeat {
                 side: side_from_db(&side).expect("stored side should be valid"),
                 seat_token: row.get(1)?,
+                participant_user_id: row.get(2)?,
                 wizard_type: wizard_type.as_deref().and_then(wizard_type_from_db),
-                deck_recipe_name: row.get(3)?,
+                deck_recipe_name: row.get(4)?,
                 deck_recipe_snapshot,
-                joined_at: row.get(5)?,
-                disconnected_at: row.get(7)?,
+                joined_at: row.get(6)?,
+                disconnected_at: row.get(8)?,
             })
         })?;
 
@@ -1333,7 +1348,7 @@ mod tests {
 
         assert!(
             store
-                .list_replayable_matches_for_user(None)
+                .list_replayable_matches_for_user(1)
                 .expect("archive should load")
                 .is_empty()
         );
@@ -1343,6 +1358,58 @@ mod tests {
                 .expect("replay lookup should succeed")
                 .is_none()
         );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn replayable_shared_matches_are_filtered_to_joined_accounts() {
+        let path = test_db_path("shared-participants");
+        let mut store = SqliteMatchStore::new(&path).expect("store should open");
+
+        let created = store
+            .create_shared_match(Some(99))
+            .expect("shared match should be created");
+        store
+            .join_shared_match(
+                &created.match_id,
+                &created.player_token,
+                WizardType::Chronomancer,
+                deck_library::starter_deck_snapshot(),
+                Some(1),
+            )
+            .expect("player should join");
+        store
+            .join_shared_match(
+                &created.match_id,
+                &created.opponent_token,
+                WizardType::Pyromancer,
+                deck_library::starter_deck_snapshot(),
+                Some(2),
+            )
+            .expect("opponent should join");
+        store
+            .connection
+            .execute(
+                "UPDATE shared_matches SET status = 'completed' WHERE match_id = ?1",
+                params![&created.match_id],
+            )
+            .expect("shared match should be markable complete");
+
+        let player_matches = store
+            .list_replayable_matches_for_user(1)
+            .expect("archive should load");
+        let unrelated_matches = store
+            .list_replayable_matches_for_user(3)
+            .expect("archive should load");
+        let creator_matches = store
+            .list_replayable_matches_for_user(99)
+            .expect("archive should load");
+
+        assert_eq!(player_matches.len(), 1);
+        assert_eq!(player_matches[0].id, created.match_id);
+        assert!(unrelated_matches.is_empty());
+        assert!(creator_matches.is_empty());
 
         let _ = fs::remove_file(path);
     }

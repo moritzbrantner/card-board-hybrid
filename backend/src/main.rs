@@ -709,7 +709,7 @@ async fn logout_account(State(state): State<SharedState>, headers: HeaderMap) ->
 }
 
 async fn list_matches(State(state): State<SharedState>, headers: HeaderMap) -> impl IntoResponse {
-    let profile = match optional_profile_from_headers(&state, &headers) {
+    let profile = match required_profile_from_headers(&state, &headers) {
         Ok(profile) => profile,
         Err(response) => return response,
     };
@@ -718,7 +718,7 @@ async fn list_matches(State(state): State<SharedState>, headers: HeaderMap) -> i
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        match store.list_replayable_matches_for_user(profile.as_ref().map(|profile| profile.id)) {
+        match store.list_replayable_matches_for_user(profile.id) {
             Ok(matches) => matches,
             Err(error) => return store_error_response(error),
         }
@@ -874,7 +874,13 @@ async fn join_shared_match(
             Ok(deck_recipe) => deck_recipe,
             Err(response) => return response,
         };
-        match store.join_shared_match(&match_id, &seat_token, request.wizard_type, deck_recipe) {
+        match store.join_shared_match(
+            &match_id,
+            &seat_token,
+            request.wizard_type,
+            deck_recipe,
+            profile.as_ref().map(|profile| profile.id),
+        ) {
             Ok(Some(shared)) => shared,
             Ok(None) => return shared_not_found_response(),
             Err(error) => return store_error_response(error),
@@ -1826,6 +1832,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn signed_out_match_archive_requires_an_account() {
+        let path = test_db_path("archive-auth");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, body) = json_request(
+            app,
+            Request::builder()
+                .uri("/api/matches")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["message"], "Sign in to continue.");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
     async fn deck_legality_preview_returns_draft_legality_for_unsaved_counts() {
         let path = test_db_path("decks-preview");
         let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
@@ -2256,7 +2282,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn profile_matches_include_completed_shared_matches_created_by_account() {
+    async fn profile_matches_include_completed_shared_matches_joined_by_account() {
         let path = test_db_path("profile-shared-history");
         let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
         let token = register_test_account(app.clone(), "shared-creator@example.com").await;
@@ -2303,6 +2329,7 @@ mod tests {
                 .uri(format!(
                     "/api/shared-matches/{match_id}/seats/{player_token}/join"
                 ))
+                .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
                 .expect("request should build"),
@@ -2412,12 +2439,14 @@ mod tests {
     async fn create_match_initializes_archive_and_replay_frame() {
         let path = test_db_path("archive-replay");
         let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "archive-replay@example.com").await;
 
         let (status, created) = json_request(
             app.clone(),
             Request::builder()
                 .method("POST")
                 .uri("/api/matches")
+                .header("authorization", format!("Bearer {token}"))
                 .body(Body::empty())
                 .expect("request should build"),
         )
@@ -2429,6 +2458,7 @@ mod tests {
             app.clone(),
             Request::builder()
                 .uri("/api/matches")
+                .header("authorization", format!("Bearer {token}"))
                 .body(Body::empty())
                 .expect("request should build"),
         )
@@ -2441,6 +2471,7 @@ mod tests {
             app.clone(),
             Request::builder()
                 .uri(format!("/api/matches/{match_id}/replay"))
+                .header("authorization", format!("Bearer {token}"))
                 .body(Body::empty())
                 .expect("request should build"),
         )
@@ -2671,12 +2702,14 @@ mod tests {
     async fn shared_match_creation_returns_private_seat_links_and_hides_setup_from_archive() {
         let path = test_db_path("shared-create");
         let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "shared-create@example.com").await;
 
         let (status, created) = json_request(
             app.clone(),
             Request::builder()
                 .method("POST")
                 .uri("/api/shared-matches")
+                .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
                 .expect("request should build"),
@@ -2706,6 +2739,7 @@ mod tests {
             app,
             Request::builder()
                 .uri("/api/matches")
+                .header("authorization", format!("Bearer {token}"))
                 .body(Body::empty())
                 .expect("request should build"),
         )
@@ -2720,6 +2754,7 @@ mod tests {
     async fn shared_match_join_exposes_only_the_viewer_seat_hand() {
         let path = test_db_path("shared-join");
         let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "shared-join@example.com").await;
 
         let (_, created) = json_request(
             app.clone(),
@@ -2788,6 +2823,7 @@ mod tests {
                 .uri(format!(
                     "/api/shared-matches/{match_id}/seats/{player_token}/join"
                 ))
+                .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
                 .expect("request should build"),
@@ -2853,6 +2889,7 @@ mod tests {
             app,
             Request::builder()
                 .uri("/api/matches")
+                .header("authorization", format!("Bearer {token}"))
                 .body(Body::empty())
                 .expect("request should build"),
         )

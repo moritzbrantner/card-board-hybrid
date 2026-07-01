@@ -272,6 +272,10 @@ export function App() {
   }
 
   if (normalizedPath === "/matches") {
+    if (!currentUser) {
+      return <AuthPage onAuthenticated={handleAuthenticated} />;
+    }
+
     return (
       <MatchArchivePage
         onNavigate={navigate}
