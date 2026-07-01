@@ -31,6 +31,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   attack,
+  advanceAi,
   createMatch,
   createSharedMatch,
   createDeck,
@@ -49,6 +50,7 @@ import {
   loginAccount,
   logoutAccount,
   movePiece,
+  passPriority,
   playCard,
   previewDeckLegality,
   registerAccount,
@@ -1583,6 +1585,11 @@ function MatchPage({
     () => createMatchVisualCatalog(catalogCards),
     [catalogCards],
   );
+  const readyMatch = loadState.status === "ready" ? loadState.match : null;
+  const playerHasPriorityResponse = useMemo(
+    () => (readyMatch ? hasPlayablePriorityResponse(readyMatch, viewerSide) : false),
+    [readyMatch, viewerSide],
+  );
 
   const selectedCard = useMemo(() => {
     if (loadState.status !== "ready" || selection?.type !== "card") {
@@ -1641,6 +1648,34 @@ function MatchPage({
     }
   }
 
+  useEffect(() => {
+    if (!readyMatch || busy || readyMatch.phase === "matchOver") {
+      return;
+    }
+
+    let action: (() => Promise<MatchState>) | null = null;
+    if (readyMatch.actionStack.length > 0) {
+      if (readyMatch.prioritySide === "player" && !playerHasPriorityResponse) {
+        action = () => passPriority(matchId);
+      } else if (readyMatch.prioritySide === "opponent") {
+        action = () => advanceAi(matchId);
+      }
+    } else if (readyMatch.activeSide === "opponent") {
+      action = () => advanceAi(matchId);
+    }
+
+    if (!action) {
+      return;
+    }
+
+    const scheduledAction = action;
+    const timeoutId = window.setTimeout(() => {
+      void runAction(scheduledAction);
+    }, 1000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [readyMatch, busy, matchId, playerHasPriorityResponse]);
+
   async function handleCreateSeparateMatch() {
     setBusy(true);
     setNotice(null);
@@ -1683,6 +1718,17 @@ function MatchPage({
   }
 
   const { match } = loadState;
+  const hasPendingStack = match.actionStack.length > 0;
+  const isPlayerPriority = hasPendingStack && match.prioritySide === viewerSide;
+  const canPassSoloPriority = isPlayerPriority && playerHasPriorityResponse;
+  const phaseLabel =
+    match.phase === "matchOver"
+      ? `${sideLabel(match.winner)} wins`
+      : hasPendingStack
+        ? `${sideLabel(match.prioritySide)} priority`
+        : match.activeSide === viewerSide
+          ? "Your turn"
+          : "AI thinking";
 
   function handleTileClick(tile: HexTile) {
     if (busy || match.phase === "matchOver") {
@@ -1792,11 +1838,27 @@ function MatchPage({
               className="primary-button"
               type="button"
               onClick={() => void runAction(() => endTurn(matchId))}
-              disabled={busy || match.phase === "matchOver" || match.actionStack.length > 0}
+              disabled={
+                busy ||
+                match.phase === "matchOver" ||
+                match.activeSide !== viewerSide ||
+                hasPendingStack
+              }
             >
               <Play size={18} />
               End Turn
             </button>
+            {hasPendingStack ? (
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => void runAction(() => passPriority(matchId))}
+                disabled={busy || match.phase === "matchOver" || !isPlayerPriority}
+              >
+                <Zap size={18} />
+                Pass Priority
+              </button>
+            ) : null}
           </div>
         </header>
 
@@ -1804,7 +1866,7 @@ function MatchPage({
           <PlayerBadge player={match.player} />
           <div className="phase-pill">
             <Activity size={16} />
-            {match.phase === "matchOver" ? `${sideLabel(match.winner)} wins` : "Planning"}
+            {phaseLabel}
           </div>
           <PlayerBadge player={match.opponent} />
         </section>
@@ -1869,6 +1931,7 @@ function MatchPage({
           </div>
           <aside className="log" aria-label="Match log">
             {notice ? <p className="notice">{notice}</p> : null}
+            {canPassSoloPriority ? <p>Play a response or pass priority.</p> : null}
             {match.log.map((entry, index) => (
               <p key={`${entry}-${index}`}>{entry}</p>
             ))}
@@ -3148,6 +3211,37 @@ function participantBySide(match: MatchState, side: Side): MatchParticipantState
 
 function handForSide(match: MatchState, side: Side): Card[] {
   return participantBySide(match, side).hand ?? [];
+}
+
+function piecesInMatch(match: MatchState): BoardPiece[] {
+  return [
+    {
+      ...match.player.wizard,
+      pieceType: "wizard",
+      name: wizardTypeLabel(match.player.wizard.wizardType),
+    },
+    {
+      ...match.opponent.wizard,
+      pieceType: "wizard",
+      name: wizardTypeLabel(match.opponent.wizard.wizardType),
+    },
+    ...match.board.units.map((unit) => ({ ...unit, pieceType: "unit" as const })),
+  ];
+}
+
+function hasPlayablePriorityResponse(match: MatchState, viewerSide: Side) {
+  if (match.prioritySide !== viewerSide || match.actionStack.length === 0) {
+    return false;
+  }
+
+  return handForSide(match, viewerSide).some(
+    (card) =>
+      card.kind.type === "spell" &&
+      isPlayableCard(match, viewerSide, card) &&
+      piecesInMatch(match).some((piece) =>
+        isLegalCardTarget(match, viewerSide, card, piece.position, piece),
+      ),
+  );
 }
 
 function isPlayableCard(match: MatchState, viewerSide: Side, card: Card) {

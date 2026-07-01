@@ -332,6 +332,9 @@ export type MatchActionRequest =
     }
   | {
       type: "passPriority";
+    }
+  | {
+      type: "advanceAi";
     };
 
 export type SharedClientMessage =

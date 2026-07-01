@@ -1734,6 +1734,48 @@ mod tests {
         (status, json)
     }
 
+    async fn post_match_action(
+        app: Router,
+        match_id: &str,
+        action_json: &'static str,
+    ) -> (StatusCode, serde_json::Value) {
+        json_request(
+            app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/matches/{match_id}/actions"))
+                .header("content-type", "application/json")
+                .body(Body::from(action_json))
+                .expect("request should build"),
+        )
+        .await
+    }
+
+    async fn advance_solo_match_to_player_turn(app: Router, match_id: &str) -> serde_json::Value {
+        let mut last = serde_json::Value::Null;
+        for _ in 0..50 {
+            let match_state = &last["matchState"];
+            if match_state["activeSide"] == "player"
+                && match_state["actionStack"]
+                    .as_array()
+                    .is_some_and(Vec::is_empty)
+            {
+                return last;
+            }
+
+            let action = if match_state["prioritySide"] == "player" {
+                r#"{"type":"passPriority"}"#
+            } else {
+                r#"{"type":"advanceAi"}"#
+            };
+            let (status, acted) = post_match_action(app.clone(), match_id, action).await;
+            assert_eq!(status, StatusCode::OK);
+            last = acted;
+        }
+
+        panic!("AI did not return control to the player");
+    }
+
     fn seat_token_from_url(url: &str) -> &str {
         url.rsplit('/')
             .next()
@@ -2501,18 +2543,14 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let match_id = created["matchId"].as_str().expect("match id should exist");
 
-        let (status, acted) = json_request(
-            app,
-            Request::builder()
-                .method("POST")
-                .uri(format!("/api/matches/{match_id}/actions"))
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"type":"endTurn"}"#))
-                .expect("request should build"),
-        )
-        .await;
+        let (status, acted) =
+            post_match_action(app.clone(), match_id, r#"{"type":"endTurn"}"#).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(acted["matchId"], match_id);
+        assert_eq!(acted["matchState"]["round"], 1);
+        assert_eq!(acted["matchState"]["activeSide"], "opponent");
+
+        let acted = advance_solo_match_to_player_turn(app.clone(), match_id).await;
         assert_eq!(acted["matchState"]["round"], 2);
         assert_eq!(
             acted["matchState"]["player"]["hand"]
@@ -2557,17 +2595,9 @@ mod tests {
         .await;
         let match_id = created["matchId"].as_str().expect("match id should exist");
 
-        let (status, _) = json_request(
-            app.clone(),
-            Request::builder()
-                .method("POST")
-                .uri(format!("/api/matches/{match_id}/actions"))
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"type":"endTurn"}"#))
-                .expect("request should build"),
-        )
-        .await;
+        let (status, _) = post_match_action(app.clone(), match_id, r#"{"type":"endTurn"}"#).await;
         assert_eq!(status, StatusCode::OK);
+        advance_solo_match_to_player_turn(app.clone(), match_id).await;
 
         let (status, replay) = json_request(
             app.clone(),
@@ -2661,17 +2691,10 @@ mod tests {
         let match_id = created["matchId"].as_str().expect("match id should exist");
 
         for _ in 0..2 {
-            let (status, _) = json_request(
-                app.clone(),
-                Request::builder()
-                    .method("POST")
-                    .uri(format!("/api/matches/{match_id}/actions"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"type":"endTurn"}"#))
-                    .expect("request should build"),
-            )
-            .await;
+            let (status, _) =
+                post_match_action(app.clone(), match_id, r#"{"type":"endTurn"}"#).await;
             assert_eq!(status, StatusCode::OK);
+            advance_solo_match_to_player_turn(app.clone(), match_id).await;
         }
 
         let (status, replay) = json_request(

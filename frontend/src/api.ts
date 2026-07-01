@@ -231,3 +231,7 @@ export function endTurn(matchId: string) {
 export function passPriority(matchId: string) {
   return matchAction(matchId, { type: "passPriority" });
 }
+
+export function advanceAi(matchId: string) {
+  return matchAction(matchId, { type: "advanceAi" });
+}

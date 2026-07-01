@@ -398,6 +398,7 @@ pub enum MatchActionRequest {
     },
     EndTurn,
     PassPriority,
+    AdvanceAi,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -429,6 +430,7 @@ pub enum MatchError {
     StackPending,
     EmptyStack,
     PriorityTooLow,
+    AiUnavailable,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -495,6 +497,7 @@ impl fmt::Display for MatchError {
             Self::StackPending => "resolve the stack before taking that action",
             Self::EmptyStack => "there are no pending actions to resolve",
             Self::PriorityTooLow => "spell priority must be greater than the pending action",
+            Self::AiUnavailable => "the AI is not ready to act",
         };
 
         f.write_str(message)
@@ -806,6 +809,7 @@ impl MatchState {
             MatchActionRequest::PassPriority => {
                 self.pass_priority_for_side(side, &mut frames, action_index)
             }
+            MatchActionRequest::AdvanceAi => self.advance_solo_ai(&mut frames, action_index),
         }?;
 
         Ok(frames)
@@ -815,7 +819,7 @@ impl MatchState {
         if !self.action_stack.is_empty() {
             return Err(MatchError::StackPending);
         }
-        if self.mode == MatchMode::Shared && side != self.active_side {
+        if side != self.active_side {
             return Err(MatchError::NotActiveSide);
         }
         Ok(())
@@ -851,23 +855,6 @@ impl MatchState {
             },
         );
         self.start_turn(Side::Opponent, frames, action_index);
-        self.run_opponent_turn(frames, action_index);
-        self.check_winner(frames, action_index);
-
-        if self.phase == Phase::Planning {
-            self.round += 1;
-            self.reset_unit_armor_for_new_round();
-            self.grant_round_mana_from_control();
-            self.start_turn(Side::Player, frames, action_index);
-            self.log.insert(0, format!("Round {} begins.", self.round));
-            self.truncate_log();
-            self.record_replay_frame(
-                frames,
-                action_index,
-                ReplayEvent::RoundStarted { round: self.round },
-            );
-        }
-
         self.truncate_log();
     }
 
@@ -951,6 +938,7 @@ impl MatchState {
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) -> Result<(), MatchError> {
+        let stack_was_empty = self.action_stack.is_empty();
         let card = {
             let player = self.player_ref(side);
             player
@@ -971,8 +959,8 @@ impl MatchState {
             }
         }
 
-        if self.action_stack.is_empty() {
-            if self.mode == MatchMode::Shared && side != self.active_side {
+        if stack_was_empty {
+            if side != self.active_side {
                 return Err(MatchError::NotActiveSide);
             }
         } else {
@@ -1084,7 +1072,7 @@ impl MatchState {
             }
         }
 
-        if self.mode == MatchMode::Solo {
+        if self.mode == MatchMode::Solo && side == Side::Player && stack_was_empty {
             self.resolve_all_stack(frames, action_index);
         }
         self.check_winner(frames, action_index);
@@ -1412,7 +1400,7 @@ impl MatchState {
             action_index,
             ReplayEvent::ActionQueued { side, item },
         );
-        if self.mode == MatchMode::Solo {
+        if self.mode == MatchMode::Solo && side == Side::Player {
             self.resolve_all_stack(frames, action_index);
         }
         self.truncate_log();
@@ -1512,7 +1500,7 @@ impl MatchState {
             action_index,
             ReplayEvent::ActionQueued { side, item },
         );
-        if self.mode == MatchMode::Solo {
+        if self.mode == MatchMode::Solo && side == Side::Player {
             self.resolve_all_stack(frames, action_index);
         }
         self.check_winner(frames, action_index);
@@ -1575,40 +1563,67 @@ impl MatchState {
         );
     }
 
-    fn run_opponent_turn(
+    fn advance_solo_ai(
         &mut self,
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
-    ) {
-        self.log
-            .insert(0, "Opponent begins their turn.".to_string());
+    ) -> Result<(), MatchError> {
+        if self.mode != MatchMode::Solo {
+            return Err(MatchError::AiUnavailable);
+        }
 
-        for _ in 0..24 {
-            if self.phase == Phase::MatchOver {
-                return;
+        if !self.action_stack.is_empty() {
+            if self.priority_side != Some(Side::Opponent) {
+                return Err(MatchError::NotPrioritySide);
             }
-            if let Some((attacker_id, target_id)) = self.best_opponent_attack() {
-                let _ = self.attack_for_side(
+            self.pass_priority_for_side(Side::Opponent, frames, action_index)?;
+            return Ok(());
+        }
+
+        if self.active_side != Side::Opponent {
+            return Err(MatchError::AiUnavailable);
+        }
+
+        if self.try_opponent_action(frames, action_index) {
+            self.check_winner(frames, action_index);
+        } else {
+            self.finish_opponent_turn(frames, action_index);
+        }
+
+        self.truncate_log();
+        Ok(())
+    }
+
+    fn try_opponent_action(
+        &mut self,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) -> bool {
+        if let Some((attacker_id, target_id)) = self.best_opponent_attack() {
+            return self
+                .attack_for_side(
                     Side::Opponent,
                     &attacker_id,
                     &target_id,
                     frames,
                     action_index,
-                );
-                continue;
-            }
-            if self.try_opponent_spell(frames, action_index) {
-                continue;
-            }
-            if self.try_opponent_summon(frames, action_index) {
-                continue;
-            }
-            if self.try_opponent_move(frames, action_index) {
-                continue;
-            }
-            break;
+                )
+                .is_ok();
         }
+        if self.try_opponent_spell(frames, action_index) {
+            return true;
+        }
+        if self.try_opponent_summon(frames, action_index) {
+            return true;
+        }
+        self.try_opponent_move(frames, action_index)
+    }
 
+    fn finish_opponent_turn(
+        &mut self,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
         self.log.insert(0, "Opponent ended their turn.".to_string());
         self.record_replay_frame(
             frames,
@@ -1618,7 +1633,20 @@ impl MatchState {
                 round: self.round,
             },
         );
-        self.truncate_log();
+
+        if self.phase == Phase::Planning {
+            self.round += 1;
+            self.reset_unit_armor_for_new_round();
+            self.grant_round_mana_from_control();
+            self.start_turn(Side::Player, frames, action_index);
+            self.log.insert(0, format!("Round {} begins.", self.round));
+            self.truncate_log();
+            self.record_replay_frame(
+                frames,
+                action_index,
+                ReplayEvent::RoundStarted { round: self.round },
+            );
+        }
     }
 
     fn best_opponent_attack(&self) -> Option<(String, String)> {
@@ -2382,6 +2410,24 @@ mod tests {
         id
     }
 
+    fn advance_solo_ai_until_player_turn(game: &mut MatchState) {
+        for _ in 0..50 {
+            if game.active_side == Side::Player && game.action_stack.is_empty() {
+                return;
+            }
+
+            if game.priority_side == Some(Side::Player) {
+                game.apply_action(MatchActionRequest::PassPriority)
+                    .expect("player can pass priority");
+            } else {
+                game.apply_action(MatchActionRequest::AdvanceAi)
+                    .expect("AI can advance");
+            }
+        }
+
+        panic!("AI did not return control to the player");
+    }
+
     #[test]
     fn radius_three_board_has_thirty_seven_tiles() {
         let game = MatchState::new_with_seed(7);
@@ -2840,15 +2886,70 @@ mod tests {
     }
 
     #[test]
-    fn ending_turn_runs_ai_and_advances_round() {
+    fn ending_turn_starts_paced_ai_turn() {
         let mut game = MatchState::new_with_seed(7);
 
         game.apply_action(MatchActionRequest::EndTurn)
             .expect("ending turn should work");
 
+        assert_eq!(game.round, 1);
+        assert_eq!(game.active_side, Side::Opponent);
+        assert_eq!(game.action_stack.len(), 0);
+    }
+
+    #[test]
+    fn advancing_ai_eventually_advances_round() {
+        let mut game = MatchState::new_with_seed(7);
+
+        game.apply_action(MatchActionRequest::EndTurn)
+            .expect("ending turn should work");
+
+        advance_solo_ai_until_player_turn(&mut game);
+
         assert_eq!(game.round, 2);
+        assert_eq!(game.active_side, Side::Player);
         assert_eq!(game.player.max_mana, game.mana_from_control(Side::Player));
         assert_eq!(game.player.hand.len(), 5);
+    }
+
+    #[test]
+    fn solo_ai_actions_wait_for_player_priority_response() {
+        let mut game = MatchState::new_with_seed(7);
+        game.player.mana = 8;
+        game.player.wizard.ap_remaining = 3;
+        game.player.wizard.hp = 18;
+        game.opponent.wizard.position = hex(0, -1);
+        game.opponent.wizard.ap_remaining = 1;
+        let salve = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "quick-salve")
+            .expect("priority response spell exists");
+        let salve_id = put_card_in_side_hand(&mut game, Side::Player, salve);
+
+        game.apply_action(MatchActionRequest::EndTurn)
+            .expect("ending turn should start AI turn");
+        game.apply_action(MatchActionRequest::AdvanceAi)
+            .expect("AI should queue an attack");
+
+        assert_eq!(game.action_stack.len(), 1);
+        assert_eq!(game.priority_side, Some(Side::Player));
+
+        game.apply_action(MatchActionRequest::PlayCard {
+            card_id: salve_id,
+            target: ActionTarget::Piece {
+                piece_id: game.player.wizard.id.clone(),
+            },
+        })
+        .expect("player can answer AI action with higher priority spell");
+
+        assert_eq!(game.action_stack.len(), 2);
+        assert_eq!(game.priority_side, Some(Side::Opponent));
+        assert_eq!(game.player.wizard.hp, 18);
+
+        game.apply_action(MatchActionRequest::AdvanceAi)
+            .expect("AI should pass priority to resolve the response");
+        assert_eq!(game.player.wizard.hp, 20);
+        assert_eq!(game.priority_side, Some(Side::Player));
     }
 
     #[test]
@@ -2924,6 +3025,7 @@ mod tests {
 
         game.apply_action(MatchActionRequest::EndTurn)
             .expect("ending turn should advance to the next round");
+        advance_solo_ai_until_player_turn(&mut game);
 
         assert_eq!(
             game.board
