@@ -1465,6 +1465,11 @@ h1 {
   cursor: pointer;
 }
 
+.deck-count-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .deck-count-controls strong {
   text-align: center;
 }

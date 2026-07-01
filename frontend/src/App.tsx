@@ -66,6 +66,7 @@ import type {
   DeckCardCount,
   DeckLegality,
   DeckListResponse,
+  DeckRules,
   DeckRecipeSummary,
   HexCoord,
   HexTile,
@@ -646,14 +647,18 @@ function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { curr
     return () => window.clearTimeout(timeout);
   }, [localCards, selectedDeckId]);
 
-  function adjustCount(templateId: string, delta: number) {
+  function adjustCount(card: CatalogCard, delta: number) {
     setCardCounts((current) => {
-      const nextCount = Math.max(0, (current[templateId] ?? 0) + delta);
+      const currentCount = current[card.templateId] ?? 0;
+      const nextCount =
+        delta > 0
+          ? Math.min(currentCount + delta, copyLimitForRarity(card.rarity, rules))
+          : Math.max(0, currentCount + delta);
       const next = { ...current };
       if (nextCount === 0) {
-        delete next[templateId];
+        delete next[card.templateId];
       } else {
-        next[templateId] = nextCount;
+        next[card.templateId] = nextCount;
       }
       return next;
     });
@@ -814,24 +819,35 @@ function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { curr
           </label>
 
           <div className="deck-builder-grid">
-            {filteredCards.map((card) => (
-              <div key={card.id} className={`deck-card-row ${card.rarity}`}>
-                <div>
-                  <strong>{card.name}</strong>
-                  <span>{card.rarity} · {card.cost} mana</span>
+            {filteredCards.map((card) => {
+              const count = cardCounts[card.templateId] ?? 0;
+              const copyLimit = copyLimitForRarity(card.rarity, rules);
+              const copyLimitReached = count >= copyLimit;
+
+              return (
+                <div key={card.id} className={`deck-card-row ${card.rarity}`}>
+                  <div>
+                    <strong>{card.name}</strong>
+                    <span>{card.rarity} · {card.cost} mana</span>
+                  </div>
+                  <p>{card.text}</p>
+                  <div className="deck-count-controls">
+                    <button type="button" onClick={() => adjustCount(card, -1)} disabled={busy}>
+                      -
+                    </button>
+                    <strong>{count}</strong>
+                    <button
+                      type="button"
+                      onClick={() => adjustCount(card, 1)}
+                      disabled={busy || copyLimitReached}
+                      title={copyLimitReached ? `${rarityLabel(card.rarity)} copy limit reached` : undefined}
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
-                <p>{card.text}</p>
-                <div className="deck-count-controls">
-                  <button type="button" onClick={() => adjustCount(card.templateId, -1)} disabled={busy}>
-                    -
-                  </button>
-                  <strong>{cardCounts[card.templateId] ?? 0}</strong>
-                  <button type="button" onClick={() => adjustCount(card.templateId, 1)} disabled={busy}>
-                    +
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       </section>
@@ -868,6 +884,28 @@ function cardsFromCounts(counts: Record<string, number>): DeckCardCount[] {
     .filter(([, count]) => count > 0)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([templateId, count]) => ({ templateId, count }));
+}
+
+function copyLimitForRarity(rarity: Rarity, rules: DeckRules | null) {
+  switch (rarity) {
+    case "basic":
+      return rules?.basicCopyLimit ?? 5;
+    case "advanced":
+      return rules?.advancedCopyLimit ?? 4;
+    case "rare":
+      return rules?.rareCopyLimit ?? 3;
+  }
+}
+
+function rarityLabel(rarity: Rarity) {
+  switch (rarity) {
+    case "basic":
+      return "Basic";
+    case "advanced":
+      return "Advanced";
+    case "rare":
+      return "Rare";
+  }
 }
 
 function aiSelectionFromValue(
