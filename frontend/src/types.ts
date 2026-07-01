@@ -67,6 +67,71 @@ export type CatalogResponse = {
   cards: CatalogCard[];
 };
 
+export type DeckCardCount = {
+  templateId: string;
+  count: number;
+};
+
+export type DeckRules = {
+  maxDecksPerAccount: number;
+  minCards: number;
+  basicCopyLimit: number;
+  advancedCopyLimit: number;
+  rareCopyLimit: number;
+  advancedTotalLimit: number;
+  rareTotalLimit: number;
+};
+
+export type DeckLegality = {
+  legal: boolean;
+  totalCards: number;
+  basicCards: number;
+  advancedCards: number;
+  rareCards: number;
+  messages: string[];
+};
+
+export type DeckRecipeSummary = {
+  id: number;
+  name: string;
+  isDefault: boolean;
+  cards: DeckCardCount[];
+  legality: DeckLegality;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type DeckRecipeDetail = DeckRecipeSummary;
+
+export type DeckListResponse = {
+  rules: DeckRules;
+  decks: DeckRecipeSummary[];
+};
+
+export type SystemDeckRecipe = {
+  id: string;
+  name: string;
+  wizardType: WizardType;
+  cards: DeckCardCount[];
+  legality: DeckLegality;
+};
+
+export type SystemDeckListResponse = {
+  rules: DeckRules;
+  decks: SystemDeckRecipe[];
+};
+
+export type SoloAiOpponentSelection =
+  | {
+      source: "system";
+      systemDeckId: string;
+    }
+  | {
+      source: "account";
+      deckId: number;
+      wizardType: WizardType;
+    };
+
 export type AuthUser = {
   id: number;
   email: string;

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Spark Jolt">
+  <rect width="320" height="220" fill="#1c2120"/>
+  <path d="M184 18 86 125h58l-18 77 108-119h-62z" fill="#d9b84f"/>
+  <circle cx="232" cy="66" r="24" fill="#58b7a1" opacity=".75"/>
+</svg>

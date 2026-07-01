@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Prism Initiate">
+  <rect width="320" height="220" fill="#1d2028"/>
+  <path d="M160 28 248 176H72z" fill="#7aa7d9"/>
+  <path d="M160 28v148H72z" fill="#58b7a1" opacity=".82"/>
+  <path d="M160 28v148h88z" fill="#d9b84f" opacity=".82"/>
+</svg>

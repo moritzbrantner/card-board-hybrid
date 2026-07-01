@@ -1,5 +1,6 @@
 use serde::Serialize;
 
+use crate::deck_library::starter_recipe_count;
 use crate::match_session::{Card, CardKind, Rarity, SpellEffect};
 
 #[derive(Clone, Debug, Serialize)]
@@ -27,7 +28,9 @@ pub fn starter_catalog() -> Vec<CatalogCard> {
     starter_card_templates()
         .into_iter()
         .map(|card| {
-            let copy_count = starter_copy_count(card.rarity);
+            let copy_count = starter_recipe_count(&card.template_id)
+                .try_into()
+                .expect("starter recipe counts should fit in u8");
             let art_key = card.template_id.clone();
             CatalogCard {
                 id: card.template_id.clone(),
@@ -130,6 +133,65 @@ pub fn starter_card_templates() -> Vec<Card> {
             SpellEffect::Heal { amount: 2 },
         ),
         spell_card(
+            "spark-jolt",
+            "Spark Jolt",
+            Rarity::Basic,
+            1,
+            "Priority 3. Range 2. Deal 1 damage to an enemy unit or wizard.",
+            2,
+            3,
+            SpellEffect::Damage { amount: 1 },
+        ),
+        spell_card(
+            "warding-sigil",
+            "Warding Sigil",
+            Rarity::Basic,
+            1,
+            "Priority 2. Range 2. An allied unit gains +1 armor.",
+            2,
+            2,
+            SpellEffect::Buff {
+                attack: 0,
+                armor: 1,
+            },
+        ),
+        unit_card(
+            "rune-runner",
+            "Rune Runner",
+            Rarity::Basic,
+            2,
+            "1 attack / 1 armor / 4 AP.",
+            UnitStats {
+                attack: 1,
+                armor: 1,
+                max_ap: 4,
+            },
+        ),
+        unit_card(
+            "ash-hound",
+            "Ash Hound",
+            Rarity::Basic,
+            2,
+            "2 attack / 1 armor / 3 AP.",
+            UnitStats {
+                attack: 2,
+                armor: 1,
+                max_ap: 3,
+            },
+        ),
+        unit_card(
+            "prism-initiate",
+            "Prism Initiate",
+            Rarity::Basic,
+            1,
+            "1 attack / 3 armor / 1 AP.",
+            UnitStats {
+                attack: 1,
+                armor: 3,
+                max_ap: 1,
+            },
+        ),
+        spell_card(
             "mending-rune",
             "Mending Rune",
             Rarity::Advanced,
@@ -176,6 +238,41 @@ pub fn starter_card_templates() -> Vec<Card> {
             },
         ),
         unit_card(
+            "flame-weaver",
+            "Flame Weaver",
+            Rarity::Advanced,
+            4,
+            "3 attack / 2 armor / 2 AP.",
+            UnitStats {
+                attack: 3,
+                armor: 2,
+                max_ap: 2,
+            },
+        ),
+        spell_card(
+            "bastion-rune",
+            "Bastion Rune",
+            Rarity::Advanced,
+            4,
+            "Priority 1. Range 2. An allied unit gains +4 armor.",
+            2,
+            1,
+            SpellEffect::Buff {
+                attack: 0,
+                armor: 4,
+            },
+        ),
+        spell_card(
+            "temporal-bolt",
+            "Temporal Bolt",
+            Rarity::Advanced,
+            3,
+            "Priority 5. Range 2. Deal 2 damage to an enemy unit or wizard.",
+            2,
+            5,
+            SpellEffect::Damage { amount: 2 },
+        ),
+        unit_card(
             "iron-colossus",
             "Iron Colossus",
             Rarity::Rare,
@@ -207,15 +304,35 @@ pub fn starter_card_templates() -> Vec<Card> {
             5,
             SpellEffect::Damage { amount: 3 },
         ),
+        unit_card(
+            "phoenix-adept",
+            "Phoenix Adept",
+            Rarity::Rare,
+            5,
+            "3 attack / 3 armor / 3 AP.",
+            UnitStats {
+                attack: 3,
+                armor: 3,
+                max_ap: 3,
+            },
+        ),
+        spell_card(
+            "comet-spear",
+            "Comet Spear",
+            Rarity::Rare,
+            6,
+            "Priority 3. Range 3. Deal 5 damage to an enemy unit or wizard.",
+            3,
+            3,
+            SpellEffect::Damage { amount: 5 },
+        ),
     ]
 }
 
-pub fn starter_copy_count(rarity: Rarity) -> u8 {
-    match rarity {
-        Rarity::Basic => 8,
-        Rarity::Advanced => 4,
-        Rarity::Rare => 1,
-    }
+pub fn card_template_by_id(template_id: &str) -> Option<Card> {
+    starter_card_templates()
+        .into_iter()
+        .find(|card| card.template_id == template_id)
 }
 
 struct UnitStats {
@@ -247,6 +364,10 @@ fn unit_card(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "card templates read clearly at call sites"
+)]
 fn spell_card(
     template_id: &str,
     name: &str,

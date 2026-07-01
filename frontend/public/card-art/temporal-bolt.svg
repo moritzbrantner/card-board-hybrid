@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Temporal Bolt">
+  <rect width="320" height="220" fill="#151817"/>
+  <circle cx="160" cy="110" r="72" fill="none" stroke="#7aa7d9" stroke-width="14"/>
+  <path d="M160 64v50l42 30" fill="none" stroke="#d9b84f" stroke-width="14" stroke-linecap="round"/>
+  <path d="M70 172 250 48" stroke="#58b7a1" stroke-width="10" stroke-linecap="round"/>
+</svg>

@@ -6,8 +6,6 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::card_catalog::{starter_card_templates, starter_copy_count};
-
 const BOARD_RADIUS: i32 = 3;
 const STARTING_MANA: u8 = 2;
 const MAX_MANA: u8 = 8;
@@ -519,6 +517,31 @@ impl MatchState {
         Self::new_with_seed_and_player_wizard_type(seed, player_wizard_type)
     }
 
+    pub fn new_with_loadouts(
+        player_wizard_type: WizardType,
+        opponent_wizard_type: WizardType,
+        player_deck: Vec<Card>,
+        opponent_deck: Vec<Card>,
+    ) -> Self {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos() as u64)
+            .unwrap_or(1);
+
+        Self::new_with_seed_wizard_types_mode_and_decks(
+            seed,
+            player_wizard_type,
+            opponent_wizard_type,
+            MatchMode::Solo,
+            player_deck,
+            opponent_deck,
+        )
+    }
+
+    #[allow(
+        dead_code,
+        reason = "kept as the default shared rules-engine constructor"
+    )]
     pub fn new_shared_with_wizard_types(
         player_wizard_type: WizardType,
         opponent_wizard_type: WizardType,
@@ -533,6 +556,27 @@ impl MatchState {
             player_wizard_type,
             opponent_wizard_type,
             MatchMode::Shared,
+        )
+    }
+
+    pub fn new_shared_with_loadouts(
+        player_wizard_type: WizardType,
+        opponent_wizard_type: WizardType,
+        player_deck: Vec<Card>,
+        opponent_deck: Vec<Card>,
+    ) -> Self {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos() as u64)
+            .unwrap_or(1);
+
+        Self::new_with_seed_wizard_types_mode_and_decks(
+            seed,
+            player_wizard_type,
+            opponent_wizard_type,
+            MatchMode::Shared,
+            player_deck,
+            opponent_deck,
         )
     }
 
@@ -593,6 +637,34 @@ impl MatchState {
         opponent_wizard_type: WizardType,
         mode: MatchMode,
     ) -> Self {
+        let player_deck = crate::deck_library::deck_from_snapshot(
+            Side::Player,
+            &crate::deck_library::starter_deck_snapshot(),
+        )
+        .expect("starter player deck should be valid");
+        let opponent_deck = crate::deck_library::deck_from_snapshot(
+            Side::Opponent,
+            &crate::deck_library::starter_deck_snapshot(),
+        )
+        .expect("starter opponent deck should be valid");
+        Self::new_with_seed_wizard_types_mode_and_decks(
+            seed,
+            player_wizard_type,
+            opponent_wizard_type,
+            mode,
+            player_deck,
+            opponent_deck,
+        )
+    }
+
+    fn new_with_seed_wizard_types_mode_and_decks(
+        seed: u64,
+        player_wizard_type: WizardType,
+        opponent_wizard_type: WizardType,
+        mode: MatchMode,
+        player_deck: Vec<Card>,
+        opponent_deck: Vec<Card>,
+    ) -> Self {
         let mut game = Self {
             mode,
             round: 1,
@@ -602,11 +674,13 @@ impl MatchState {
                 Side::Player,
                 seed ^ 0xA11C_E551_1234_5678,
                 player_wizard_type,
+                player_deck,
             ),
             opponent: PlayerState::new(
                 Side::Opponent,
                 seed ^ 0x0B0E_1234_9876_5432,
                 opponent_wizard_type,
+                opponent_deck,
             ),
             board: HexBoard::new(BOARD_RADIUS),
             action_stack: Vec::new(),
@@ -782,6 +856,7 @@ impl MatchState {
             self.round += 1;
             self.start_turn(Side::Player, frames, action_index);
             self.log.insert(0, format!("Round {} begins.", self.round));
+            self.truncate_log();
             self.record_replay_frame(
                 frames,
                 action_index,
@@ -812,6 +887,7 @@ impl MatchState {
         if side == Side::Opponent {
             self.round += 1;
             self.log.insert(0, format!("Round {} begins.", self.round));
+            self.truncate_log();
             self.record_replay_frame(
                 frames,
                 action_index,
@@ -2051,8 +2127,7 @@ impl HexCoord {
 }
 
 impl PlayerState {
-    fn new(side: Side, mut rng_seed: u64, wizard_type: WizardType) -> Self {
-        let mut deck = starter_deck(side);
+    fn new(side: Side, mut rng_seed: u64, wizard_type: WizardType, mut deck: Vec<Card>) -> Self {
         shuffle(&mut deck, &mut rng_seed);
 
         Self {
@@ -2214,21 +2289,8 @@ impl Side {
     }
 }
 
-fn starter_deck(side: Side) -> Vec<Card> {
-    let mut cards = Vec::new();
-    for template in starter_card_templates() {
-        let copy_count = starter_copy_count(template.rarity);
-        for copy in 0..copy_count {
-            let mut card = template.clone();
-            card.id = format!("{}-{copy}-{}", side.card_prefix(), card.template_id);
-            cards.push(card);
-        }
-    }
-    cards
-}
-
 impl Side {
-    fn card_prefix(self) -> &'static str {
+    pub(crate) fn card_prefix(self) -> &'static str {
         match self {
             Self::Player => "p",
             Self::Opponent => "o",
@@ -2251,6 +2313,7 @@ fn shuffle<T>(items: &mut [T], seed: &mut u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::card_catalog::starter_card_templates;
 
     fn hex(q: i32, r: i32) -> HexCoord {
         HexCoord { q, r }
@@ -2375,7 +2438,7 @@ mod tests {
         assert!(value["opponent"].get("hand").is_none());
         assert!(value["opponent"].get("deck").is_none());
         assert!(value["opponent"].get("discard").is_none());
-        assert_eq!(value["opponent"]["deckCount"], 63);
+        assert_eq!(value["opponent"]["deckCount"], 56);
     }
 
     #[test]
@@ -2500,31 +2563,31 @@ mod tests {
             .chain(game.player.deck.iter())
             .collect();
 
-        assert_eq!(all_cards.len(), 67);
+        assert_eq!(all_cards.len(), 60);
         assert_eq!(
             all_cards
                 .iter()
                 .filter(|card| card.rarity == Rarity::Basic)
                 .count(),
-            40
+            50
         );
         assert_eq!(
             all_cards
                 .iter()
                 .filter(|card| card.rarity == Rarity::Advanced)
                 .count(),
-            24
+            9
         );
         assert_eq!(
             all_cards
                 .iter()
                 .filter(|card| card.rarity == Rarity::Rare)
                 .count(),
-            3
+            1
         );
-        assert_eq!(starter_card_templates().len(), 14);
+        assert_eq!(starter_card_templates().len(), 24);
         assert_eq!(game.player.hand.len(), 4);
-        assert_eq!(game.player.deck_count, 63);
+        assert_eq!(game.player.deck_count, 56);
     }
 
     #[test]

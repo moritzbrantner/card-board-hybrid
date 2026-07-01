@@ -4,12 +4,18 @@ import type {
   AuthUser,
   CatalogResponse,
   CreateSharedMatchResponse,
+  DeckCardCount,
+  DeckListResponse,
+  DeckRecipeDetail,
+  DeckRecipeSummary,
   MatchArchiveResponse,
   MatchActionRequest,
   MatchReplayResponse,
   MatchResponse,
   MatchState,
+  SoloAiOpponentSelection,
   SharedMatchResponse,
+  SystemDeckListResponse,
   HexCoord,
   WizardType,
   AccountProfile,
@@ -80,6 +86,49 @@ export function loadProfileMatches() {
   return request<MatchArchiveResponse>("/api/profile/matches");
 }
 
+export function loadDecks() {
+  return request<DeckListResponse>("/api/decks");
+}
+
+export function loadDeck(deckId: number) {
+  return request<DeckRecipeDetail>(`/api/decks/${encodeURIComponent(deckId)}`);
+}
+
+export function createDeck(name: string, cards: DeckCardCount[], isDefault = false) {
+  return request<DeckRecipeSummary>("/api/decks", {
+    method: "POST",
+    body: JSON.stringify({ name, cards, isDefault }),
+  });
+}
+
+export function updateDeck(
+  deckId: number,
+  name: string,
+  cards: DeckCardCount[],
+  isDefault = false,
+) {
+  return request<DeckRecipeSummary>(`/api/decks/${encodeURIComponent(deckId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name, cards, isDefault }),
+  });
+}
+
+export function duplicateDeck(deckId: number) {
+  return request<DeckRecipeSummary>(`/api/decks/${encodeURIComponent(deckId)}/duplicate`, {
+    method: "POST",
+  });
+}
+
+export function deleteDeck(deckId: number) {
+  return request<{ message: string }>(`/api/decks/${encodeURIComponent(deckId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function loadSystemDecks() {
+  return request<SystemDeckListResponse>("/api/system-decks");
+}
+
 export function logoutAccount() {
   return request<{ message: string }>("/api/auth/logout", {
     method: "POST",
@@ -93,10 +142,14 @@ function matchAction(matchId: string, action: MatchActionRequest) {
   }).then((response) => response.matchState);
 }
 
-export function createMatch(wizardType?: WizardType) {
+export function createMatch(options?: {
+  wizardType?: WizardType;
+  playerDeckId?: number;
+  aiOpponent?: SoloAiOpponentSelection;
+}) {
   return request<MatchResponse>("/api/matches", {
     method: "POST",
-    body: wizardType ? JSON.stringify({ wizardType }) : undefined,
+    body: options ? JSON.stringify(options) : undefined,
   });
 }
 
@@ -113,12 +166,17 @@ export function loadSharedMatch(matchId: string, seatToken: string) {
   );
 }
 
-export function joinSharedMatch(matchId: string, seatToken: string, wizardType: WizardType) {
+export function joinSharedMatch(
+  matchId: string,
+  seatToken: string,
+  wizardType: WizardType,
+  deckRecipeId?: number,
+) {
   return request<SharedMatchResponse>(
     `/api/shared-matches/${encodeURIComponent(matchId)}/seats/${encodeURIComponent(seatToken)}/join`,
     {
       method: "POST",
-      body: JSON.stringify({ wizardType }),
+      body: JSON.stringify({ wizardType, deckRecipeId }),
     },
   );
 }

@@ -41,8 +41,28 @@ The 37-hex board used by the first hex version of Rune Lanes.
 _Avoid_: lane board
 
 **Starter deck**:
-The shared 50-card deck recipe used by both players at the beginning of the game.
+The system-provided legal deck recipe copied to new accounts and used by anonymous or default play.
 _Avoid_: beginner deck
+
+**Deck recipe**:
+A saved list of card-template counts used to create a shuffled match deck.
+_Avoid_: deck, pile
+
+**Deck library**:
+The set of named deck recipes owned by an account.
+_Avoid_: collection
+
+**Legal deck recipe**:
+A deck recipe that satisfies Rune Lanes deck-building rules and can be used to start a match.
+_Avoid_: valid deck
+
+**Draft deck recipe**:
+A saved deck recipe that does not currently satisfy deck-building rules.
+_Avoid_: invalid deck
+
+**System deck recipe**:
+A predefined legal recipe shipped by Rune Lanes, used for starter/default play and AI opponent choices.
+_Avoid_: AI-only deck
 
 **Solo match**:
 A match where one human controls Player and the backend AI controls Opponent.

@@ -38,6 +38,14 @@ The frontend proxies `/api` to `http://localhost:4000`.
 - `/match/<match-id>` opens the playable Rune Lanes board for a persisted match.
 - `/match/<match-id>/<seat-token>` opens a private shared-match seat link.
 - `/catalog/` opens the backend-driven starter card catalog.
+- `/decks/` opens the signed-in deck library and deck builder.
+
+## Deck building
+
+Signed-in accounts can save named deck recipes. Draft recipes can be saved while
+they are incomplete, but only legal recipes can be selected for a match. New and
+anonymous play can always fall back to the system starter recipe, and solo
+matches can choose from predefined AI deck recipes.
 
 ## Match persistence
 

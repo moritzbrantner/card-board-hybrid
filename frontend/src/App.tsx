@@ -33,20 +33,26 @@ import {
   attack,
   createMatch,
   createSharedMatch,
+  createDeck,
+  deleteDeck,
+  duplicateDeck,
   endTurn,
   joinSharedMatch,
   loadCurrentAccount,
   loadCatalog,
+  loadDecks,
   loadMatch,
   loadMatches,
   loadReplay,
   loadSharedMatch,
+  loadSystemDecks,
   loginAccount,
   logoutAccount,
   movePiece,
   playCard,
   registerAccount,
   sharedMatchWebSocketUrl,
+  updateDeck,
 } from "./api";
 import { ProfilePage } from "./profile";
 import { clearAuthToken, getAuthToken, saveAuthToken } from "./session";
@@ -56,6 +62,11 @@ import type {
   AuthUser,
   Card,
   CatalogCard,
+  DeckCardCount,
+  DeckLegality,
+  DeckListResponse,
+  DeckRecipeSummary,
+  DeckRules,
   HexCoord,
   HexTile,
   MatchReplayResponse,
@@ -65,11 +76,14 @@ import type {
   MatchState,
   Rarity,
   ReplayEvent,
+  SoloAiOpponentSelection,
   SharedClientMessage,
   SharedMatchResponse,
   SharedServerMessage,
   Side,
   StackItem,
+  SystemDeckRecipe,
+  SystemDeckListResponse,
   Unit,
   Wizard,
   WizardType,
@@ -90,6 +104,16 @@ type LoadState =
 type CatalogLoadState =
   | { status: "loading" }
   | { status: "ready"; cards: CatalogCard[] }
+  | { status: "error"; message: string };
+
+type DeckLoadState =
+  | { status: "loading" }
+  | { status: "ready"; response: DeckListResponse }
+  | { status: "error"; message: string };
+
+type SystemDeckLoadState =
+  | { status: "loading" }
+  | { status: "ready"; response: SystemDeckListResponse }
   | { status: "error"; message: string };
 
 type MatchArchiveLoadState =
@@ -217,6 +241,20 @@ export function App() {
         currentUser={currentUser}
         onNavigate={navigate}
         onProfileUpdated={(profile) => setAuthState({ status: "signedIn", user: profile })}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
+
+  if (normalizedPath === "/decks") {
+    if (!currentUser) {
+      return <AuthPage onAuthenticated={handleAuthenticated} />;
+    }
+
+    return (
+      <DecksPage
+        currentUser={currentUser}
+        onNavigate={navigate}
         onSignOut={handleSignOut}
       />
     );
@@ -519,6 +557,367 @@ function CatalogDetail({ card }: { card: CatalogCard | null }) {
   );
 }
 
+function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { currentUser: AuthUser }) {
+  const [deckLoadState, setDeckLoadState] = useState<DeckLoadState>({ status: "loading" });
+  const [catalogLoadState, setCatalogLoadState] = useState<CatalogLoadState>({ status: "loading" });
+  const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
+  const [deckName, setDeckName] = useState("");
+  const [cardCounts, setCardCounts] = useState<Record<string, number>>({});
+  const [defaultDeck, setDefaultDeck] = useState(false);
+  const [query, setQuery] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void reloadDecks();
+    loadCatalog()
+      .then((response) => setCatalogLoadState({ status: "ready", cards: response.cards }))
+      .catch((error: unknown) =>
+        setCatalogLoadState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not load catalog",
+        }),
+      );
+  }, []);
+
+  async function reloadDecks(nextSelectedId?: number) {
+    setDeckLoadState({ status: "loading" });
+    try {
+      const response = await loadDecks();
+      setDeckLoadState({ status: "ready", response });
+      const nextDeck =
+        response.decks.find((deck) => deck.id === nextSelectedId) ??
+        response.decks.find((deck) => deck.id === selectedDeckId) ??
+        response.decks[0] ??
+        null;
+      selectDeck(nextDeck);
+    } catch (error) {
+      setDeckLoadState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Could not load decks",
+      });
+    }
+  }
+
+  function selectDeck(deck: DeckRecipeSummary | null) {
+    setSelectedDeckId(deck?.id ?? null);
+    setDeckName(deck?.name ?? "New Deck");
+    setDefaultDeck(deck?.isDefault ?? false);
+    setCardCounts(countsFromCards(deck?.cards ?? []));
+    setNotice(null);
+  }
+
+  const decks = deckLoadState.status === "ready" ? deckLoadState.response.decks : [];
+  const rules = deckLoadState.status === "ready" ? deckLoadState.response.rules : null;
+  const catalogCards = catalogLoadState.status === "ready" ? catalogLoadState.cards : [];
+  const localCards = cardsFromCounts(cardCounts);
+  const localLegality = rules ? evaluateDeckLegality(localCards, catalogCards, rules) : null;
+  const filteredCards = catalogCards.filter((card) => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    return (
+      normalizedQuery.length === 0 ||
+      card.name.toLocaleLowerCase().includes(normalizedQuery) ||
+      card.text.toLocaleLowerCase().includes(normalizedQuery)
+    );
+  });
+
+  function adjustCount(templateId: string, delta: number) {
+    setCardCounts((current) => {
+      const nextCount = Math.max(0, (current[templateId] ?? 0) + delta);
+      const next = { ...current };
+      if (nextCount === 0) {
+        delete next[templateId];
+      } else {
+        next[templateId] = nextCount;
+      }
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    if (!selectedDeckId) {
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
+    try {
+      const saved = await updateDeck(selectedDeckId, deckName, localCards, defaultDeck);
+      await reloadDecks(saved.id);
+      setNotice("Deck saved.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not save deck");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCreate() {
+    if (decks.length >= (rules?.maxDecksPerAccount ?? 30)) {
+      setNotice("Deck library limit reached.");
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
+    try {
+      const created = await createDeck("New Deck", [], false);
+      await reloadDecks(created.id);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not create deck");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDuplicate() {
+    if (!selectedDeckId) {
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
+    try {
+      const created = await duplicateDeck(selectedDeckId);
+      await reloadDecks(created.id);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not duplicate deck");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!selectedDeckId || decks.length <= 1) {
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
+    try {
+      await deleteDeck(selectedDeckId);
+      await reloadDecks();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not delete deck");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (deckLoadState.status === "loading" || catalogLoadState.status === "loading") {
+    return <ShellMessage title="Decks" message="Loading deck library" />;
+  }
+
+  if (deckLoadState.status === "error") {
+    return <ShellMessage title="Decks" message={deckLoadState.message} />;
+  }
+
+  if (catalogLoadState.status === "error") {
+    return <ShellMessage title="Decks" message={catalogLoadState.message} />;
+  }
+
+  return (
+    <main className="app-shell deck-shell">
+      <section className="deck-layout" aria-label="Deck library">
+        <header className="top-bar catalog-header">
+          <div>
+            <p className="eyebrow">Rune Lanes</p>
+            <h1>Decks</h1>
+          </div>
+          <div className="actions">
+            <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+            <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Match picker">
+              <House size={18} />
+            </button>
+          </div>
+        </header>
+
+        <aside className="deck-list" aria-label="Deck recipes">
+          <button className="primary-button" type="button" onClick={() => void handleCreate()} disabled={busy}>
+            <Plus size={18} />
+            New Deck
+          </button>
+          {decks.map((deck) => (
+            <button
+              key={deck.id}
+              className={`deck-list-item ${selectedDeckId === deck.id ? "selected" : ""}`}
+              type="button"
+              onClick={() => selectDeck(deck)}
+            >
+              <strong>{deck.name}</strong>
+              <span>{deck.legality.legal ? "Legal" : "Draft"} · {deck.legality.totalCards} cards</span>
+              {deck.isDefault ? <span>Default</span> : null}
+            </button>
+          ))}
+        </aside>
+
+        <section className="deck-editor" aria-label="Deck editor">
+          <div className="deck-editor-header">
+            <label>
+              Name
+              <input value={deckName} onChange={(event) => setDeckName(event.target.value)} />
+            </label>
+            <label className="deck-default-toggle">
+              <input
+                type="checkbox"
+                checked={defaultDeck}
+                onChange={(event) => setDefaultDeck(event.target.checked)}
+              />
+              Default
+            </label>
+            <button className="primary-button" type="button" onClick={() => void handleSave()} disabled={busy || !selectedDeckId}>
+              Save
+            </button>
+            <button className="secondary-link" type="button" onClick={() => void handleDuplicate()} disabled={busy || !selectedDeckId}>
+              <Copy size={18} />
+              Duplicate
+            </button>
+            <button className="secondary-link" type="button" onClick={() => void handleDelete()} disabled={busy || !selectedDeckId || decks.length <= 1}>
+              <X size={18} />
+              Delete
+            </button>
+          </div>
+
+          {localLegality ? <DeckLegalityPanel legality={localLegality} /> : null}
+          {notice ? <p className="notice">{notice}</p> : null}
+
+          <label className="catalog-search deck-search" htmlFor="deck-card-search">
+            <Search size={17} />
+            <input
+              id="deck-card-search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search cards"
+              autoComplete="off"
+            />
+          </label>
+
+          <div className="deck-builder-grid">
+            {filteredCards.map((card) => (
+              <div key={card.id} className={`deck-card-row ${card.rarity}`}>
+                <div>
+                  <strong>{card.name}</strong>
+                  <span>{card.rarity} · {card.cost} mana</span>
+                </div>
+                <p>{card.text}</p>
+                <div className="deck-count-controls">
+                  <button type="button" onClick={() => adjustCount(card.templateId, -1)} disabled={busy}>
+                    -
+                  </button>
+                  <strong>{cardCounts[card.templateId] ?? 0}</strong>
+                  <button type="button" onClick={() => adjustCount(card.templateId, 1)} disabled={busy}>
+                    +
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </section>
+    </main>
+  );
+}
+
+function DeckLegalityPanel({ legality }: { legality: DeckLegality }) {
+  return (
+    <section className={`deck-legality ${legality.legal ? "legal" : "draft"}`} aria-label="Deck legality">
+      <div>
+        <strong>{legality.legal ? "Legal deck" : "Draft deck"}</strong>
+        <span>
+          {legality.totalCards} cards · {legality.basicCards} Basic · {legality.advancedCards} Advanced · {legality.rareCards} Rare
+        </span>
+      </div>
+      {legality.messages.length > 0 ? (
+        <ul>
+          {legality.messages.map((message) => (
+            <li key={message}>{message}</li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
+function countsFromCards(cards: DeckCardCount[]) {
+  return Object.fromEntries(cards.map((card) => [card.templateId, card.count]));
+}
+
+function cardsFromCounts(counts: Record<string, number>): DeckCardCount[] {
+  return Object.entries(counts)
+    .filter(([, count]) => count > 0)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([templateId, count]) => ({ templateId, count }));
+}
+
+function evaluateDeckLegality(
+  cards: DeckCardCount[],
+  catalogCards: CatalogCard[],
+  rules: DeckRules,
+): DeckLegality {
+  const catalogByTemplate = new Map(catalogCards.map((card) => [card.templateId, card]));
+  const messages: string[] = [];
+  let totalCards = 0;
+  let basicCards = 0;
+  let advancedCards = 0;
+  let rareCards = 0;
+
+  for (const cardCount of cards) {
+    const card = catalogByTemplate.get(cardCount.templateId);
+    totalCards += cardCount.count;
+    if (!card) {
+      messages.push(`${cardCount.templateId} is not in the card catalog.`);
+      continue;
+    }
+    if (card.rarity === "basic") {
+      basicCards += cardCount.count;
+      if (cardCount.count > rules.basicCopyLimit) {
+        messages.push(`${card.name} allows at most ${rules.basicCopyLimit} copies.`);
+      }
+    } else if (card.rarity === "advanced") {
+      advancedCards += cardCount.count;
+      if (cardCount.count > rules.advancedCopyLimit) {
+        messages.push(`${card.name} allows at most ${rules.advancedCopyLimit} copies.`);
+      }
+    } else {
+      rareCards += cardCount.count;
+      if (cardCount.count > rules.rareCopyLimit) {
+        messages.push(`${card.name} allows at most ${rules.rareCopyLimit} copies.`);
+      }
+    }
+  }
+
+  if (totalCards < rules.minCards) {
+    messages.push(`At least ${rules.minCards} cards are required.`);
+  }
+  if (advancedCards > rules.advancedTotalLimit) {
+    messages.push(`At most ${rules.advancedTotalLimit} Advanced cards are allowed.`);
+  }
+  if (rareCards > rules.rareTotalLimit) {
+    messages.push(`At most ${rules.rareTotalLimit} Rare cards are allowed.`);
+  }
+
+  return {
+    legal: messages.length === 0,
+    totalCards,
+    basicCards,
+    advancedCards,
+    rareCards,
+    messages,
+  };
+}
+
+function aiSelectionFromValue(
+  value: string,
+  accountWizardType: WizardType,
+): SoloAiOpponentSelection | null {
+  if (value.startsWith("system:")) {
+    return { source: "system", systemDeckId: value.slice("system:".length) };
+  }
+  if (value.startsWith("account:")) {
+    const deckId = Number(value.slice("account:".length));
+    return Number.isFinite(deckId)
+      ? { source: "account", deckId, wizardType: accountWizardType }
+      : null;
+  }
+  return null;
+}
+
 function DetailStat({ label, value }: { label: string; value: string | number }) {
   return (
     <span className="detail-stat">
@@ -647,14 +1046,69 @@ function MatchPicker({
   const [selectedWizardType, setSelectedWizardType] = useState<WizardType>(
     () => currentUser?.preferredWizardType ?? "runekeeper",
   );
+  const [deckLoadState, setDeckLoadState] = useState<DeckLoadState | null>(
+    currentUser ? { status: "loading" } : null,
+  );
+  const [systemDeckLoadState, setSystemDeckLoadState] = useState<SystemDeckLoadState>({
+    status: "loading",
+  });
+  const [selectedPlayerDeckId, setSelectedPlayerDeckId] = useState<string>("starter");
+  const [selectedAiDeck, setSelectedAiDeck] = useState<string>("system:balanced-starter");
+  const [selectedAiWizardType, setSelectedAiWizardType] = useState<WizardType>("runekeeper");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadSystemDecks()
+      .then((response) => {
+        setSystemDeckLoadState({ status: "ready", response });
+        if (!response.decks.some((deck) => `system:${deck.id}` === selectedAiDeck)) {
+          setSelectedAiDeck(`system:${response.decks[0]?.id ?? "balanced-starter"}`);
+        }
+      })
+      .catch((error: unknown) =>
+        setSystemDeckLoadState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not load AI decks",
+        }),
+      );
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setDeckLoadState(null);
+      setSelectedPlayerDeckId("starter");
+      return;
+    }
+    setDeckLoadState({ status: "loading" });
+    loadDecks()
+      .then((response) => {
+        setDeckLoadState({ status: "ready", response });
+        const defaultDeck = response.decks.find((deck) => deck.isDefault && deck.legality.legal);
+        if (defaultDeck) {
+          setSelectedPlayerDeckId(String(defaultDeck.id));
+        }
+      })
+      .catch((error: unknown) =>
+        setDeckLoadState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not load decks",
+        }),
+      );
+  }, [currentUser]);
 
   async function handleCreateMatch() {
     setBusy(true);
     setNotice(null);
     try {
-      const created = await createMatch(selectedWizardType);
+      const aiOpponent = aiSelectionFromValue(selectedAiDeck, selectedAiWizardType);
+      const created = await createMatch({
+        wizardType: selectedWizardType,
+        ...(selectedPlayerDeckId !== "starter"
+          ? { playerDeckId: Number(selectedPlayerDeckId) }
+          : {}),
+        ...(aiOpponent ? { aiOpponent } : {}),
+      });
       onNavigate(`/match/${created.matchId}`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not create match");
@@ -690,6 +1144,14 @@ function MatchPicker({
     }
     onNavigate(`/match/${encodeURIComponent(normalized)}`);
   }
+
+  const legalAccountDecks =
+    deckLoadState?.status === "ready"
+      ? deckLoadState.response.decks.filter((deck) => deck.legality.legal)
+      : [];
+  const systemDecks =
+    systemDeckLoadState.status === "ready" ? systemDeckLoadState.response.decks : [];
+  const selectedAiDeckIsAccount = selectedAiDeck.startsWith("account:");
 
   return (
     <main className="app-shell picker-shell">
@@ -739,6 +1201,62 @@ function MatchPicker({
             ))}
           </div>
         </fieldset>
+        <section className="setup-deck-selectors" aria-label="Deck selection">
+          <label>
+            Your Deck
+            <select
+              value={selectedPlayerDeckId}
+              onChange={(event) => setSelectedPlayerDeckId(event.target.value)}
+              disabled={busy || !currentUser || deckLoadState?.status === "loading"}
+            >
+              <option value="starter">Starter</option>
+              {legalAccountDecks.map((deck) => (
+                <option key={deck.id} value={deck.id}>
+                  {deck.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            AI Deck
+            <select
+              value={selectedAiDeck}
+              onChange={(event) => setSelectedAiDeck(event.target.value)}
+              disabled={busy || systemDeckLoadState.status === "loading"}
+            >
+              {systemDecks.map((deck) => (
+                <option key={deck.id} value={`system:${deck.id}`}>
+                  {deck.name}
+                </option>
+              ))}
+              {legalAccountDecks.map((deck) => (
+                <option key={deck.id} value={`account:${deck.id}`}>
+                  {deck.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {selectedAiDeckIsAccount ? (
+            <label>
+              AI Wizard
+              <select
+                value={selectedAiWizardType}
+                onChange={(event) => setSelectedAiWizardType(event.target.value as WizardType)}
+                disabled={busy}
+              >
+                {WIZARD_OPTIONS.map((wizard) => (
+                  <option key={wizard.id} value={wizard.id}>
+                    {wizard.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {deckLoadState?.status === "error" ? <p className="notice">{deckLoadState.message}</p> : null}
+          {systemDeckLoadState.status === "error" ? (
+            <p className="notice">{systemDeckLoadState.message}</p>
+          ) : null}
+        </section>
         <div className="picker-actions">
           <button
             className="primary-button"
@@ -762,6 +1280,12 @@ function MatchPicker({
             <LibraryBig size={18} />
             Card Catalog
           </button>
+          {currentUser ? (
+            <button className="secondary-link" type="button" onClick={() => onNavigate("/decks")}>
+              <Layers size={18} />
+              Decks
+            </button>
+          ) : null}
           <button className="secondary-link" type="button" onClick={() => onNavigate("/matches")}>
             <History size={18} />
             Match Archive
@@ -1374,6 +1898,10 @@ function SharedMatchPage({
     const stored = sessionStorage.getItem(`rune-lanes-wizard:${matchId}`);
     return isWizardType(stored) ? stored : (currentUser?.preferredWizardType ?? "runekeeper");
   });
+  const [deckLoadState, setDeckLoadState] = useState<DeckLoadState | null>(
+    currentUser ? { status: "loading" } : null,
+  );
+  const [selectedDeckId, setSelectedDeckId] = useState<string>("starter");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
@@ -1399,6 +1927,29 @@ function SharedMatchPage({
       .then((response) => setCatalogCards(response.cards))
       .catch(() => setCatalogCards([]));
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setDeckLoadState(null);
+      setSelectedDeckId("starter");
+      return;
+    }
+    setDeckLoadState({ status: "loading" });
+    loadDecks()
+      .then((response) => {
+        setDeckLoadState({ status: "ready", response });
+        const defaultDeck = response.decks.find((deck) => deck.isDefault && deck.legality.legal);
+        if (defaultDeck) {
+          setSelectedDeckId(String(defaultDeck.id));
+        }
+      })
+      .catch((error: unknown) =>
+        setDeckLoadState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not load decks",
+        }),
+      );
+  }, [currentUser]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
@@ -1546,7 +2097,12 @@ function SharedMatchPage({
     setBusy(true);
     setNotice(null);
     try {
-      const joined = await joinSharedMatch(matchId, seatToken, selectedWizardType);
+      const joined = await joinSharedMatch(
+        matchId,
+        seatToken,
+        selectedWizardType,
+        selectedDeckId === "starter" ? undefined : Number(selectedDeckId),
+      );
       sessionStorage.setItem(`rune-lanes-wizard:${matchId}`, selectedWizardType);
       setLoadState({ status: "ready", shared: joined });
     } catch (error) {
@@ -1676,6 +2232,10 @@ function SharedMatchPage({
     const opponentWizard = shared.opponentWizardType
       ? wizardOptionByType(shared.opponentWizardType)
       : null;
+    const legalDecks =
+      deckLoadState?.status === "ready"
+        ? deckLoadState.response.decks.filter((deck) => deck.legality.legal)
+        : [];
     const lobbyActionLabel = shared.viewerReady
       ? hasUnsavedWizardChoice
         ? "Update Wizard"
@@ -1713,6 +2273,24 @@ function SharedMatchPage({
             busy={busy}
             onSelect={handleSelectLobbyWizard}
           />
+          <section className="setup-deck-selectors" aria-label="Shared deck selection">
+            <label>
+              Your Deck
+              <select
+                value={selectedDeckId}
+                onChange={(event) => setSelectedDeckId(event.target.value)}
+                disabled={busy || !currentUser || deckLoadState?.status === "loading"}
+              >
+                <option value="starter">Starter</option>
+                {legalDecks.map((deck) => (
+                  <option key={deck.id} value={deck.id}>
+                    {deck.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {deckLoadState?.status === "error" ? <p className="notice">{deckLoadState.message}</p> : null}
+          </section>
           <div className="lobby-status-grid" aria-label="Lobby status">
             <LobbySeatStatus
               label="You"
@@ -1729,7 +2307,7 @@ function SharedMatchPage({
             className="primary-button"
             type="button"
             onClick={() => void handleJoinSharedMatch()}
-            disabled={busy || (shared.viewerReady && !hasUnsavedWizardChoice)}
+            disabled={busy}
           >
             <Users size={18} />
             {lobbyActionLabel}

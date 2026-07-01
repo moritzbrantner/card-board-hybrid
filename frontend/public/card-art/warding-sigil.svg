@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Warding Sigil">
+  <rect width="320" height="220" fill="#202827"/>
+  <circle cx="160" cy="110" r="74" fill="none" stroke="#7aa7d9" stroke-width="16"/>
+  <path d="M160 54 212 142h-104z" fill="none" stroke="#d9b84f" stroke-width="12"/>
+</svg>

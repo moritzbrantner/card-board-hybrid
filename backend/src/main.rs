@@ -1,4 +1,5 @@
 mod card_catalog;
+mod deck_library;
 mod identity;
 mod match_access;
 mod match_session;
@@ -16,6 +17,10 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use card_catalog::{CatalogResponse, starter_catalog};
+use deck_library::{
+    DeckLibrary, DeckLibraryError, DeckRecipeSnapshot, SaveDeckRequest, starter_deck_snapshot,
+    system_deck_by_id, system_deck_response, system_deck_snapshot,
+};
 use futures_util::StreamExt;
 use identity::{
     AccountProfile, CreatedAuthSession, GeneratedAvatar, IdentityError, IdentityModule,
@@ -123,13 +128,36 @@ struct GeneratedAvatarRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateMatchRequest {
-    wizard_type: WizardType,
+    #[serde(default)]
+    wizard_type: Option<WizardType>,
+    #[serde(default)]
+    player_deck_id: Option<i64>,
+    #[serde(default)]
+    ai_opponent: Option<AiOpponentRequest>,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    tag = "source",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum AiOpponentRequest {
+    System {
+        system_deck_id: String,
+    },
+    Account {
+        deck_id: i64,
+        wizard_type: WizardType,
+    },
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JoinSharedMatchRequest {
     wizard_type: WizardType,
+    #[serde(default)]
+    deck_recipe_id: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -260,7 +288,7 @@ fn create_app(store: SqliteMatchStore) -> Router {
     });
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::PATCH])
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
         .allow_headers(Any);
 
     let static_files = ServeDir::new("frontend/dist")
@@ -269,6 +297,13 @@ fn create_app(store: SqliteMatchStore) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/catalog/cards", get(catalog_cards))
+        .route("/api/system-decks", get(system_decks))
+        .route("/api/decks", get(list_decks).post(create_deck))
+        .route(
+            "/api/decks/{deck_id}",
+            get(load_deck).patch(update_deck).delete(delete_deck),
+        )
+        .route("/api/decks/{deck_id}/duplicate", post(duplicate_deck))
         .route("/api/auth/register", post(register_account))
         .route("/api/auth/login", post(login_account))
         .route("/api/auth/logout", post(logout_account))
@@ -315,6 +350,154 @@ async fn catalog_cards() -> impl IntoResponse {
     Json(CatalogResponse {
         cards: starter_catalog(),
     })
+}
+
+async fn system_decks() -> impl IntoResponse {
+    Json(system_deck_response())
+}
+
+async fn list_decks(State(state): State<SharedState>, headers: HeaderMap) -> impl IntoResponse {
+    let profile = match required_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
+        Err(response) => return response,
+    };
+    let response = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let mut decks = DeckLibrary::new(store.connection_mut());
+        match decks.list_for_user(profile.id) {
+            Ok(response) => response,
+            Err(error) => return deck_error_response(error),
+        }
+    };
+    Json(response).into_response()
+}
+
+async fn create_deck(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(request): Json<SaveDeckRequest>,
+) -> impl IntoResponse {
+    let profile = match required_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
+        Err(response) => return response,
+    };
+    let deck = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let mut decks = DeckLibrary::new(store.connection_mut());
+        match decks.create_for_user(profile.id, request) {
+            Ok(deck) => deck,
+            Err(error) => return deck_error_response(error),
+        }
+    };
+    Json(deck).into_response()
+}
+
+async fn load_deck(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(deck_id): Path<i64>,
+) -> impl IntoResponse {
+    let profile = match required_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
+        Err(response) => return response,
+    };
+    let deck = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let mut decks = DeckLibrary::new(store.connection_mut());
+        match decks.load_for_user(profile.id, deck_id) {
+            Ok(Some(deck)) => deck,
+            Ok(None) => return deck_not_found_response(),
+            Err(error) => return deck_error_response(error),
+        }
+    };
+    Json(deck).into_response()
+}
+
+async fn update_deck(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(deck_id): Path<i64>,
+    Json(request): Json<SaveDeckRequest>,
+) -> impl IntoResponse {
+    let profile = match required_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
+        Err(response) => return response,
+    };
+    let deck = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let mut decks = DeckLibrary::new(store.connection_mut());
+        match decks.update_for_user(profile.id, deck_id, request) {
+            Ok(Some(deck)) => deck,
+            Ok(None) => return deck_not_found_response(),
+            Err(error) => return deck_error_response(error),
+        }
+    };
+    Json(deck).into_response()
+}
+
+async fn duplicate_deck(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(deck_id): Path<i64>,
+) -> impl IntoResponse {
+    let profile = match required_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
+        Err(response) => return response,
+    };
+    let deck = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let mut decks = DeckLibrary::new(store.connection_mut());
+        match decks.duplicate_for_user(profile.id, deck_id) {
+            Ok(Some(deck)) => deck,
+            Ok(None) => return deck_not_found_response(),
+            Err(error) => return deck_error_response(error),
+        }
+    };
+    Json(deck).into_response()
+}
+
+async fn delete_deck(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(deck_id): Path<i64>,
+) -> impl IntoResponse {
+    let profile = match required_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
+        Err(response) => return response,
+    };
+    let deleted = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let mut decks = DeckLibrary::new(store.connection_mut());
+        match decks.delete_for_user(profile.id, deck_id) {
+            Ok(deleted) => deleted,
+            Err(error) => return deck_error_response(error),
+        }
+    };
+    if !deleted {
+        return deck_not_found_response();
+    }
+    Json(AuthMessageResponse {
+        message: "Deck deleted",
+    })
+    .into_response()
 }
 
 async fn register_account(
@@ -541,11 +724,15 @@ async fn create_match(
         Ok(profile) => profile,
         Err(response) => return response,
     };
-    let wizard_type = if body.is_empty() || body.iter().all(|byte| byte.is_ascii_whitespace()) {
-        None
+    let request = if body.is_empty() || body.iter().all(|byte| byte.is_ascii_whitespace()) {
+        CreateMatchRequest {
+            wizard_type: None,
+            player_deck_id: None,
+            ai_opponent: None,
+        }
     } else {
         match serde_json::from_slice::<CreateMatchRequest>(&body) {
-            Ok(request) => Some(request.wizard_type),
+            Ok(request) => request,
             Err(error) => {
                 return (
                     StatusCode::BAD_REQUEST,
@@ -563,14 +750,36 @@ async fn create_match(
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        let player_wizard_type = wizard_type.unwrap_or_else(|| {
+        let player_wizard_type = request.wizard_type.unwrap_or_else(|| {
             profile
                 .as_ref()
                 .map(|profile| profile.preferred_wizard_type)
                 .unwrap_or_default()
         });
-        let result = store.create_match_for_user(
+        let (opponent_wizard_type, player_snapshot, opponent_snapshot) =
+            match resolve_solo_deck_choices(
+                &mut store,
+                profile.as_ref().map(|profile| profile.id),
+                request.player_deck_id,
+                request.ai_opponent,
+            ) {
+                Ok(loadouts) => loadouts,
+                Err(response) => return response,
+            };
+        let player_deck = match deck_library::deck_from_snapshot(Side::Player, &player_snapshot) {
+            Ok(deck) => deck,
+            Err(error) => return deck_error_response(error),
+        };
+        let opponent_deck =
+            match deck_library::deck_from_snapshot(Side::Opponent, &opponent_snapshot) {
+                Ok(deck) => deck,
+                Err(error) => return deck_error_response(error),
+            };
+        let result = store.create_match_for_user_with_decks(
             player_wizard_type,
+            opponent_wizard_type,
+            player_deck,
+            opponent_deck,
             profile.as_ref().map(|profile| profile.id),
         );
         match result {
@@ -629,15 +838,28 @@ async fn load_shared_match(
 
 async fn join_shared_match(
     State(state): State<SharedState>,
+    headers: HeaderMap,
     Path((match_id, seat_token)): Path<(String, String)>,
     Json(request): Json<JoinSharedMatchRequest>,
 ) -> impl IntoResponse {
+    let profile = match optional_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
+        Err(response) => return response,
+    };
     let shared = {
         let mut store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        match store.join_shared_match(&match_id, &seat_token, request.wizard_type) {
+        let deck_recipe = match resolve_optional_account_deck_choice(
+            &mut store,
+            profile.as_ref().map(|profile| profile.id),
+            request.deck_recipe_id,
+        ) {
+            Ok(deck_recipe) => deck_recipe,
+            Err(response) => return response,
+        };
+        match store.join_shared_match(&match_id, &seat_token, request.wizard_type, deck_recipe) {
             Ok(Some(shared)) => shared,
             Ok(None) => return shared_not_found_response(),
             Err(error) => return store_error_response(error),
@@ -1125,6 +1347,29 @@ fn store_error_response(error: MatchStoreError) -> axum::response::Response {
         .into_response()
 }
 
+fn deck_error_response(error: DeckLibraryError) -> axum::response::Response {
+    let status = match error {
+        DeckLibraryError::UnknownTemplate(_)
+        | DeckLibraryError::NegativeCount(_)
+        | DeckLibraryError::EmptyName
+        | DeckLibraryError::NameTooLong
+        | DeckLibraryError::TooManyDecks
+        | DeckLibraryError::IllegalRecipe(_)
+        | DeckLibraryError::UnknownSystemDeck(_) => StatusCode::BAD_REQUEST,
+        DeckLibraryError::NotFound => StatusCode::NOT_FOUND,
+        DeckLibraryError::Sqlite(_) | DeckLibraryError::Snapshot(_) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    };
+    (
+        status,
+        Json(ApiError {
+            message: error.to_string(),
+        }),
+    )
+        .into_response()
+}
+
 fn identity_error_response(error: IdentityError) -> axum::response::Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -1175,6 +1420,16 @@ fn replay_not_found_response(match_id: &str) -> axum::response::Response {
         .into_response()
 }
 
+fn deck_not_found_response() -> axum::response::Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ApiError {
+            message: "Deck recipe was not found".to_string(),
+        }),
+    )
+        .into_response()
+}
+
 fn shared_not_found_response() -> axum::response::Response {
     (
         StatusCode::NOT_FOUND,
@@ -1191,6 +1446,82 @@ fn generated_avatar_is_valid(avatar: &GeneratedAvatarRequest) -> bool {
     SYMBOLS.contains(&avatar.symbol.as_str()) && COLORS.contains(&avatar.color.as_str())
 }
 
+#[allow(
+    clippy::result_large_err,
+    reason = "route helpers return Axum responses directly"
+)]
+fn resolve_solo_deck_choices(
+    store: &mut SqliteMatchStore,
+    user_id: Option<i64>,
+    player_deck_id: Option<i64>,
+    ai_opponent: Option<AiOpponentRequest>,
+) -> Result<(WizardType, DeckRecipeSnapshot, DeckRecipeSnapshot), axum::response::Response> {
+    let player_snapshot = resolve_optional_account_deck_choice(store, user_id, player_deck_id)?;
+    let (opponent_wizard_type, opponent_snapshot) = match ai_opponent {
+        Some(AiOpponentRequest::System { system_deck_id }) => {
+            let Some(system_deck) = system_deck_by_id(&system_deck_id) else {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiError {
+                        message: format!("Unknown system deck: {system_deck_id}"),
+                    }),
+                )
+                    .into_response());
+            };
+            let snapshot = match system_deck_snapshot(&system_deck_id) {
+                Ok(snapshot) => snapshot,
+                Err(error) => return Err(deck_error_response(error)),
+            };
+            (system_deck.wizard_type, snapshot)
+        }
+        Some(AiOpponentRequest::Account {
+            deck_id,
+            wizard_type,
+        }) => {
+            let snapshot = resolve_required_account_deck_choice(store, user_id, deck_id)?;
+            (wizard_type, snapshot)
+        }
+        None => (WizardType::Runekeeper, starter_deck_snapshot()),
+    };
+
+    Ok((opponent_wizard_type, player_snapshot, opponent_snapshot))
+}
+
+#[allow(
+    clippy::result_large_err,
+    reason = "route helpers return Axum responses directly"
+)]
+fn resolve_optional_account_deck_choice(
+    store: &mut SqliteMatchStore,
+    user_id: Option<i64>,
+    deck_id: Option<i64>,
+) -> Result<DeckRecipeSnapshot, axum::response::Response> {
+    match deck_id {
+        Some(deck_id) => resolve_required_account_deck_choice(store, user_id, deck_id),
+        None => Ok(starter_deck_snapshot()),
+    }
+}
+
+#[allow(
+    clippy::result_large_err,
+    reason = "route helpers return Axum responses directly"
+)]
+fn resolve_required_account_deck_choice(
+    store: &mut SqliteMatchStore,
+    user_id: Option<i64>,
+    deck_id: i64,
+) -> Result<DeckRecipeSnapshot, axum::response::Response> {
+    let Some(user_id) = user_id else {
+        return Err(unauthorized_response());
+    };
+    let mut decks = DeckLibrary::new(store.connection_mut());
+    match decks.legal_snapshot_for_user(user_id, deck_id) {
+        Ok(Some(snapshot)) => Ok(snapshot),
+        Ok(None) => Err(deck_not_found_response()),
+        Err(error) => Err(deck_error_response(error)),
+    }
+}
+
 fn bearer_token_from_headers(headers: &HeaderMap) -> Option<String> {
     let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
     value
@@ -1199,6 +1530,10 @@ fn bearer_token_from_headers(headers: &HeaderMap) -> Option<String> {
         .map(str::to_string)
 }
 
+#[allow(
+    clippy::result_large_err,
+    reason = "route helpers return Axum responses directly"
+)]
 fn optional_profile_from_headers(
     state: &SharedState,
     headers: &HeaderMap,
@@ -1222,6 +1557,10 @@ fn optional_profile_from_headers(
     profile.map(Some).ok_or_else(unauthorized_response)
 }
 
+#[allow(
+    clippy::result_large_err,
+    reason = "route helpers return Axum responses directly"
+)]
 fn required_profile_from_headers(
     state: &SharedState,
     headers: &HeaderMap,
@@ -1425,6 +1764,131 @@ mod tests {
         assert!(current_user["avatar"]["color"].as_str().is_some());
         assert_eq!(current_user["preferredWizardType"], "runekeeper");
         assert!(current_user["id"].as_i64().unwrap() > 0);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn signed_out_deck_library_requests_require_an_account() {
+        let path = test_db_path("decks-auth");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, body) = json_request(
+            app,
+            Request::builder()
+                .uri("/api/decks")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["message"], "Sign in to continue.");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn deck_library_creates_starter_copy_and_allows_drafts() {
+        let path = test_db_path("decks-starter-draft");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "decks@example.com").await;
+
+        let (status, library) = json_request(
+            app.clone(),
+            Request::builder()
+                .uri("/api/decks")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(library["decks"].as_array().unwrap().len(), 1);
+        assert_eq!(library["decks"][0]["name"], "Balanced Starter");
+        assert_eq!(library["decks"][0]["isDefault"], true);
+        assert_eq!(library["decks"][0]["legality"]["legal"], true);
+
+        let (status, draft) = json_request(
+            app,
+            Request::builder()
+                .method("POST")
+                .uri("/api/decks")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"name":"Tiny Draft","cards":[{"templateId":"ember-squire","count":1}]}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(draft["name"], "Tiny Draft");
+        assert_eq!(draft["legality"]["legal"], false);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn match_creation_rejects_illegal_account_deck_and_uses_system_ai_wizard() {
+        let path = test_db_path("match-deck-selection");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "loadout@example.com").await;
+
+        let (_, draft) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/decks")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"name":"Tiny Draft","cards":[{"templateId":"ember-squire","count":1}]}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+        let draft_id = draft["id"].as_i64().unwrap();
+
+        let (status, rejected) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(format!(
+                    r#"{{"wizardType":"runekeeper","playerDeckId":{draft_id}}}"#
+                )))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            rejected["message"]
+                .as_str()
+                .expect("message should be a string")
+                .contains("not legal")
+        );
+
+        let (status, created) = json_request(
+            app,
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"wizardType":"runekeeper","aiOpponent":{"source":"system","systemDeckId":"ember-burn"}}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            created["matchState"]["opponent"]["wizard"]["wizardType"],
+            "pyromancer"
+        );
 
         let _ = fs::remove_file(path);
     }
@@ -2302,13 +2766,13 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         let cards = body["cards"].as_array().expect("cards should be an array");
-        assert_eq!(cards.len(), 14);
+        assert_eq!(cards.len(), 24);
         assert_eq!(cards[0]["id"], "ember-squire");
-        assert_eq!(cards[13]["id"], "eclipse-strike");
-        assert_eq!(cards[0]["copyCount"], 8);
-        assert_eq!(cards[4]["copyCount"], 4);
-        assert_eq!(cards[11]["copyCount"], 1);
-        assert_eq!(cards[10]["kind"]["priority"], 4);
+        assert_eq!(cards[23]["id"], "comet-spear");
+        assert_eq!(cards[0]["copyCount"], 5);
+        assert_eq!(cards[4]["copyCount"], 1);
+        assert_eq!(cards[19]["copyCount"], 1);
+        assert_eq!(cards[15]["kind"]["priority"], 4);
         assert_eq!(
             cards
                 .iter()
@@ -2316,7 +2780,7 @@ mod tests {
                     .as_u64()
                     .expect("copy count should be numeric"))
                 .sum::<u64>(),
-            67
+            60
         );
         assert!(cards.iter().all(|card| {
             card["artPath"]

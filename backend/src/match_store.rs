@@ -10,9 +10,10 @@ use rand::RngCore;
 use rand::rngs::OsRng;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+use crate::deck_library::{self, DeckLibraryError, DeckRecipeSnapshot};
 use crate::identity;
 use crate::match_session::{
-    MatchActionRequest, MatchState, RecordedReplayFrame, ReplayEvent, Side, WizardType,
+    Card, MatchActionRequest, MatchState, RecordedReplayFrame, ReplayEvent, Side, WizardType,
 };
 
 pub const MATCH_DATABASE_PATH_ENV: &str = "RUNE_LANES_DB_PATH";
@@ -55,10 +56,16 @@ pub enum SharedMatchStatus {
 }
 
 #[derive(Clone, Debug)]
+#[allow(
+    dead_code,
+    reason = "loaded for future shared setup visibility and frozen recipe audits"
+)]
 pub struct StoredSharedSeat {
     pub side: Side,
     pub seat_token: String,
     pub wizard_type: Option<WizardType>,
+    pub deck_recipe_name: Option<String>,
+    pub deck_recipe_snapshot: Option<DeckRecipeSnapshot>,
     pub joined_at: Option<i64>,
     pub disconnected_at: Option<i64>,
 }
@@ -89,6 +96,7 @@ pub enum MatchStoreError {
     Sqlite(rusqlite::Error),
     Snapshot(serde_json::Error),
     Identity(identity::IdentityError),
+    Deck(DeckLibraryError),
 }
 
 impl fmt::Display for MatchStoreError {
@@ -98,6 +106,7 @@ impl fmt::Display for MatchStoreError {
             Self::Sqlite(error) => write!(f, "could not access match database: {error}"),
             Self::Snapshot(error) => write!(f, "could not read persisted match snapshot: {error}"),
             Self::Identity(error) => write!(f, "{error}"),
+            Self::Deck(error) => write!(f, "{error}"),
         }
     }
 }
@@ -125,6 +134,12 @@ impl From<serde_json::Error> for MatchStoreError {
 impl From<identity::IdentityError> for MatchStoreError {
     fn from(error: identity::IdentityError) -> Self {
         Self::Identity(error)
+    }
+}
+
+impl From<DeckLibraryError> for MatchStoreError {
+    fn from(error: DeckLibraryError) -> Self {
+        Self::Deck(error)
     }
 }
 
@@ -184,11 +199,14 @@ impl SqliteMatchStore {
                 joined_at INTEGER,
                 last_seen_at INTEGER,
                 disconnected_at INTEGER,
+                deck_recipe_name TEXT,
+                deck_recipe_snapshot_json TEXT,
                 PRIMARY KEY (match_id, side)
             );
             ",
         )?;
         identity::migrate(&connection)?;
+        deck_library::migrate(&connection)?;
         add_column_if_missing(&connection, "matches", "initial_snapshot_json", "TEXT")?;
         add_column_if_missing(&connection, "matches", "completed_at", "INTEGER")?;
         add_column_if_missing(
@@ -199,6 +217,13 @@ impl SqliteMatchStore {
         )?;
         add_column_if_missing(&connection, "matches", "owner_user_id", "INTEGER")?;
         add_column_if_missing(&connection, "shared_matches", "creator_user_id", "INTEGER")?;
+        add_column_if_missing(&connection, "match_seats", "deck_recipe_name", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "match_seats",
+            "deck_recipe_snapshot_json",
+            "TEXT",
+        )?;
 
         Ok(Self { connection })
     }
@@ -207,14 +232,43 @@ impl SqliteMatchStore {
         &mut self.connection
     }
 
+    #[allow(
+        dead_code,
+        reason = "kept as the default store API for tests and callers"
+    )]
     pub fn create_match_for_user(
         &mut self,
         player_wizard_type: WizardType,
         owner_user_id: Option<i64>,
     ) -> Result<StoredMatch, MatchStoreError> {
+        let starter = deck_library::starter_deck_snapshot();
+        let player_deck = deck_library::deck_from_snapshot(Side::Player, &starter)?;
+        let opponent_deck = deck_library::deck_from_snapshot(Side::Opponent, &starter)?;
+        self.create_match_for_user_with_decks(
+            player_wizard_type,
+            WizardType::Runekeeper,
+            player_deck,
+            opponent_deck,
+            owner_user_id,
+        )
+    }
+
+    pub fn create_match_for_user_with_decks(
+        &mut self,
+        player_wizard_type: WizardType,
+        opponent_wizard_type: WizardType,
+        player_deck: Vec<Card>,
+        opponent_deck: Vec<Card>,
+        owner_user_id: Option<i64>,
+    ) -> Result<StoredMatch, MatchStoreError> {
         for attempt in 0..8 {
             let id = readable_match_id(attempt);
-            let state = MatchState::new_with_player_wizard_type(player_wizard_type);
+            let state = MatchState::new_with_loadouts(
+                player_wizard_type,
+                opponent_wizard_type,
+                player_deck.clone(),
+                opponent_deck.clone(),
+            );
             let snapshot = state.to_snapshot_json()?;
             let initial_frame = state.initial_replay_frame();
             let event_json = serde_json::to_string(&initial_frame.event)?;
@@ -245,7 +299,12 @@ impl SqliteMatchStore {
         }
 
         let id = readable_match_id(99);
-        let state = MatchState::new_with_player_wizard_type(player_wizard_type);
+        let state = MatchState::new_with_loadouts(
+            player_wizard_type,
+            opponent_wizard_type,
+            player_deck,
+            opponent_deck,
+        );
         let snapshot = state.to_snapshot_json()?;
         let initial_frame = state.initial_replay_frame();
         let event_json = serde_json::to_string(&initial_frame.event)?;
@@ -381,6 +440,7 @@ impl SqliteMatchStore {
         id: &str,
         seat_token: &str,
         wizard_type: WizardType,
+        deck_recipe: DeckRecipeSnapshot,
     ) -> Result<Option<StoredSharedMatch>, MatchStoreError> {
         let Some(shared) = self.load_shared_match_for_seat(id, seat_token)? else {
             return Ok(None);
@@ -394,19 +454,33 @@ impl SqliteMatchStore {
             "
             UPDATE match_seats
             SET wizard_type = ?3,
+                deck_recipe_name = ?4,
+                deck_recipe_snapshot_json = ?5,
                 joined_at = COALESCE(joined_at, unixepoch()),
                 last_seen_at = unixepoch(),
                 disconnected_at = NULL
             WHERE match_id = ?1 AND seat_token = ?2
             ",
-            params![id, seat_token, wizard_type.to_db()],
+            params![
+                id,
+                seat_token,
+                wizard_type.to_db(),
+                deck_recipe.name,
+                serde_json::to_string(&deck_recipe)?
+            ],
         )?;
 
-        if let Some((player_wizard_type, opponent_wizard_type)) =
-            ready_shared_wizard_types(&transaction, id)?
+        if let Some((player_wizard_type, opponent_wizard_type, player_recipe, opponent_recipe)) =
+            ready_shared_loadouts(&transaction, id)?
         {
-            let state =
-                MatchState::new_shared_with_wizard_types(player_wizard_type, opponent_wizard_type);
+            let player_deck = deck_library::deck_from_snapshot(Side::Player, &player_recipe)?;
+            let opponent_deck = deck_library::deck_from_snapshot(Side::Opponent, &opponent_recipe)?;
+            let state = MatchState::new_shared_with_loadouts(
+                player_wizard_type,
+                opponent_wizard_type,
+                player_deck,
+                opponent_deck,
+            );
             let snapshot = state.to_snapshot_json()?;
             let initial_frame = state.initial_replay_frame();
             let event_json = serde_json::to_string(&initial_frame.event)?;
@@ -833,7 +907,15 @@ impl SqliteMatchStore {
     fn load_shared_seats(&self, match_id: &str) -> Result<Vec<StoredSharedSeat>, MatchStoreError> {
         let mut statement = self.connection.prepare(
             "
-            SELECT side, seat_token, wizard_type, joined_at, last_seen_at, disconnected_at
+            SELECT
+                side,
+                seat_token,
+                wizard_type,
+                deck_recipe_name,
+                deck_recipe_snapshot_json,
+                joined_at,
+                last_seen_at,
+                disconnected_at
             FROM match_seats
             WHERE match_id = ?1
             ",
@@ -841,12 +923,26 @@ impl SqliteMatchStore {
         let rows = statement.query_map(params![match_id], |row| {
             let side = row.get::<_, String>(0)?;
             let wizard_type = row.get::<_, Option<String>>(2)?;
+            let snapshot_json = row.get::<_, Option<String>>(4)?;
+            let deck_recipe_snapshot = snapshot_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        4,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
             Ok(StoredSharedSeat {
                 side: side_from_db(&side).expect("stored side should be valid"),
                 seat_token: row.get(1)?,
                 wizard_type: wizard_type.as_deref().and_then(wizard_type_from_db),
-                joined_at: row.get(3)?,
-                disconnected_at: row.get(5)?,
+                deck_recipe_name: row.get(3)?,
+                deck_recipe_snapshot,
+                joined_at: row.get(5)?,
+                disconnected_at: row.get(7)?,
             })
         })?;
 
@@ -952,13 +1048,21 @@ fn insert_shared_seat(
     Ok(())
 }
 
-fn ready_shared_wizard_types(
+fn ready_shared_loadouts(
     transaction: &Transaction<'_>,
     match_id: &str,
-) -> Result<Option<(WizardType, WizardType)>, MatchStoreError> {
+) -> Result<
+    Option<(
+        WizardType,
+        WizardType,
+        DeckRecipeSnapshot,
+        DeckRecipeSnapshot,
+    )>,
+    MatchStoreError,
+> {
     let mut statement = transaction.prepare(
         "
-        SELECT side, wizard_type, joined_at
+        SELECT side, wizard_type, deck_recipe_snapshot_json, joined_at
         FROM match_seats
         WHERE match_id = ?1
         ",
@@ -967,28 +1071,61 @@ fn ready_shared_wizard_types(
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, Option<String>>(1)?,
-            row.get::<_, Option<i64>>(2)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<i64>>(3)?,
         ))
     })?;
 
     let mut player_wizard_type = None;
     let mut opponent_wizard_type = None;
+    let mut player_deck = None;
+    let mut opponent_deck = None;
     for row in rows {
-        let (side, wizard_type, joined_at) = row?;
+        let (side, wizard_type, deck_snapshot_json, joined_at) = row?;
         if joined_at.is_none() {
             continue;
         }
         let Some(wizard_type) = wizard_type.as_deref().and_then(wizard_type_from_db) else {
             continue;
         };
+        let Some(deck_snapshot_json) = deck_snapshot_json else {
+            continue;
+        };
+        let deck_snapshot = serde_json::from_str::<DeckRecipeSnapshot>(&deck_snapshot_json)?;
         match side_from_db(&side) {
-            Some(Side::Player) => player_wizard_type = Some(wizard_type),
-            Some(Side::Opponent) => opponent_wizard_type = Some(wizard_type),
+            Some(Side::Player) => {
+                player_wizard_type = Some(wizard_type);
+                player_deck = Some(deck_snapshot);
+            }
+            Some(Side::Opponent) => {
+                opponent_wizard_type = Some(wizard_type);
+                opponent_deck = Some(deck_snapshot);
+            }
             None => {}
         }
     }
 
-    Ok(player_wizard_type.zip(opponent_wizard_type))
+    Ok(
+        match (
+            player_wizard_type,
+            opponent_wizard_type,
+            player_deck,
+            opponent_deck,
+        ) {
+            (
+                Some(player_wizard_type),
+                Some(opponent_wizard_type),
+                Some(player_deck),
+                Some(opponent_deck),
+            ) => Some((
+                player_wizard_type,
+                opponent_wizard_type,
+                player_deck,
+                opponent_deck,
+            )),
+            _ => None,
+        },
+    )
 }
 
 fn add_column_if_missing(

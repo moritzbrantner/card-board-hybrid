@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Bastion Rune">
+  <rect width="320" height="220" fill="#18211f"/>
+  <path d="M80 52h160v64c0 46-34 78-80 94-46-16-80-48-80-94z" fill="#58b7a1"/>
+  <path d="M116 96h88v22h-88zm0 42h88v22h-88z" fill="#151817"/>
+</svg>
