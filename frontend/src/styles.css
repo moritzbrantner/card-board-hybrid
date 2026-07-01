@@ -607,10 +607,11 @@ h1 {
 }
 
 .piece-token {
+  position: relative;
   display: grid;
-  align-content: center;
+  align-content: start;
   justify-items: center;
-  gap: 1px;
+  gap: 2px;
   width: var(--token-size);
   min-height: var(--token-size);
   border: 2px solid currentColor;
@@ -618,6 +619,11 @@ h1 {
   color: var(--green);
   background: rgba(16, 19, 18, 0.88);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  transition:
+    transform 160ms ease,
+    filter 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .piece-token.opponent {
@@ -632,8 +638,82 @@ h1 {
   color: #df8277;
 }
 
+.hex-tile:not(:disabled):hover .piece-token {
+  transform: translateY(-2px);
+  filter: brightness(1.08);
+}
+
+.piece-token.portrait {
+  padding: 4px;
+}
+
+.piece-token.portrait.basic {
+  color: var(--green);
+}
+
+.piece-token.portrait.advanced {
+  color: var(--blue);
+}
+
+.piece-token.portrait.rare {
+  color: var(--gold);
+}
+
+.piece-token.portrait.unknown {
+  color: var(--muted);
+  border-style: dashed;
+}
+
+.piece-token.runekeeper {
+  color: #7aa7d9;
+}
+
+.piece-token.pyromancer {
+  color: #d1665a;
+}
+
+.piece-token.chronomancer {
+  color: #a78bfa;
+}
+
+.piece-token.warden {
+  color: #77b36f;
+}
+
+.piece-token.battlemage {
+  color: #d9b84f;
+}
+
+.piece-token .piece-token-portrait {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: calc(var(--token-size) * 0.55);
+  overflow: hidden;
+  border-radius: 5px;
+  color: #fffaf0;
+  background:
+    linear-gradient(150deg, rgba(255, 255, 255, 0.12), transparent 52%),
+    rgba(0, 0, 0, 0.28);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.piece-token .piece-token-portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .piece-token strong {
-  font-size: 1.05rem;
+  max-width: 100%;
+  overflow: hidden;
+  color: #fffaf0;
+  font-size: 0.74rem;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .piece-token span {
@@ -642,6 +722,19 @@ h1 {
   gap: 2px;
   font-size: 0.78rem;
   font-weight: 800;
+}
+
+.piece-token .piece-token-stat-row {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.piece-token .piece-token-stat-row span {
+  min-width: 0;
+  padding: 1px 3px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.42);
 }
 
 .piece-token svg {
@@ -799,8 +892,8 @@ h1 {
   display: grid;
   align-content: start;
   flex: 0 0 168px;
-  gap: 8px;
-  min-height: 178px;
+  gap: 7px;
+  min-height: 242px;
   padding: 16px 12px 12px;
   border: 1px solid rgba(217, 184, 79, 0.3);
   border-radius: 8px;
@@ -810,6 +903,16 @@ h1 {
     linear-gradient(160deg, rgba(88, 183, 161, 0.15), transparent 48%),
     #222827;
   cursor: pointer;
+  overflow: hidden;
+  transition:
+    transform 160ms ease,
+    filter 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.card-button:not(:disabled):hover {
+  transform: translateY(-3px);
+  filter: brightness(1.06);
 }
 
 .card-button.dragging {
@@ -828,6 +931,14 @@ h1 {
 .card-button.selected {
   border-color: var(--gold);
   box-shadow: 0 0 0 2px rgba(217, 184, 79, 0.22);
+}
+
+.card-button-art {
+  width: calc(100% + 24px);
+  height: 76px;
+  margin: -16px -12px 2px;
+  object-fit: cover;
+  background: #111412;
 }
 
 .card-cost {
@@ -1665,6 +1776,10 @@ h1 {
   background:
     linear-gradient(150deg, rgba(88, 183, 161, 0.14), transparent 52%),
     #111412;
+  font-size: 2rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .unit-modal-body {
@@ -1809,6 +1924,11 @@ h1 {
 
   .card-button {
     flex-basis: 154px;
+    min-height: 228px;
+  }
+
+  .card-button-art {
+    height: 68px;
   }
 
   .player-badge {
@@ -1843,5 +1963,18 @@ h1 {
 
   .catalog-detail > img {
     height: 210px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-button,
+  .piece-token {
+    transition: none;
+  }
+
+  .card-button:not(:disabled):hover,
+  .hex-tile:not(:disabled):hover .piece-token,
+  .card-button.dragging {
+    transform: none;
   }
 }

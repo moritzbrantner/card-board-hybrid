@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Warden">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#122018"/>
+      <stop offset=".55" stop-color="#376d42"/>
+      <stop offset="1" stop-color="#d9b84f"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#fffaf0"/>
+      <stop offset="1" stop-color="#77b36f"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="220" fill="url(#bg)"/>
+  <path d="M0 160 C74 130 105 151 159 112 C218 70 254 88 320 48 L320 220 L0 220 Z" fill="#101610" opacity=".74"/>
+  <path d="M160 30 218 52 211 101 C205 143 183 165 160 178 C137 165 115 143 109 101 L102 52 Z" fill="url(#shield)" opacity=".9"/>
+  <path d="M160 54 190 66 186 101 C182 124 172 139 160 149 C148 139 138 124 134 101 L130 66 Z" fill="#1c2120"/>
+  <path d="M87 190 C104 151 129 132 160 132 C191 132 216 151 233 190 Z" fill="#172015"/>
+  <path d="M127 190 C133 163 144 150 160 150 C176 150 187 163 193 190 Z" fill="#77b36f" opacity=".68"/>
+</svg>

@@ -58,6 +58,13 @@ import {
 import { ProfilePage } from "./profile";
 import { clearAuthToken, getAuthToken, saveAuthToken } from "./session";
 import { WIZARD_OPTIONS } from "./wizards";
+import {
+  createMatchVisualCatalog,
+  type CardVisualIdentity,
+  type MatchVisualCatalog,
+  type UnitVisualIdentity,
+  type WizardVisualIdentity,
+} from "./matchVisualIdentity";
 import type {
   AuthSessionResponse,
   AuthUser,
@@ -153,9 +160,8 @@ type UnitContextMenu =
 type BoardWizard = Wizard & { pieceType: "wizard"; name: string };
 type BoardUnit = Unit & { pieceType: "unit"; hp?: never; maxHp?: never };
 type BoardPiece = BoardWizard | BoardUnit;
-type CatalogUnitCard = CatalogCard & {
-  kind: Extract<CatalogCard["kind"], { type: "unit" }>;
-};
+
+const EMPTY_MATCH_VISUAL_CATALOG = createMatchVisualCatalog([]);
 
 type AccountProps = {
   currentUser: AuthUser | null;
@@ -1569,6 +1575,11 @@ function MatchPage({
       .catch(() => setCatalogCards([]));
   }, []);
 
+  const visualCatalog = useMemo(
+    () => createMatchVisualCatalog(catalogCards),
+    [catalogCards],
+  );
+
   const selectedCard = useMemo(() => {
     if (loadState.status !== "ready" || selection?.type !== "card") {
       return null;
@@ -1594,13 +1605,10 @@ function MatchPage({
     return piece?.pieceType === "unit" ? piece : null;
   }, [loadState, unitModalPieceId]);
 
-  const modalUnitCard = useMemo(() => {
-    if (!modalUnit) {
-      return null;
-    }
-
-    return findUnitCatalogCard(catalogCards, modalUnit);
-  }, [catalogCards, modalUnit]);
+  const modalUnitVisualIdentity = useMemo(
+    () => (modalUnit ? visualCatalog.unit(modalUnit) : null),
+    [modalUnit, visualCatalog],
+  );
 
   const contextMenuUnit = useMemo(() => {
     if (loadState.status !== "ready" || unitContextMenu === null) {
@@ -1801,6 +1809,7 @@ function MatchPage({
           <Board
             match={match}
             viewerSide="player"
+            visualCatalog={visualCatalog}
             selectedCard={selectedCard}
             selectedPiece={selectedPiece}
             disabled={busy || match.phase === "matchOver"}
@@ -1814,6 +1823,7 @@ function MatchPage({
                 <CardButton
                   key={card.id}
                   card={card}
+                  visualIdentity={visualCatalog.card(card)}
                   selected={selection?.type === "card" && card.id === selection.cardId}
                   dragging={draggedCardId === card.id}
                   disabled={busy || !isPlayableCard(match, viewerSide, card)}
@@ -1864,7 +1874,7 @@ function MatchPage({
       {modalUnit ? (
         <UnitCardModal
           unit={modalUnit}
-          card={modalUnitCard}
+          unitVisualIdentity={modalUnitVisualIdentity ?? visualCatalog.unit(modalUnit)}
           onClose={() => setUnitModalPieceId(null)}
         />
       ) : null}
@@ -1933,6 +1943,11 @@ function SharedMatchPage({
       .then((response) => setCatalogCards(response.cards))
       .catch(() => setCatalogCards([]));
   }, []);
+
+  const visualCatalog = useMemo(
+    () => createMatchVisualCatalog(catalogCards),
+    [catalogCards],
+  );
 
   useEffect(() => {
     if (!currentUser) {
@@ -2049,13 +2064,10 @@ function SharedMatchPage({
     return piece?.pieceType === "unit" ? piece : null;
   }, [match, unitModalPieceId]);
 
-  const modalUnitCard = useMemo(() => {
-    if (!modalUnit) {
-      return null;
-    }
-
-    return findUnitCatalogCard(catalogCards, modalUnit);
-  }, [catalogCards, modalUnit]);
+  const modalUnitVisualIdentity = useMemo(
+    () => (modalUnit ? visualCatalog.unit(modalUnit) : null),
+    [modalUnit, visualCatalog],
+  );
 
   const contextMenuUnit = useMemo(() => {
     if (!match || unitContextMenu === null) {
@@ -2401,6 +2413,7 @@ function SharedMatchPage({
           <Board
             match={match}
             viewerSide={viewerSide}
+            visualCatalog={visualCatalog}
             selectedCard={selectedCard}
             selectedPiece={selectedPiece}
             disabled={busy || match.phase === "matchOver" || !canAct}
@@ -2414,6 +2427,7 @@ function SharedMatchPage({
                 <CardButton
                   key={card.id}
                   card={card}
+                  visualIdentity={visualCatalog.card(card)}
                   selected={selection?.type === "card" && card.id === selection.cardId}
                   dragging={draggedCardId === card.id}
                   disabled={busy || !canAct || !isPlayableCard(match, viewerSide, card)}
@@ -2469,7 +2483,7 @@ function SharedMatchPage({
       {modalUnit ? (
         <UnitCardModal
           unit={modalUnit}
-          card={modalUnitCard}
+          unitVisualIdentity={modalUnitVisualIdentity ?? visualCatalog.unit(modalUnit)}
           onClose={() => setUnitModalPieceId(null)}
         />
       ) : null}
@@ -2677,11 +2691,11 @@ function UnitContextMenuView({
 
 function UnitCardModal({
   unit,
-  card,
+  unitVisualIdentity,
   onClose,
 }: {
   unit: BoardUnit;
-  card: CatalogCard | null;
+  unitVisualIdentity: UnitVisualIdentity;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -2695,8 +2709,6 @@ function UnitCardModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  const unitCard = isCatalogUnitCard(card) ? card : null;
-
   return (
     <div
       className="modal-backdrop"
@@ -2708,7 +2720,7 @@ function UnitCardModal({
       }}
     >
       <section
-        className={`unit-modal ${unitCard?.rarity ?? "basic"}`}
+        className={`unit-modal ${unitVisualIdentity.rarity === "unknown" ? "basic unknown" : unitVisualIdentity.rarity}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="unit-modal-title"
@@ -2716,29 +2728,29 @@ function UnitCardModal({
         <button className="icon-button modal-close" type="button" onClick={onClose} title="Close">
           <X size={18} />
         </button>
-        {unitCard ? (
-          <img src={unitCard.artPath} alt="" />
+        {unitVisualIdentity.portraitPath ? (
+          <img src={unitVisualIdentity.portraitPath} alt={unitVisualIdentity.portraitAlt} />
         ) : (
           <div className="unit-modal-art-placeholder" aria-hidden="true">
-            <Sword size={46} />
+            <span>{unitVisualIdentity.fallbackLabel}</span>
           </div>
         )}
         <div className="unit-modal-body">
           <div>
             <p className="eyebrow">
               {unit.side === "player" ? "Your" : "Opponent"} unit
-              {unitCard ? ` · ${unitCard.rarity}` : ""}
+              {unitVisualIdentity.rarity === "unknown" ? " · Card unknown" : ` · ${unitVisualIdentity.rarity}`}
             </p>
-            <h2 id="unit-modal-title">{unitCard?.name ?? unit.name}</h2>
+            <h2 id="unit-modal-title">{unitVisualIdentity.name}</h2>
           </div>
 
           <div className="detail-stat-row">
-            {unitCard ? (
+            {unitVisualIdentity.baseStats ? (
               <>
-                <DetailStat label="Cost" value={unitCard.cost} />
-                <DetailStat label="Base Attack" value={unitCard.kind.attack} />
-                <DetailStat label="Base Armor" value={unitCard.kind.armor} />
-                <DetailStat label="Base AP" value={unitCard.kind.maxAp} />
+                <DetailStat label="Cost" value={unitVisualIdentity.baseStats.cost} />
+                <DetailStat label="Base Attack" value={unitVisualIdentity.baseStats.attack} />
+                <DetailStat label="Base Armor" value={unitVisualIdentity.baseStats.armor} />
+                <DetailStat label="Base AP" value={unitVisualIdentity.baseStats.maxAp} />
               </>
             ) : (
               <DetailStat label="Card" value="Unknown" />
@@ -2753,7 +2765,8 @@ function UnitCardModal({
           </div>
 
           <p className="detail-rules">
-            {unitCard?.text ?? "This unit came from an older match without saved card metadata."}
+            {unitVisualIdentity.baseStats?.text ??
+              "This unit came from an older match without saved card metadata."}
           </p>
         </div>
       </section>
@@ -2883,6 +2896,7 @@ function PlayerBadge({ player }: { player: MatchParticipantState }) {
 function Board({
   match,
   viewerSide,
+  visualCatalog = EMPTY_MATCH_VISUAL_CATALOG,
   selectedCard,
   selectedPiece,
   disabled,
@@ -2893,6 +2907,7 @@ function Board({
 }: {
   match: MatchState;
   viewerSide: Side;
+  visualCatalog?: MatchVisualCatalog;
   selectedCard: Card | null;
   selectedPiece: BoardPiece | null;
   disabled: boolean;
@@ -2957,7 +2972,7 @@ function Board({
                   }}
                   title={`q ${tile.coord.q}, r ${tile.coord.r}`}
                 >
-                  {piece ? <PieceToken piece={piece} /> : null}
+                  {piece ? <PieceToken piece={piece} visualCatalog={visualCatalog} /> : null}
                 </button>
               );
             })}
@@ -2968,18 +2983,44 @@ function Board({
   );
 }
 
-function PieceToken({ piece }: { piece: BoardPiece }) {
+function PieceToken({
+  piece,
+  visualCatalog,
+}: {
+  piece: BoardPiece;
+  visualCatalog: MatchVisualCatalog;
+}) {
+  let visualIdentity: UnitVisualIdentity | WizardVisualIdentity;
+  let accentClass: string;
+  if (piece.pieceType === "wizard") {
+    const wizardVisualIdentity = visualCatalog.wizard(piece);
+    visualIdentity = wizardVisualIdentity;
+    accentClass = wizardVisualIdentity.accentClass;
+  } else {
+    const unitVisualIdentity = visualCatalog.unit(piece);
+    visualIdentity = unitVisualIdentity;
+    accentClass = unitVisualIdentity.rarity;
+  }
+  const unknownClass = visualIdentity.status === "unknown" ? "unknown" : "";
+
   return (
-    <span className={`piece-token ${piece.side} ${piece.pieceType}`} title={piece.name}>
-      <strong>
-        {piece.pieceType === "wizard"
-          ? wizardTokenLabel(piece.wizardType)
-          : piece.name.slice(0, 3)}
-      </strong>
-      <span>
-        <Sword size={11} />
-        {piece.attack}
+    <span
+      className={`piece-token portrait ${piece.side} ${piece.pieceType} ${accentClass} ${unknownClass}`}
+      title={visualIdentity.name}
+    >
+      <span className="piece-token-portrait" aria-hidden="true">
+        {visualIdentity.portraitPath ? (
+          <img src={visualIdentity.portraitPath} alt="" />
+        ) : (
+          <span>{visualIdentity.fallbackLabel}</span>
+        )}
       </span>
+      <strong>{visualIdentity.fallbackLabel}</strong>
+      <span className="piece-token-stat-row">
+        <span>
+          <Sword size={11} />
+          {piece.attack}
+        </span>
       {piece.pieceType === "wizard" ? (
         <span>
           <Heart size={11} />
@@ -2995,12 +3036,14 @@ function PieceToken({ piece }: { piece: BoardPiece }) {
         <Footprints size={11} />
         {piece.apRemaining}
       </span>
+      </span>
     </span>
   );
 }
 
 function CardButton({
   card,
+  visualIdentity,
   selected,
   dragging = false,
   disabled,
@@ -3009,6 +3052,7 @@ function CardButton({
   onDragEnd,
 }: {
   card: Card;
+  visualIdentity: CardVisualIdentity;
   selected: boolean;
   dragging?: boolean;
   disabled: boolean;
@@ -3026,6 +3070,9 @@ function CardButton({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
+      {visualIdentity.artPath ? (
+        <img className="card-button-art" src={visualIdentity.artPath} alt={visualIdentity.artAlt} />
+      ) : null}
       <span className="card-cost">{card.cost}</span>
       <strong>{card.name}</strong>
       <span className="card-stats">
@@ -3089,18 +3136,6 @@ function pieceById(match: MatchState, pieceId: string): BoardPiece | null {
 
   const unit = match.board.units.find((candidate) => candidate.id === pieceId);
   return unit ? { ...unit, pieceType: "unit" } : null;
-}
-
-function findUnitCatalogCard(cards: CatalogCard[], unit: BoardUnit) {
-  return (
-    cards.find((card) => card.templateId === unit.templateId && card.kind.type === "unit") ??
-    cards.find((card) => card.name === unit.name && card.kind.type === "unit") ??
-    null
-  );
-}
-
-function isCatalogUnitCard(card: CatalogCard | null): card is CatalogUnitCard {
-  return card?.kind.type === "unit";
 }
 
 function participantBySide(match: MatchState, side: Side): MatchParticipantState {

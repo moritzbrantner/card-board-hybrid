@@ -84,6 +84,10 @@ _Avoid_: public player page
 A profile avatar made from persisted symbol and color choices, not uploaded media.
 _Avoid_: avatar upload
 
+**Visual identity**:
+The player-facing presentation that makes a Card, Unit, or Wizard recognizable across match surfaces, including art, labels, colors, rarity treatment, token portrait, and unknown fallback.
+_Avoid_: skin, cosmetic data, asset lookup
+
 **Seat**:
 One side-specific player slot in a shared match, either Player or Opponent.
 _Avoid_: account, user

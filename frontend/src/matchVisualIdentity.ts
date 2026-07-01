@@ -1,0 +1,204 @@
+import type {
+  Card,
+  CardKind,
+  CardSummary,
+  CatalogCard,
+  Rarity,
+  Unit,
+  Wizard,
+  WizardType,
+} from "./types";
+import { WIZARD_OPTIONS } from "./wizards";
+
+export type VisualIdentityStatus = "resolved" | "legacyNameFallback" | "unknown";
+
+export type CardVisualIdentity = {
+  status: VisualIdentityStatus;
+  templateId: string | null;
+  name: string;
+  rarity: Rarity;
+  kind: CardKind;
+  cost: number;
+  text: string;
+  artPath: string | null;
+  artAlt: string;
+  accentClass: Rarity;
+};
+
+export type UnitVisualIdentity = {
+  status: VisualIdentityStatus;
+  templateId: string | null;
+  name: string;
+  rarity: Rarity | "unknown";
+  portraitPath: string | null;
+  portraitAlt: string;
+  fallbackLabel: string;
+  baseStats:
+    | {
+        cost: number;
+        attack: number;
+        armor: number;
+        maxAp: number;
+        text: string;
+      }
+    | null;
+};
+
+export type WizardVisualIdentity = {
+  status: "resolved";
+  wizardType: WizardType;
+  name: string;
+  portraitPath: string;
+  portraitAlt: string;
+  accentClass: WizardType;
+  fallbackLabel: string;
+};
+
+export type MatchVisualCatalog = {
+  card(card: Card | CatalogCard | CardSummary): CardVisualIdentity;
+  unit(unit: Unit): UnitVisualIdentity;
+  wizard(wizard: Wizard): WizardVisualIdentity;
+};
+
+export function createMatchVisualCatalog(cards: CatalogCard[]): MatchVisualCatalog {
+  const byTemplateId = new Map(cards.map((card) => [card.templateId, card]));
+  const unitByName = new Map(
+    cards
+      .filter((card) => card.kind.type === "unit")
+      .map((card) => [card.name, card]),
+  );
+  const cardByName = new Map(cards.map((card) => [card.name, card]));
+
+  return {
+    card(card) {
+      const templateMatch = byTemplateId.get(card.templateId);
+      if (templateMatch) {
+        return cardVisualFromCatalog(templateMatch, "resolved");
+      }
+
+      const nameMatch = cardByName.get(card.name);
+      if (nameMatch) {
+        return cardVisualFromCatalog(nameMatch, "legacyNameFallback");
+      }
+
+      return {
+        status: "unknown",
+        templateId: card.templateId || null,
+        name: card.name,
+        rarity: card.rarity,
+        kind: card.kind,
+        cost: card.cost,
+        text: textFromSource(card),
+        artPath: null,
+        artAlt: `${card.name} art unavailable`,
+        accentClass: card.rarity,
+      };
+    },
+    unit(unit) {
+      const templateMatch = unit.templateId ? unitByTemplateId(byTemplateId, unit.templateId) : null;
+      if (templateMatch) {
+        return unitVisualFromCatalog(templateMatch, "resolved");
+      }
+
+      const nameMatch = unitByName.get(unit.name);
+      if (nameMatch) {
+        return unitVisualFromCatalog(nameMatch, "legacyNameFallback");
+      }
+
+      return {
+        status: "unknown",
+        templateId: null,
+        name: unit.name,
+        rarity: "unknown",
+        portraitPath: null,
+        portraitAlt: `${unit.name} portrait unavailable`,
+        fallbackLabel: fallbackLabel(unit.name),
+        baseStats: null,
+      };
+    },
+    wizard(wizard) {
+      const option =
+        WIZARD_OPTIONS.find((candidate) => candidate.id === wizard.wizardType) ??
+        WIZARD_OPTIONS[0];
+      return {
+        status: "resolved",
+        wizardType: wizard.wizardType,
+        name: option.name,
+        portraitPath: `/wizard-art/${wizard.wizardType}.svg`,
+        portraitAlt: `${option.name} portrait`,
+        accentClass: wizard.wizardType,
+        fallbackLabel: option.token,
+      };
+    },
+  };
+}
+
+function cardVisualFromCatalog(
+  card: CatalogCard,
+  status: Exclude<VisualIdentityStatus, "unknown">,
+): CardVisualIdentity {
+  return {
+    status,
+    templateId: card.templateId,
+    name: card.name,
+    rarity: card.rarity,
+    kind: card.kind,
+    cost: card.cost,
+    text: card.text,
+    artPath: card.artPath,
+    artAlt: `${card.name} art`,
+    accentClass: card.rarity,
+  };
+}
+
+function unitVisualFromCatalog(
+  card: CatalogCard,
+  status: Exclude<VisualIdentityStatus, "unknown">,
+): UnitVisualIdentity {
+  if (card.kind.type !== "unit") {
+    return {
+      status: "unknown",
+      templateId: null,
+      name: card.name,
+      rarity: "unknown",
+      portraitPath: null,
+      portraitAlt: `${card.name} portrait unavailable`,
+      fallbackLabel: fallbackLabel(card.name),
+      baseStats: null,
+    };
+  }
+
+  return {
+    status,
+    templateId: card.templateId,
+    name: card.name,
+    rarity: card.rarity,
+    portraitPath: card.artPath,
+    portraitAlt: `${card.name} portrait`,
+    fallbackLabel: fallbackLabel(card.name),
+    baseStats: {
+      cost: card.cost,
+      attack: card.kind.attack,
+      armor: card.kind.armor,
+      maxAp: card.kind.maxAp,
+      text: card.text,
+    },
+  };
+}
+
+function unitByTemplateId(
+  byTemplateId: Map<string, CatalogCard>,
+  templateId: string,
+): CatalogCard | null {
+  const card = byTemplateId.get(templateId);
+  return card?.kind.type === "unit" ? card : null;
+}
+
+function textFromSource(card: Card | CatalogCard | CardSummary) {
+  return "text" in card ? card.text : "";
+}
+
+function fallbackLabel(name: string) {
+  const compactName = Array.from(name.trim().replace(/\s+/g, ""));
+  return (compactName.slice(0, 3).join("") || "?").toUpperCase();
+}

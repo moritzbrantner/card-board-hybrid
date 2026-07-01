@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Chronomancer">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#16152f"/>
+      <stop offset=".5" stop-color="#51419a"/>
+      <stop offset="1" stop-color="#58b7a1"/>
+    </linearGradient>
+    <filter id="soft"><feGaussianBlur stdDeviation="1.2"/></filter>
+  </defs>
+  <rect width="320" height="220" fill="url(#bg)"/>
+  <circle cx="160" cy="93" r="62" fill="none" stroke="#fffaf0" stroke-width="8" opacity=".55"/>
+  <circle cx="160" cy="93" r="42" fill="#1c2120" opacity=".72"/>
+  <path d="M160 48 L160 96 L196 118" fill="none" stroke="#d9b84f" stroke-width="9" stroke-linecap="round"/>
+  <path d="M63 65 C104 55 126 32 150 18" fill="none" stroke="#fffaf0" stroke-width="5" opacity=".38" filter="url(#soft)"/>
+  <path d="M76 190 C94 146 123 126 160 126 C197 126 226 146 244 190 Z" fill="#17152b"/>
+  <path d="M122 190 C130 158 143 143 160 143 C177 143 190 158 198 190 Z" fill="#a78bfa" opacity=".72"/>
+</svg>
