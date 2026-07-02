@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Prism Ray">
+  <rect width="320" height="220" fill="#171b20"/>
+  <path d="M54 160 246 56" stroke="#7aa7d9" stroke-width="16" stroke-linecap="round"/>
+  <path d="M66 176 258 72" stroke="#58b7a1" stroke-width="8" stroke-linecap="round"/>
+  <path d="m150 74 48 32-48 32-48-32z" fill="#23312d" stroke="#d9b84f" stroke-width="8"/>
+  <circle cx="248" cy="54" r="20" fill="#d1665a"/>
+</svg>

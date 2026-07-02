@@ -24,6 +24,19 @@ export type SpellEffect =
   | {
       type: "damage";
       amount: number;
+    }
+  | {
+      type: "draw";
+      amount: number;
+    }
+  | {
+      type: "areaDamage";
+      amount: number;
+      radius: number;
+    }
+  | {
+      type: "lineDamage";
+      amount: number;
     };
 
 export type CardKind =

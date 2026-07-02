@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Starlit Study">
+  <rect width="320" height="220" fill="#151a22"/>
+  <path d="M84 176h152V64H84z" fill="#202a36" stroke="#7aa7d9" stroke-width="8"/>
+  <path d="m160 34 10 30 32 1-26 18 9 31-25-19-26 19 10-31-26-18 32-1z" fill="#d9b84f"/>
+  <path d="M112 120h96M112 148h72" stroke="#58b7a1" stroke-width="10" stroke-linecap="round"/>
+</svg>

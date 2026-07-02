@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Glass Duelist">
+  <rect width="320" height="220" fill="#171d20"/>
+  <path d="M158 38 98 112l62 72 62-72z" fill="#24353a" stroke="#7aa7d9" stroke-width="8"/>
+  <path d="M208 42 96 174" stroke="#d9b84f" stroke-width="12" stroke-linecap="round"/>
+  <path d="M190 52h36v36" fill="none" stroke="#d9b84f" stroke-width="10" stroke-linecap="round"/>
+</svg>

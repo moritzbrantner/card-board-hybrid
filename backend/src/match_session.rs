@@ -376,6 +376,9 @@ pub enum SpellEffect {
     Heal { amount: i32 },
     Buff { attack: i32, armor: i32 },
     Damage { amount: i32 },
+    Draw { amount: u8 },
+    AreaDamage { amount: i32, radius: u8 },
+    LineDamage { amount: i32 },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1109,7 +1112,28 @@ impl MatchState {
             SpellEffect::Heal { .. } | SpellEffect::Buff { .. } if target.side != side => {
                 Err(MatchError::InvalidTarget)
             }
-            SpellEffect::Damage { .. } if target.side == side => Err(MatchError::InvalidTarget),
+            SpellEffect::Damage { .. }
+            | SpellEffect::AreaDamage { .. }
+            | SpellEffect::LineDamage { .. }
+                if target.side == side =>
+            {
+                Err(MatchError::InvalidTarget)
+            }
+            SpellEffect::Draw { .. }
+                if target.side != side || target.id != self.player_ref(side).wizard.id =>
+            {
+                Err(MatchError::InvalidTarget)
+            }
+            SpellEffect::LineDamage { .. }
+                if self
+                    .player_ref(side)
+                    .wizard
+                    .position
+                    .direction_to(target.position)
+                    .is_none() =>
+            {
+                Err(MatchError::InvalidTarget)
+            }
             SpellEffect::Buff { .. } if self.is_wizard_id(&target.id) => {
                 Err(MatchError::InvalidTarget)
             }
@@ -1121,6 +1145,7 @@ impl MatchState {
         &mut self,
         side: Side,
         effect: &SpellEffect,
+        range: u8,
         target_id: &str,
         card_name: &str,
         frames: &mut Vec<RecordedReplayFrame>,
@@ -1170,20 +1195,66 @@ impl MatchState {
                 }
             }
             SpellEffect::Damage { amount } => {
-                self.damage_piece(target_id, *amount);
-                self.record_replay_frame(
+                self.damage_pieces(
+                    side,
+                    vec![target_id.to_string()],
+                    *amount,
                     frames,
                     action_index,
-                    ReplayEvent::PieceDamaged {
-                        side,
-                        piece_id: target_id.to_string(),
-                        amount: *amount,
-                    },
                 );
-                self.remove_dead_units(frames, action_index);
                 self.log.insert(
                     0,
                     format!("{} cast {} at {}.", side.label(), card_name, target_id),
+                );
+            }
+            SpellEffect::Draw { amount } => {
+                let drawn = self.draw_cards_for_side(side, *amount);
+                for card in drawn {
+                    self.record_replay_frame(
+                        frames,
+                        action_index,
+                        ReplayEvent::CardDrawn {
+                            side,
+                            card: Some(CardSummary::from(&card)),
+                            hidden: side == Side::Opponent,
+                        },
+                    );
+                }
+                self.log.insert(
+                    0,
+                    format!("{} cast {} to draw {}.", side.label(), card_name, amount),
+                );
+            }
+            SpellEffect::AreaDamage { amount, radius } => {
+                let Some(target) = self.piece_view(target_id) else {
+                    return;
+                };
+                let targets =
+                    self.enemy_piece_ids_in_area(side, target.position, i32::from(*radius));
+                self.damage_pieces(side, targets, *amount, frames, action_index);
+                self.log.insert(
+                    0,
+                    format!("{} cast {} around {}.", side.label(), card_name, target_id),
+                );
+            }
+            SpellEffect::LineDamage { amount } => {
+                let Some(target) = self.piece_view(target_id) else {
+                    return;
+                };
+                let caster_position = self.player_ref(side).wizard.position;
+                let Some(direction) = caster_position.direction_to(target.position) else {
+                    return;
+                };
+                let targets = self.enemy_piece_ids_on_line(
+                    side,
+                    caster_position,
+                    direction,
+                    i32::from(range),
+                );
+                self.damage_pieces(side, targets, *amount, frames, action_index);
+                self.log.insert(
+                    0,
+                    format!("{} cast {} down a line.", side.label(), card_name),
                 );
             }
         }
@@ -1325,7 +1396,7 @@ impl MatchState {
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) {
-        let CardKind::Spell { effect, .. } = &card.kind else {
+        let CardKind::Spell { effect, range, .. } = &card.kind else {
             return;
         };
         let Some(target) = self.piece_view(target_id) else {
@@ -1339,7 +1410,15 @@ impl MatchState {
             return;
         }
 
-        self.apply_spell(side, effect, target_id, &card.name, frames, action_index);
+        self.apply_spell(
+            side,
+            effect,
+            *range,
+            target_id,
+            &card.name,
+            frames,
+            action_index,
+        );
     }
 
     fn move_piece_for_side(
@@ -1720,6 +1799,19 @@ impl MatchState {
                         return Some((card.clone(), target));
                     }
                 }
+                SpellEffect::AreaDamage { .. } | SpellEffect::LineDamage { .. } => {
+                    let target = self
+                        .pieces_for_side(Side::Player)
+                        .into_iter()
+                        .filter(in_range)
+                        .find(|piece| {
+                            self.validate_spell_target(Side::Opponent, effect, piece)
+                                .is_ok()
+                        });
+                    if let Some(target) = target {
+                        return Some((card.clone(), target));
+                    }
+                }
                 SpellEffect::Heal { .. } => {
                     let target = self
                         .pieces_for_side(Side::Opponent)
@@ -1741,6 +1833,11 @@ impl MatchState {
                         .max_by_key(|piece| piece.attack);
                     if let Some(target) = target {
                         return Some((card.clone(), target));
+                    }
+                }
+                SpellEffect::Draw { .. } => {
+                    if opponent.deck_count + opponent.discard_count > 0 {
+                        return Some((card.clone(), PieceView::from(&opponent.wizard)));
                     }
                 }
             }
@@ -1933,6 +2030,57 @@ impl MatchState {
         if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
             unit.armor -= amount;
         }
+    }
+
+    fn damage_pieces(
+        &mut self,
+        side: Side,
+        piece_ids: Vec<String>,
+        amount: i32,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        for piece_id in piece_ids {
+            self.damage_piece(&piece_id, amount);
+            self.record_replay_frame(
+                frames,
+                action_index,
+                ReplayEvent::PieceDamaged {
+                    side,
+                    piece_id,
+                    amount,
+                },
+            );
+        }
+        self.remove_dead_units(frames, action_index);
+    }
+
+    fn draw_cards_for_side(&mut self, side: Side, amount: u8) -> Vec<Card> {
+        let player = self.player_mut(side);
+        (0..amount).filter_map(|_| player.draw()).collect()
+    }
+
+    fn enemy_piece_ids_in_area(&self, side: Side, center: HexCoord, radius: i32) -> Vec<String> {
+        self.pieces_for_side(side.opponent())
+            .into_iter()
+            .filter(|piece| center.distance(piece.position) <= radius)
+            .map(|piece| piece.id)
+            .collect()
+    }
+
+    fn enemy_piece_ids_on_line(
+        &self,
+        side: Side,
+        origin: HexCoord,
+        direction: HexCoord,
+        range: i32,
+    ) -> Vec<String> {
+        self.pieces_for_side(side.opponent())
+            .into_iter()
+            .filter(|piece| origin.distance(piece.position) <= range)
+            .filter(|piece| origin.direction_to(piece.position) == Some(direction))
+            .map(|piece| piece.id)
+            .collect()
     }
 
     fn heal_piece(&mut self, piece_id: &str, amount: i32) {
@@ -2184,6 +2332,35 @@ impl HexCoord {
             },
         ]
     }
+
+    fn direction_to(self, other: Self) -> Option<Self> {
+        let distance = self.distance(other);
+        if distance == 0 {
+            return None;
+        }
+
+        Self::directions()
+            .into_iter()
+            .find(|direction| self.offset(*direction, distance) == other)
+    }
+
+    fn offset(self, direction: Self, distance: i32) -> Self {
+        Self {
+            q: self.q + direction.q * distance,
+            r: self.r + direction.r * distance,
+        }
+    }
+
+    fn directions() -> [Self; 6] {
+        [
+            Self { q: 1, r: 0 },
+            Self { q: 1, r: -1 },
+            Self { q: 0, r: -1 },
+            Self { q: -1, r: 0 },
+            Self { q: -1, r: 1 },
+            Self { q: 0, r: 1 },
+        ]
+    }
 }
 
 impl PlayerState {
@@ -2418,6 +2595,14 @@ mod tests {
         }
 
         panic!("AI did not return control to the player");
+    }
+
+    fn unit_armor(game: &MatchState, unit_id: &str) -> Option<i32> {
+        game.board
+            .units
+            .iter()
+            .find(|unit| unit.id == unit_id)
+            .map(|unit| unit.armor)
     }
 
     #[test]
@@ -2666,7 +2851,7 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(starter_card_templates().len(), 24);
+        assert_eq!(starter_card_templates().len(), 32);
         assert_eq!(game.player.hand.len(), 4);
         assert_eq!(game.player.deck_count, 56);
     }
@@ -2877,6 +3062,192 @@ mod tests {
         })
         .expect("bolt should work");
         assert!(!game.board.units.iter().any(|unit| unit.id == "enemy"));
+    }
+
+    #[test]
+    fn draw_spells_target_the_caster_and_draw_cards() {
+        let mut game = MatchState::new_with_seed(7);
+        game.player.mana = 8;
+        game.player.wizard.ap_remaining = 3;
+        let initial_hand = game.player.hand.len();
+        let initial_deck = game.player.deck_count;
+        let insight = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "runic-insight")
+            .expect("draw spell exists");
+        let insight_id = put_card_in_hand(&mut game, insight);
+
+        game.apply_action(MatchActionRequest::PlayCard {
+            card_id: insight_id,
+            target: ActionTarget::Piece {
+                piece_id: game.player.wizard.id.clone(),
+            },
+        })
+        .expect("draw spell should target the caster");
+
+        assert_eq!(game.player.hand.len(), initial_hand + 1);
+        assert_eq!(game.player.deck_count, initial_deck - 1);
+        assert_eq!(game.player.discard_count, 1);
+    }
+
+    #[test]
+    fn area_damage_hits_enemies_near_the_target_only() {
+        let mut game = MatchState::new_with_seed(7);
+        game.player.mana = 8;
+        game.player.wizard.ap_remaining = 3;
+        game.board.units.push(Unit {
+            id: "enemy-center".to_string(),
+            side: Side::Opponent,
+            name: "Stoneguard".to_string(),
+            template_id: Some("stoneguard".to_string()),
+            attack: 1,
+            armor: 4,
+            max_armor: 4,
+            position: hex(0, 1),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+        });
+        game.board.units.push(Unit {
+            id: "enemy-neighbor".to_string(),
+            side: Side::Opponent,
+            name: "Rune Bruiser".to_string(),
+            template_id: Some("rune-bruiser".to_string()),
+            attack: 2,
+            armor: 3,
+            max_armor: 3,
+            position: hex(1, 0),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+        });
+        game.board.units.push(Unit {
+            id: "ally-neighbor".to_string(),
+            side: Side::Player,
+            name: "Ember Squire".to_string(),
+            template_id: Some("ember-squire".to_string()),
+            attack: 1,
+            armor: 2,
+            max_armor: 2,
+            position: hex(-1, 2),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+        });
+        let cinder = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "cinder-ring")
+            .expect("area spell exists");
+        let cinder_id = put_card_in_hand(&mut game, cinder);
+
+        game.apply_action(MatchActionRequest::PlayCard {
+            card_id: cinder_id,
+            target: ActionTarget::Piece {
+                piece_id: "enemy-center".to_string(),
+            },
+        })
+        .expect("area damage should be playable on an enemy");
+
+        assert_eq!(unit_armor(&game, "enemy-center"), Some(3));
+        assert_eq!(unit_armor(&game, "enemy-neighbor"), Some(2));
+        assert_eq!(unit_armor(&game, "ally-neighbor"), Some(2));
+    }
+
+    #[test]
+    fn line_damage_hits_enemies_in_a_straight_line() {
+        let mut game = MatchState::new_with_seed(7);
+        game.player.mana = 8;
+        game.player.wizard.ap_remaining = 3;
+        game.board.units.push(Unit {
+            id: "enemy-front".to_string(),
+            side: Side::Opponent,
+            name: "Stoneguard".to_string(),
+            template_id: Some("stoneguard".to_string()),
+            attack: 1,
+            armor: 4,
+            max_armor: 4,
+            position: hex(0, 1),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+        });
+        game.board.units.push(Unit {
+            id: "enemy-back".to_string(),
+            side: Side::Opponent,
+            name: "Rune Bruiser".to_string(),
+            template_id: Some("rune-bruiser".to_string()),
+            attack: 2,
+            armor: 3,
+            max_armor: 3,
+            position: hex(0, 0),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+        });
+        game.board.units.push(Unit {
+            id: "enemy-offline".to_string(),
+            side: Side::Opponent,
+            name: "Swift Familiar".to_string(),
+            template_id: Some("swift-familiar".to_string()),
+            attack: 1,
+            armor: 3,
+            max_armor: 3,
+            position: hex(1, 0),
+            ap_remaining: 3,
+            max_ap: 3,
+            has_attacked: false,
+        });
+        let ray = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "prism-ray")
+            .expect("line spell exists");
+        let ray_id = put_card_in_hand(&mut game, ray);
+
+        game.apply_action(MatchActionRequest::PlayCard {
+            card_id: ray_id,
+            target: ActionTarget::Piece {
+                piece_id: "enemy-front".to_string(),
+            },
+        })
+        .expect("line damage should be playable on a straight-line enemy");
+
+        assert_eq!(unit_armor(&game, "enemy-front"), Some(2));
+        assert_eq!(unit_armor(&game, "enemy-back"), Some(1));
+        assert_eq!(unit_armor(&game, "enemy-offline"), Some(3));
+    }
+
+    #[test]
+    fn line_damage_rejects_non_straight_targets() {
+        let mut game = MatchState::new_with_seed(7);
+        game.player.mana = 8;
+        game.player.wizard.ap_remaining = 3;
+        game.board.units.push(Unit {
+            id: "enemy-offline".to_string(),
+            side: Side::Opponent,
+            name: "Swift Familiar".to_string(),
+            template_id: Some("swift-familiar".to_string()),
+            attack: 1,
+            armor: 3,
+            max_armor: 3,
+            position: hex(1, 1),
+            ap_remaining: 3,
+            max_ap: 3,
+            has_attacked: false,
+        });
+        let ray = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "prism-ray")
+            .expect("line spell exists");
+        let ray_id = put_card_in_hand(&mut game, ray);
+
+        let result = game.apply_action(MatchActionRequest::PlayCard {
+            card_id: ray_id,
+            target: ActionTarget::Piece {
+                piece_id: "enemy-offline".to_string(),
+            },
+        });
+
+        assert_eq!(result, Err(MatchError::InvalidTarget));
     }
 
     #[test]

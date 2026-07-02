@@ -3150,13 +3150,13 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         let cards = body["cards"].as_array().expect("cards should be an array");
-        assert_eq!(cards.len(), 24);
+        assert_eq!(cards.len(), 32);
         assert_eq!(cards[0]["id"], "ember-squire");
-        assert_eq!(cards[23]["id"], "comet-spear");
+        assert_eq!(cards[31]["id"], "comet-spear");
         assert_eq!(cards[0]["copyCount"], 5);
         assert_eq!(cards[4]["copyCount"], 1);
         assert_eq!(cards[19]["copyCount"], 1);
-        assert_eq!(cards[15]["kind"]["priority"], 4);
+        assert_eq!(cards[16]["kind"]["priority"], 4);
         assert_eq!(
             cards
                 .iter()

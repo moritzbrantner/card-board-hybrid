@@ -3957,7 +3957,15 @@ function isLegalCardTarget(
     case "buff":
       return piece.side === viewerSide && piece.pieceType === "unit";
     case "damage":
+    case "areaDamage":
       return piece.side === opponentSide;
+    case "draw":
+      return piece.side === viewerSide && piece.pieceType === "wizard";
+    case "lineDamage":
+      return (
+        piece.side === opponentSide &&
+        lineDirection(participant.wizard.position, piece.position) !== null
+      );
   }
 }
 
@@ -4000,6 +4008,30 @@ function distance(a: HexCoord, b: HexCoord) {
   return Math.max(Math.abs(dq), Math.abs(dr), Math.abs(ds));
 }
 
+function lineDirection(a: HexCoord, b: HexCoord): HexCoord | null {
+  const hexDistance = distance(a, b);
+  if (hexDistance === 0) {
+    return null;
+  }
+
+  const directions = [
+    { q: 1, r: 0 },
+    { q: 1, r: -1 },
+    { q: 0, r: -1 },
+    { q: -1, r: 0 },
+    { q: -1, r: 1 },
+    { q: 0, r: 1 },
+  ];
+
+  return (
+    directions.find(
+      (direction) =>
+        a.q + direction.q * hexDistance === b.q &&
+        a.r + direction.r * hexDistance === b.r,
+    ) ?? null
+  );
+}
+
 function sameCoord(a: HexCoord, b: HexCoord) {
   return a.q === b.q && a.r === b.r;
 }
@@ -4036,6 +4068,12 @@ function spellEffectLabel(card: Card | CatalogCard) {
       return `+${card.kind.effect.attack}/+${card.kind.effect.armor}`;
     case "damage":
       return `damage ${card.kind.effect.amount}`;
+    case "draw":
+      return `draw ${card.kind.effect.amount}`;
+    case "areaDamage":
+      return `area ${card.kind.effect.amount}`;
+    case "lineDamage":
+      return `line ${card.kind.effect.amount}`;
   }
 }
 
