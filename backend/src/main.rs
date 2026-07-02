@@ -2951,6 +2951,8 @@ mod tests {
         );
         assert!(joined["matchState"]["opponent"].get("hand").is_some());
         assert!(joined["matchState"]["player"].get("hand").is_none());
+        assert_eq!(joined["matchState"]["opponent"]["handCount"], 4);
+        assert_eq!(joined["matchState"]["player"]["handCount"], 4);
 
         let (status, player_view) = json_request(
             app.clone(),
@@ -2969,6 +2971,8 @@ mod tests {
         );
         assert!(player_view["matchState"]["player"].get("hand").is_some());
         assert!(player_view["matchState"]["opponent"].get("hand").is_none());
+        assert_eq!(player_view["matchState"]["player"]["handCount"], 4);
+        assert_eq!(player_view["matchState"]["opponent"]["handCount"], 4);
 
         let (status, _) = json_request(
             app.clone(),

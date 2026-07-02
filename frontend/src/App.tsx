@@ -102,6 +102,7 @@ import type {
   ActionTarget,
 } from "./types";
 import type {
+  CSSProperties,
   DragEvent as ReactDragEvent,
   FormEvent,
   MouseEvent as ReactMouseEvent,
@@ -1747,6 +1748,8 @@ function MatchPage({
         : match.activeSide === viewerSide
           ? "Your turn"
           : "AI thinking";
+  const enemySide = opponentSideOf(viewerSide);
+  const viewerHand = handForSide(match, viewerSide);
 
   function handleTileClick(tile: HexTile) {
     if (busy || match.phase === "matchOver") {
@@ -1880,16 +1883,22 @@ function MatchPage({
           </div>
         </header>
 
-        <section className="score-row" aria-label="Score">
-          <PlayerBadge player={match.player} />
-          <div className="phase-pill">
-            <Activity size={16} />
-            {phaseLabel}
-          </div>
-          <PlayerBadge player={match.opponent} />
-        </section>
-
         <section className="battlefield">
+          <div className="battlefield-hud battlefield-hud-player">
+            <PlayerBadge player={participantBySide(match, viewerSide)} />
+          </div>
+          <div className="battlefield-hud battlefield-hud-opponent">
+            <PlayerBadge player={participantBySide(match, enemySide)} />
+          </div>
+          <div className="battlefield-hud battlefield-hud-hand">
+            <OpponentHandDisplay count={handCountForSide(match, enemySide)} />
+          </div>
+          <div className="battlefield-hud battlefield-hud-phase">
+            <div className="phase-pill">
+              <Activity size={16} />
+              {phaseLabel}
+            </div>
+          </div>
           <Board
             match={match}
             viewerSide="player"
@@ -1903,13 +1912,14 @@ function MatchPage({
           />
           <div className="hand-overlay">
             <div className="hand" aria-label="Hand">
-              {handForSide(match, viewerSide).map((card) => (
+              {viewerHand.map((card, index) => (
                 <CardButton
                   key={card.id}
                   card={card}
                   visualIdentity={visualCatalog.card(card)}
                   selected={selection?.type === "card" && card.id === selection.cardId}
                   dragging={draggedCardId === card.id}
+                  style={cardFanStyle(index, viewerHand.length)}
                   disabled={busy || !isPlayableCard(match, viewerSide, card)}
                   onClick={() => {
                     setUnitContextMenu(null);
@@ -2430,6 +2440,16 @@ function SharedMatchPage({
     shared.canClaimForfeitAt !== null &&
     now >= shared.canClaimForfeitAt &&
     match.phase !== "matchOver";
+  const enemySide = opponentSideOf(viewerSide);
+  const viewerHand = handForSide(match, viewerSide);
+  const phaseLabel =
+    match.phase === "matchOver"
+      ? `${sideLabel(match.winner)} wins`
+      : hasPendingStack
+        ? `${sideLabel(match.prioritySide)} priority`
+        : isActiveViewer
+          ? "Your turn"
+          : "Waiting";
 
   return (
     <main className="app-shell">
@@ -2479,22 +2499,22 @@ function SharedMatchPage({
           </div>
         </header>
 
-        <section className="score-row" aria-label="Score">
-          <PlayerBadge player={match.player} />
-          <div className="phase-pill">
-            <Wifi size={16} />
-            {match.phase === "matchOver"
-              ? `${sideLabel(match.winner)} wins`
-              : hasPendingStack
-                ? `${sideLabel(match.prioritySide)} priority`
-                : isActiveViewer
-                ? "Your turn"
-                : "Waiting"}
-          </div>
-          <PlayerBadge player={match.opponent} />
-        </section>
-
         <section className="battlefield">
+          <div className="battlefield-hud battlefield-hud-player">
+            <PlayerBadge player={participantBySide(match, viewerSide)} />
+          </div>
+          <div className="battlefield-hud battlefield-hud-opponent">
+            <PlayerBadge player={participantBySide(match, enemySide)} />
+          </div>
+          <div className="battlefield-hud battlefield-hud-hand">
+            <OpponentHandDisplay count={handCountForSide(match, enemySide)} />
+          </div>
+          <div className="battlefield-hud battlefield-hud-phase">
+            <div className="phase-pill">
+              <Wifi size={16} />
+              {phaseLabel}
+            </div>
+          </div>
           <Board
             match={match}
             viewerSide={viewerSide}
@@ -2508,13 +2528,14 @@ function SharedMatchPage({
           />
           <div className="hand-overlay">
             <div className="hand" aria-label="Hand">
-              {handForSide(match, viewerSide).map((card) => (
+              {viewerHand.map((card, index) => (
                 <CardButton
                   key={card.id}
                   card={card}
                   visualIdentity={visualCatalog.card(card)}
                   selected={selection?.type === "card" && card.id === selection.cardId}
                   dragging={draggedCardId === card.id}
+                  style={cardFanStyle(index, viewerHand.length)}
                   disabled={busy || !canAct || !isPlayableCard(match, viewerSide, card)}
                   onClick={() => {
                     setUnitContextMenu(null);
@@ -2978,6 +2999,22 @@ function PlayerBadge({ player }: { player: MatchParticipantState }) {
   );
 }
 
+function OpponentHandDisplay({ count }: { count: number }) {
+  const visibleBacks = Math.min(count, 7);
+
+  return (
+    <div className="opponent-hand-display" aria-label={`Enemy hand, ${count} cards`}>
+      <span className="opponent-hand-label">Enemy hand</span>
+      <div className="opponent-card-backs" aria-hidden="true">
+        {Array.from({ length: visibleBacks }, (_, index) => (
+          <span className="opponent-card-back" key={index} />
+        ))}
+      </div>
+      <strong>{count}</strong>
+    </div>
+  );
+}
+
 function Board({
   match,
   viewerSide,
@@ -3153,6 +3190,7 @@ function CardButton({
   visualIdentity,
   selected,
   dragging = false,
+  style,
   disabled,
   onClick,
   onDragStart,
@@ -3162,6 +3200,7 @@ function CardButton({
   visualIdentity: CardVisualIdentity;
   selected: boolean;
   dragging?: boolean;
+  style?: CSSProperties;
   disabled: boolean;
   onClick: () => void;
   onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
@@ -3173,6 +3212,7 @@ function CardButton({
       type="button"
       disabled={disabled}
       draggable={!disabled}
+      style={style}
       onClick={onClick}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -3259,8 +3299,31 @@ function participantBySide(match: MatchState, side: Side): MatchParticipantState
   return side === "player" ? match.player : match.opponent;
 }
 
+function opponentSideOf(side: Side): Side {
+  return side === "player" ? "opponent" : "player";
+}
+
 function handForSide(match: MatchState, side: Side): Card[] {
   return participantBySide(match, side).hand ?? [];
+}
+
+function handCountForSide(match: MatchState, side: Side): number {
+  return participantBySide(match, side).handCount;
+}
+
+type CardFanStyle = CSSProperties & {
+  "--card-fan-rotation": string;
+  "--card-fan-rise": string;
+  "--card-fan-shift": string;
+};
+
+function cardFanStyle(index: number, total: number): CardFanStyle {
+  const centerOffset = index - (total - 1) / 2;
+  return {
+    "--card-fan-rotation": `${centerOffset * 2.6}deg`,
+    "--card-fan-rise": `${Math.abs(centerOffset) * -4}px`,
+    "--card-fan-shift": `${centerOffset * 3}px`,
+  };
 }
 
 function piecesInMatch(match: MatchState): BoardPiece[] {

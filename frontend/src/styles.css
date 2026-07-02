@@ -521,12 +521,101 @@ h1 {
   position: relative;
 }
 
+.battlefield-hud {
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.battlefield-hud-player {
+  position: fixed;
+  z-index: 13;
+  bottom: 18px;
+  left: 24px;
+}
+
+.battlefield-hud-opponent {
+  top: 18px;
+  right: 18px;
+}
+
+.battlefield-hud-hand {
+  top: 18px;
+  left: 18px;
+}
+
+.battlefield-hud-phase {
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.opponent-hand-display {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label count"
+    "cards count";
+  gap: 5px 10px;
+  align-items: center;
+  min-width: 178px;
+  min-height: 64px;
+  border: 1px solid rgba(209, 102, 90, 0.34);
+  border-radius: 8px;
+  padding: 9px 11px;
+  background:
+    linear-gradient(145deg, rgba(209, 102, 90, 0.16), transparent 58%),
+    rgba(28, 33, 32, 0.94);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.28);
+}
+
+.opponent-hand-label {
+  grid-area: label;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.opponent-card-backs {
+  grid-area: cards;
+  display: flex;
+  min-width: 0;
+  padding-left: 3px;
+}
+
+.opponent-card-back {
+  width: 26px;
+  height: 38px;
+  margin-left: -7px;
+  border: 1px solid rgba(247, 243, 234, 0.28);
+  border-radius: 5px;
+  background:
+    linear-gradient(135deg, rgba(217, 184, 79, 0.32), transparent 42%),
+    linear-gradient(315deg, rgba(88, 183, 161, 0.22), transparent 44%),
+    #242a29;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.24);
+}
+
+.opponent-card-back:first-child {
+  margin-left: 0;
+}
+
+.opponent-hand-display strong {
+  grid-area: count;
+  min-width: 2ch;
+  color: #fffaf0;
+  font-size: 2.1rem;
+  line-height: 1;
+  text-align: right;
+}
+
 .board {
   display: grid;
   justify-items: center;
   max-width: 100%;
   overflow: auto;
-  padding: 30px 30px 194px;
+  padding: 96px 30px 126px;
   border: 1px solid rgba(217, 184, 79, 0.32);
   border-radius: 8px;
   background:
@@ -540,12 +629,11 @@ h1 {
 .hand-overlay {
   position: fixed;
   bottom: 22px;
-  left: 50%;
+  right: 24px;
   z-index: 12;
   display: flex;
-  width: min(900px, calc(100vw - 48px));
-  transform: translateX(-50%);
-  justify-content: center;
+  width: min(940px, calc(100vw - 48px));
+  justify-content: flex-end;
   pointer-events: none;
 }
 
@@ -972,18 +1060,14 @@ h1 {
 
 .hand {
   display: flex;
-  gap: 10px;
-  width: min(860px, 100%);
-  max-width: 100%;
-  overflow-x: auto;
-  padding: 12px;
-  border: 1px solid rgba(247, 243, 234, 0.16);
-  border-radius: 8px;
-  background: rgba(16, 19, 18, 0.72);
-  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(12px);
-  pointer-events: auto;
-  scrollbar-gutter: stable;
+  justify-content: flex-end;
+  gap: 0;
+  width: fit-content;
+  max-width: none;
+  overflow-x: visible;
+  overflow-y: visible;
+  padding: 22px 0 16px 76px;
+  pointer-events: none;
 }
 
 .card-button {
@@ -992,6 +1076,7 @@ h1 {
   align-content: start;
   flex: 0 0 168px;
   gap: 7px;
+  margin-left: -52px;
   min-height: 242px;
   padding: 16px 12px 12px;
   border: 1px solid rgba(217, 184, 79, 0.3);
@@ -1003,20 +1088,30 @@ h1 {
     #222827;
   cursor: pointer;
   overflow: hidden;
+  pointer-events: auto;
+  transform: translateX(var(--card-fan-shift, 0)) translateY(var(--card-fan-rise, 0))
+    rotate(var(--card-fan-rotation, 0));
+  transform-origin: 50% 118%;
   transition:
     transform 160ms ease,
     filter 160ms ease,
     box-shadow 160ms ease;
 }
 
+.card-button:first-child {
+  margin-left: 0;
+}
+
 .card-button:not(:disabled):hover {
-  transform: translateY(-3px);
+  transform: translateX(var(--card-fan-shift, 0))
+    translateY(calc(var(--card-fan-rise, 0px) - 10px)) rotate(var(--card-fan-rotation, 0));
   filter: brightness(1.06);
 }
 
 .card-button.dragging {
   opacity: 0.72;
-  transform: translateY(-6px);
+  transform: translateX(var(--card-fan-shift, 0))
+    translateY(calc(var(--card-fan-rise, 0px) - 14px)) rotate(var(--card-fan-rotation, 0));
 }
 
 .card-button.advanced {
@@ -1942,7 +2037,34 @@ h1 {
 
   .board {
     justify-items: start;
-    padding: 18px 18px 184px;
+    padding: 152px 18px 138px;
+  }
+
+  .battlefield-hud-player {
+    bottom: 310px;
+    left: 14px;
+  }
+
+  .battlefield-hud-opponent {
+    top: 14px;
+    right: 14px;
+  }
+
+  .battlefield-hud-hand {
+    top: 14px;
+    left: 14px;
+  }
+
+  .battlefield-hud-phase {
+    top: 88px;
+  }
+
+  .battlefield-hud-opponent .player-badge,
+  .battlefield-hud-player .player-badge {
+    flex-wrap: wrap;
+    max-width: min(360px, calc(100vw - 28px));
+    min-height: 0;
+    padding: 9px 12px;
   }
 
   .player-zone {
@@ -1951,10 +2073,12 @@ h1 {
 
   .hand {
     width: 100%;
+    padding-left: 58px;
   }
 
   .hand-overlay {
     bottom: 14px;
+    right: 14px;
     width: calc(100vw - 28px);
   }
 
@@ -2013,6 +2137,39 @@ h1 {
 }
 
 @media (max-width: 520px) {
+  .board {
+    padding-top: 214px;
+  }
+
+  .battlefield-hud-opponent {
+    top: 86px;
+    right: 12px;
+    left: 12px;
+  }
+
+  .battlefield-hud-opponent .player-badge {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .battlefield-hud-phase {
+    top: 164px;
+  }
+
+  .battlefield-hud-player {
+    bottom: 274px;
+    right: 12px;
+    left: 12px;
+  }
+
+  .battlefield-hud-player .player-badge {
+    width: 100%;
+  }
+
+  .opponent-hand-display {
+    width: min(178px, calc(100vw - 24px));
+  }
+
   .pile-row {
     grid-template-columns: 1fr;
   }
@@ -2023,15 +2180,12 @@ h1 {
 
   .card-button {
     flex-basis: 154px;
+    margin-left: -48px;
     min-height: 228px;
   }
 
   .card-button-art {
     height: 68px;
-  }
-
-  .player-badge {
-    justify-content: space-between;
   }
 
   .open-match-form div {

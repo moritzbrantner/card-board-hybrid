@@ -202,6 +202,7 @@ export type MatchParticipantState = {
   maxMana: number;
   wizard: Wizard;
   hand?: Card[];
+  handCount: number;
   deckCount: number;
   discardCount: number;
 };

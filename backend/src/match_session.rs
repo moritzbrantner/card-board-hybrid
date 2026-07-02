@@ -181,7 +181,7 @@ impl Serialize for PublicPlayerState<'_> {
     where
         S: serde::Serializer,
     {
-        let field_count = if self.expose_hand { 8 } else { 7 };
+        let field_count = if self.expose_hand { 9 } else { 8 };
         let mut state = serializer.serialize_struct("PlayerState", field_count)?;
         state.serialize_field("side", &self.player.side)?;
         state.serialize_field("mana", &self.player.mana)?;
@@ -190,6 +190,7 @@ impl Serialize for PublicPlayerState<'_> {
         if self.expose_hand {
             state.serialize_field("hand", &self.player.hand)?;
         }
+        state.serialize_field("handCount", &self.player.hand.len())?;
         state.serialize_field("deckCount", &self.player.deck_count)?;
         state.serialize_field("discardCount", &self.player.discard_count)?;
         state.end()
@@ -699,7 +700,6 @@ impl MatchState {
             game.player.draw();
             game.opponent.draw();
         }
-        game.grant_round_mana_from_control();
         let mut ignored_frames = Vec::new();
         game.start_turn(Side::Player, &mut ignored_frames, None);
 
@@ -878,7 +878,6 @@ impl MatchState {
         if side == Side::Opponent {
             self.round += 1;
             self.reset_unit_armor_for_new_round();
-            self.grant_round_mana_from_control();
             self.log.insert(0, format!("Round {} begins.", self.round));
             self.truncate_log();
             self.record_replay_frame(
@@ -898,23 +897,15 @@ impl MatchState {
         }
     }
 
-    fn grant_round_mana_from_control(&mut self) {
-        let player_mana = self.mana_from_control(Side::Player);
-        let opponent_mana = self.mana_from_control(Side::Opponent);
-
-        self.player.max_mana = player_mana;
-        self.player.mana = player_mana;
-        self.opponent.max_mana = opponent_mana;
-        self.opponent.mana = opponent_mana;
+    fn refresh_mana_from_control(&mut self, side: Side) {
+        let mana = self.mana_from_control(side);
+        let player = self.player_mut(side);
+        player.max_mana = mana;
+        player.mana = mana;
     }
 
     fn mana_from_control(&self, side: Side) -> u8 {
-        let friendly_control = self.controlled_hexes(side);
-        let enemy_control = self.controlled_hexes(side.opponent());
-        friendly_control
-            .difference(&enemy_control)
-            .count()
-            .min(usize::from(MAX_MANA)) as u8
+        self.controlled_hexes(side).len().min(usize::from(MAX_MANA)) as u8
     }
 
     fn controlled_hexes(&self, side: Side) -> HashSet<HexCoord> {
@@ -1637,7 +1628,6 @@ impl MatchState {
         if self.phase == Phase::Planning {
             self.round += 1;
             self.reset_unit_armor_for_new_round();
-            self.grant_round_mana_from_control();
             self.start_turn(Side::Player, frames, action_index);
             self.log.insert(0, format!("Round {} begins.", self.round));
             self.truncate_log();
@@ -1836,6 +1826,7 @@ impl MatchState {
         action_index: Option<u32>,
     ) {
         self.active_side = side;
+        self.refresh_mana_from_control(side);
         let should_draw = self.player_ref(side).has_started_first_turn;
         let mut drawn = None;
         {
@@ -2237,6 +2228,7 @@ impl PlayerState {
             "mana": self.mana,
             "maxMana": self.max_mana,
             "wizard": self.wizard,
+            "handCount": self.hand.len(),
             "deckCount": self.deck_count,
             "discardCount": self.discard_count,
         });
@@ -2525,6 +2517,8 @@ mod tests {
         assert!(value["opponent"].get("hand").is_none());
         assert!(value["opponent"].get("deck").is_none());
         assert!(value["opponent"].get("discard").is_none());
+        assert_eq!(value["player"]["handCount"], 4);
+        assert_eq!(value["opponent"]["handCount"], 4);
         assert_eq!(value["opponent"]["deckCount"], 56);
     }
 
@@ -2953,23 +2947,27 @@ mod tests {
     }
 
     #[test]
-    fn round_start_mana_comes_from_uncontested_controlled_hexes() {
+    fn turn_start_mana_comes_from_controlled_hexes() {
         let mut game = MatchState::new_with_seed(7);
         game.player.wizard.position = hex(0, 1);
         game.opponent.wizard.position = hex(0, -1);
+        game.player.mana = 0;
+        game.player.max_mana = 0;
+        game.opponent.mana = 0;
+        game.opponent.max_mana = 0;
 
-        game.grant_round_mana_from_control();
+        game.start_turn(Side::Player, &mut Vec::new(), None);
 
-        assert_eq!(game.player.max_mana, 6);
-        assert_eq!(game.player.mana, 6);
-        assert_eq!(game.opponent.max_mana, 6);
-        assert_eq!(game.opponent.mana, 6);
         assert!(game.controlled_hexes(Side::Player).contains(&hex(0, 0)));
         assert!(game.controlled_hexes(Side::Opponent).contains(&hex(0, 0)));
+        assert_eq!(game.player.max_mana, 7);
+        assert_eq!(game.player.mana, 7);
+        assert_eq!(game.opponent.max_mana, 0);
+        assert_eq!(game.opponent.mana, 0);
     }
 
     #[test]
-    fn shared_mana_is_not_refreshed_when_turn_passes_within_same_round() {
+    fn shared_turn_start_refreshes_only_the_active_side_mana() {
         let mut game = MatchState::new_with_seed_wizard_types_and_mode(
             7,
             WizardType::Runekeeper,
@@ -2988,8 +2986,11 @@ mod tests {
         assert_eq!(game.active_side, Side::Opponent);
         assert_eq!(game.player.mana, 1);
         assert_eq!(game.player.max_mana, 4);
-        assert_eq!(game.opponent.mana, 2);
-        assert_eq!(game.opponent.max_mana, 4);
+        assert_eq!(game.opponent.mana, game.mana_from_control(Side::Opponent));
+        assert_eq!(
+            game.opponent.max_mana,
+            game.mana_from_control(Side::Opponent)
+        );
     }
 
     #[test]
