@@ -104,6 +104,49 @@ test("saved action hotkeys submit only when the viewer may act", async ({ page }
   ]);
 });
 
+test("solo board cursor selects and confirms a legal move", async ({ page }) => {
+  let match = playableMatch({ activeSide: "player" });
+  const actions = [];
+  await mockHotkeyApi(page, async (action) => {
+    actions.push(action);
+    if (action.type === "movePiece") {
+      match = playableMatch({
+        activeSide: "player",
+        playerPosition: action.to,
+      });
+      return matchResponse(match);
+    }
+
+    throw new Error(`Unexpected action ${action.type}`);
+  }, () => match);
+
+  const preferencesLoaded = page.waitForResponse((response) =>
+    response.url().endsWith("/api/preferences"),
+  );
+  await page.goto(`/match/${MATCH_ID}`);
+  await preferencesLoaded;
+  await expect(page.getByRole("heading", { name: "Round 1" })).toBeVisible();
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  });
+
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("q");
+  await expect(
+    page.locator('.hex-tile.keyboard-focused[aria-label="q 0, r 2, empty hex"]'),
+  ).toBeVisible();
+
+  await page.keyboard.press("Enter");
+  await expect.poll(() => actions).toEqual([
+    { type: "movePiece", pieceId: "player-wizard", to: { q: 0, r: 2 } },
+  ]);
+  await expect(
+    page.getByRole("button", { name: "q 0, r 2, occupied by your wizard" }),
+  ).toBeVisible();
+});
+
 async function mockHotkeyApi(page, handleAction = null, currentMatch = null) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -210,15 +253,22 @@ function matchResponse(matchState) {
   return { matchId: MATCH_ID, matchState, replayFrames: [] };
 }
 
-function playableMatch({ activeSide, actionStack = [], prioritySide = null, hand = [] }) {
+function playableMatch({
+  activeSide,
+  actionStack = [],
+  prioritySide = null,
+  hand = [],
+  playerPosition = { q: 0, r: 3 },
+  opponentPosition = { q: 0, r: -3 },
+}) {
   return {
     mode: "solo",
     round: 1,
     phase: "planning",
     activeSide,
     prioritySide,
-    player: participant("player", activeSide, { q: 0, r: 3 }, hand),
-    opponent: participant("opponent", activeSide, { q: 0, r: -3 }, undefined),
+    player: participant("player", activeSide, playerPosition, hand),
+    opponent: participant("opponent", activeSide, opponentPosition, undefined),
     board: { radius: 3, tiles: radiusThreeTiles(), units: [], droppedItems: [] },
     actionStack,
     log: [],

@@ -60,6 +60,7 @@ export type Board3DTileInteraction = {
   disabled: boolean;
   isLegal: boolean;
   isSelected: boolean;
+  isFocused?: boolean;
   hasPiece: boolean;
   pieceSide?: Side;
   pieceType?: Board3DPiece["pieceType"];
@@ -629,6 +630,7 @@ function Board3DHitTarget({
     interaction.pieceSide ? `occupied-${interaction.pieceSide}` : "",
     interaction.isLegal ? "legal" : "",
     interaction.isSelected ? "selected-piece" : "",
+    interaction.isFocused ? "keyboard-focused" : "",
   ]
     .filter(Boolean)
     .join(" ");

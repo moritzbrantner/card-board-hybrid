@@ -75,6 +75,14 @@ import {
 } from "./boardAnimations";
 import { Board3DRenderer, type Board3DTileInteraction } from "./Board3D";
 import {
+  boardCursorConfirmIntent,
+  hideBoardCursor,
+  initialBoardCursorCoord,
+  isBoardCursorDirectionCommand,
+  moveBoardCursorCoord,
+  type BoardCursorSelection,
+} from "./boardCursor";
+import {
   boardRendererFallbackMessage,
   canCreateWebGLContext,
   isBoardRendererInteractive,
@@ -2028,6 +2036,10 @@ function MatchPage({
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
+  const [boardCursor, setBoardCursor] = useState<{ coord: HexCoord | null; visible: boolean }>({
+    coord: null,
+    visible: false,
+  });
   const [focusedUnitPieceId, setFocusedUnitPieceId] = useState<string | null>(null);
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [playedCardId, setPlayedCardId] = useState<string | null>(null);
@@ -2042,6 +2054,7 @@ function MatchPage({
   useEffect(() => {
     setLoadState({ status: "loading" });
     setSelection(null);
+    setBoardCursor({ coord: null, visible: false });
     setFocusedUnitPieceId(null);
     setDraggedCardId(null);
     setPlayedCardId(null);
@@ -2122,6 +2135,14 @@ function MatchPage({
     const piece = pieceById(loadState.match, focusedUnitPieceId);
     return piece?.pieceType === "unit" ? piece : null;
   }, [loadState, focusedUnitPieceId]);
+
+  useEffect(() => {
+    if (!readyMatch || boardCursor.coord) {
+      return;
+    }
+
+    setBoardCursor({ coord: initialBoardCursorCoord(readyMatch, viewerSide), visible: false });
+  }, [boardCursor.coord, readyMatch, viewerSide]);
 
   async function runAction(action: () => Promise<MatchResponse>) {
     setBusy(true);
@@ -2208,6 +2229,7 @@ function MatchPage({
       cancel: () => {
         const hadContext =
           selection !== null ||
+          boardCursor.visible ||
           draggedCardId !== null ||
           playedCardId !== null ||
           unitModalPieceId !== null ||
@@ -2217,12 +2239,56 @@ function MatchPage({
         }
 
         setSelection(null);
+        setBoardCursor(hideBoardCursor);
         setDraggedCardId(null);
         setPlayedCardId(null);
         setUnitModalPieceId(null);
         setUnitContextMenu(null);
         setNotice(null);
         return true;
+      },
+      cursorNorthwest: () => moveKeyboardCursor("cursorNorthwest"),
+      cursorNortheast: () => moveKeyboardCursor("cursorNortheast"),
+      cursorEast: () => moveKeyboardCursor("cursorEast"),
+      cursorWest: () => moveKeyboardCursor("cursorWest"),
+      cursorSouthwest: () => moveKeyboardCursor("cursorSouthwest"),
+      cursorSoutheast: () => moveKeyboardCursor("cursorSoutheast"),
+      confirm: () => {
+        if (!readyMatch || busy || readyMatch.phase === "matchOver") {
+          return false;
+        }
+
+        const coord = boardCursor.coord ?? initialBoardCursorCoord(readyMatch, viewerSide);
+        const tile = tileAt(readyMatch, coord);
+        if (!tile) {
+          return false;
+        }
+
+        const piece = pieceAt(readyMatch, coord);
+        const intent = boardCursorConfirmIntent({
+          coord,
+          selection: selection as BoardCursorSelection,
+          focusedPiece: piece ? { id: piece.id, side: piece.side } : null,
+          viewerSide,
+        });
+
+        setBoardCursor({ coord, visible: true });
+
+        if (intent.type === "selectPiece") {
+          setSelection({ type: "piece", pieceId: intent.pieceId });
+          setFocusedUnitPieceId(piece?.pieceType === "unit" ? piece.id : null);
+          setUnitContextMenu(null);
+          setUnitModalPieceId(null);
+          setNotice(null);
+          return true;
+        }
+
+        if (intent.type === "targetHex") {
+          handleTileClick(tile);
+          return true;
+        }
+
+        return false;
       },
       endTurn: () => {
         if (
@@ -2268,6 +2334,7 @@ function MatchPage({
     }),
     [
       busy,
+      boardCursor,
       contextMenuUnit,
       draggedCardId,
       focusedUnit,
@@ -2281,6 +2348,27 @@ function MatchPage({
     ],
   );
   useHotkeyHandlers(visualPreferences.preferences.hotkeys, matchHotkeyHandlers);
+
+  function moveKeyboardCursor(commandId: Parameters<typeof moveBoardCursorCoord>[1]) {
+    if (
+      !isBoardCursorDirectionCommand(commandId) ||
+      !readyMatch ||
+      busy ||
+      readyMatch.phase === "matchOver"
+    ) {
+      return false;
+    }
+
+    const radius = readyMatch.board.radius;
+    const currentCoord = boardCursor.coord ?? initialBoardCursorCoord(readyMatch, viewerSide);
+    const coord = moveBoardCursorCoord(currentCoord, commandId, radius);
+    const piece = pieceAt(readyMatch, coord);
+    setBoardCursor({ coord, visible: true });
+    setFocusedUnitPieceId(piece?.pieceType === "unit" ? piece.id : null);
+    setUnitContextMenu(null);
+    setNotice(null);
+    return true;
+  }
 
   async function handleCreateSeparateMatch() {
     setBusy(true);
@@ -2518,6 +2606,7 @@ function MatchPage({
             visualCatalog={visualCatalog}
             selectedCard={selectedCard}
             selectedPiece={selectedPiece}
+            focusedCoord={boardCursor.visible ? boardCursor.coord : null}
             disabled={busy || match.phase === "matchOver"}
             onTileClick={handleTileClick}
             onTileDrop={handleCardDrop}
@@ -3901,6 +3990,7 @@ function Board({
   visualCatalog = EMPTY_MATCH_VISUAL_CATALOG,
   selectedCard,
   selectedPiece,
+  focusedCoord,
   disabled,
   readOnly = false,
   onTileClick,
@@ -3915,6 +4005,7 @@ function Board({
   visualCatalog?: MatchVisualCatalog;
   selectedCard: Card | null;
   selectedPiece: BoardPiece | null;
+  focusedCoord?: HexCoord | null;
   disabled: boolean;
   readOnly?: boolean;
   onTileClick?: (tile: HexTile) => void;
@@ -3956,6 +4047,7 @@ function Board({
           ((!piece && isLegalMove(match, viewerSide, selectedPiece, tile.coord)) ||
             (piece && isLegalAttack(match, viewerSide, selectedPiece, piece)))));
     const isSelected = piece?.id === selectedPiece?.id;
+    const isFocused = focusedCoord ? sameCoord(tile.coord, focusedCoord) : false;
 
     return {
       coord: tile.coord,
@@ -3963,6 +4055,7 @@ function Board({
       disabled: !isInteractive,
       isLegal: Boolean(isLegal),
       isSelected,
+      isFocused,
       hasPiece: Boolean(piece),
       pieceSide: piece?.side,
       pieceType: piece?.pieceType,
@@ -4069,13 +4162,14 @@ function Board({
               );
               const isLegal = interaction?.isLegal ?? false;
               const isSelected = piece?.id === selectedPiece?.id;
+              const isFocused = focusedCoord ? sameCoord(tile.coord, focusedCoord) : false;
               const occupantClass = displayPiece ? `occupied occupied-${displayPiece.side}` : "";
               const title = tileTitle(tile, piece, viewerSide, droppedItems.length);
 
               return (
                 <button
                   key={coordKey(tile.coord)}
-                  className={`hex-tile ${occupantClass} ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""}`}
+                  className={`hex-tile ${occupantClass} ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""} ${isFocused ? "keyboard-focused" : ""}`}
                   type="button"
                   disabled={disabled && !readOnly}
                   tabIndex={readOnly ? -1 : undefined}
@@ -4379,6 +4473,10 @@ function tileTitle(
 
 function droppedItemsAt(match: MatchState, coord: HexCoord) {
   return (match.board.droppedItems ?? []).filter((item) => sameCoord(item.position, coord));
+}
+
+function tileAt(match: MatchState, coord: HexCoord) {
+  return match.board.tiles.find((tile) => sameCoord(tile.coord, coord)) ?? null;
 }
 
 function pieceStatLabel(piece: BoardPiece) {
