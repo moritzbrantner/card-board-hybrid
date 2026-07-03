@@ -62,8 +62,12 @@ import {
   effectiveBoardVisualMode,
   saveLocalBoardVisualMode,
 } from "./boardVisualMode";
-import { Board3DRenderer } from "./Board3D";
-import { canCreateWebGLContext, selectBoardRenderer } from "./boardRenderer";
+import { Board3DRenderer, type Board3DTileInteraction } from "./Board3D";
+import {
+  canCreateWebGLContext,
+  isBoardRendererInteractive,
+  selectBoardRenderer,
+} from "./boardRenderer";
 import { ProfilePage } from "./profile";
 import { clearAuthToken, getAuthToken, saveAuthToken } from "./session";
 import { WIZARD_OPTIONS } from "./wizards";
@@ -3270,17 +3274,41 @@ function Board({
   onUnitContextMenu?: (unit: BoardUnit, position: { x: number; y: number }) => void;
 }) {
   const [webglFailed, setWebglFailed] = useState(
-    () => boardVisualMode === "3d" && readOnly && !canCreateWebGLContext(),
+    () => boardVisualMode === "3d" && !canCreateWebGLContext(),
   );
   const [assetFailureCount, setAssetFailureCount] = useState(0);
-  const webglUnavailable = boardVisualMode === "3d" && readOnly && !canCreateWebGLContext();
+  const webglUnavailable = boardVisualMode === "3d" && !canCreateWebGLContext();
   const renderer = selectBoardRenderer({
     requestedMode: boardVisualMode,
     webglFailed: webglFailed || webglUnavailable,
     readOnly,
   });
+  const isInteractive = isBoardRendererInteractive({ renderer, readOnly, disabled });
   const columns = groupTilesByColumn(match.board.tiles);
   const pieces = piecesInMatch(match);
+  const tileInteractions = match.board.tiles.map((tile): Board3DTileInteraction => {
+    const piece = pieceAt(match, tile.coord);
+    const isLegal =
+      isInteractive &&
+      ((selectedCard && isLegalCardTarget(match, viewerSide, selectedCard, tile.coord, piece)) ||
+        (selectedPiece &&
+          ((!piece && isLegalMove(match, viewerSide, selectedPiece, tile.coord)) ||
+            (piece && isLegalAttack(match, viewerSide, selectedPiece, piece)))));
+    const isSelected = piece?.id === selectedPiece?.id;
+
+    return {
+      coord: tile.coord,
+      title: tileTitle(tile, piece, viewerSide),
+      disabled: !isInteractive,
+      isLegal: Boolean(isLegal),
+      isSelected,
+      hasPiece: Boolean(piece),
+      pieceSide: piece?.side,
+      pieceType: piece?.pieceType,
+      pieceLabel: piece ? viewerSideShortLabel(piece.side, viewerSide) : undefined,
+      pieceStatLabel: piece ? pieceStatLabel(piece) : undefined,
+    };
+  });
 
   useEffect(() => {
     if (boardVisualMode === "2d") {
@@ -3289,10 +3317,10 @@ function Board({
       return;
     }
 
-    if (readOnly && !canCreateWebGLContext()) {
+    if (!canCreateWebGLContext()) {
       setWebglFailed(true);
     }
-  }, [boardVisualMode, readOnly]);
+  }, [boardVisualMode]);
 
   if (renderer === "3d") {
     return (
@@ -3312,6 +3340,18 @@ function Board({
           pieces={pieces}
           visualCatalog={visualCatalog}
           readOnly={readOnly}
+          disabled={disabled}
+          tileInteractions={tileInteractions}
+          onTileClick={onTileClick}
+          onTileDrop={onTileDrop}
+          onTileContextMenu={(tile, event) => {
+            const piece = pieceAt(match, tile.coord);
+            if (piece?.pieceType !== "unit" || !onUnitContextMenu) {
+              return;
+            }
+
+            onUnitContextMenu(piece, { x: event.clientX, y: event.clientY });
+          }}
           onFatalRenderError={() => setWebglFailed(true)}
           onAssetFailure={() => setAssetFailureCount((count) => count + 1)}
         />
@@ -3326,11 +3366,6 @@ function Board({
       data-board-renderer="2d"
       aria-label="Hex board"
     >
-      {boardVisualMode === "3d" && !readOnly ? (
-        <div className="board-renderer-notice" role="status">
-          3D board preview is read-only in this version, using 2D for play.
-        </div>
-      ) : null}
       {webglFailed || webglUnavailable ? (
         <div className="board-renderer-notice" role="status">
           3D board unavailable, using 2D.
@@ -3341,14 +3376,10 @@ function Board({
           <div className="hex-column" key={column.q}>
             {column.tiles.map((tile) => {
               const piece = pieceAt(match, tile.coord);
-              const isLegal =
-                !readOnly &&
-                !disabled &&
-                ((selectedCard &&
-                  isLegalCardTarget(match, viewerSide, selectedCard, tile.coord, piece)) ||
-                  (selectedPiece &&
-                    ((!piece && isLegalMove(match, viewerSide, selectedPiece, tile.coord)) ||
-                      (piece && isLegalAttack(match, viewerSide, selectedPiece, piece)))));
+              const interaction = tileInteractions.find(
+                (candidate) => coordKey(candidate.coord) === coordKey(tile.coord),
+              );
+              const isLegal = interaction?.isLegal ?? false;
               const isSelected = piece?.id === selectedPiece?.id;
               const occupantClass = piece ? `occupied occupied-${piece.side}` : "";
               const title = tileTitle(tile, piece, viewerSide);
@@ -3567,6 +3598,14 @@ function tileTitle(tile: HexTile, piece: BoardPiece | null, viewerSide: Side) {
 
   const owner = viewerSideLabel(piece.side, viewerSide);
   return `${coordLabel}, occupied by ${owner} ${piece.pieceType}`;
+}
+
+function pieceStatLabel(piece: BoardPiece) {
+  if (piece.pieceType === "wizard") {
+    return `${piece.attack}/${piece.hp} AP ${piece.apRemaining}`;
+  }
+
+  return `${piece.attack}/${piece.armor} AP ${piece.apRemaining}`;
 }
 
 function pieceById(match: MatchState, pieceId: string): BoardPiece | null {
