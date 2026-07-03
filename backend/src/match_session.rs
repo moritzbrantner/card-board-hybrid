@@ -1636,11 +1636,12 @@ impl MatchState {
             action_index,
             ReplayEvent::UnitSummoned {
                 side,
-                unit_id,
+                unit_id: unit_id.clone(),
                 name: unit_name,
                 position: unit_position,
             },
         );
+        self.pick_up_dropped_items_at(side, &unit_id, unit_position, frames, action_index);
     }
 
     fn resolve_spell_card(
@@ -1889,6 +1890,7 @@ impl MatchState {
                 to,
             },
         );
+        self.pick_up_dropped_items_at(side, piece_id, to, frames, action_index);
     }
 
     fn attack_for_side(
@@ -2594,6 +2596,55 @@ impl MatchState {
                     },
                 );
             }
+        }
+    }
+
+    fn pick_up_dropped_items_at(
+        &mut self,
+        side: Side,
+        unit_id: &str,
+        position: HexCoord,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        let Some(unit_index) =
+            self.board.units.iter().position(|unit| {
+                unit.id == unit_id && unit.side == side && unit.position == position
+            })
+        else {
+            return;
+        };
+
+        let mut picked_up = Vec::new();
+        self.board.dropped_items.retain(|dropped_item| {
+            if dropped_item.position == position {
+                picked_up.push(dropped_item.item.clone());
+                false
+            } else {
+                true
+            }
+        });
+
+        for item in picked_up {
+            let item_id = item.id.clone();
+            let item_name = item.name.clone();
+            {
+                let unit = &mut self.board.units[unit_index];
+                apply_item_passive(unit, &item.passive);
+                unit.items.push(item);
+            }
+            self.log
+                .insert(0, format!("{} picked up {}.", unit_id, item_name));
+            self.record_replay_frame(
+                frames,
+                action_index,
+                ReplayEvent::ItemEquipped {
+                    side,
+                    unit_id: unit_id.to_string(),
+                    item_id,
+                    name: item_name,
+                },
+            );
         }
     }
 
@@ -3680,6 +3731,96 @@ mod tests {
                 .iter()
                 .any(|frame| matches!(frame.event, ReplayEvent::ItemDropped { .. }))
         );
+    }
+
+    #[test]
+    fn units_pick_up_dropped_items_by_moving_onto_their_hex() {
+        let mut game = MatchState::new_with_seed(7);
+        game.board.units.push(Unit {
+            id: "attacker".to_string(),
+            side: Side::Player,
+            name: "Rune Bruiser".to_string(),
+            template_id: Some("rune-bruiser".to_string()),
+            attack: 3,
+            armor: 3,
+            max_armor: 3,
+            position: hex(1, 1),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+            items: Vec::new(),
+        });
+        game.board.units.push(Unit {
+            id: "looter".to_string(),
+            side: Side::Player,
+            name: "Swift Familiar".to_string(),
+            template_id: Some("swift-familiar".to_string()),
+            attack: 1,
+            armor: 1,
+            max_armor: 1,
+            position: hex(-1, 2),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+            items: Vec::new(),
+        });
+        game.board.units.push(Unit {
+            id: "carrier".to_string(),
+            side: Side::Opponent,
+            name: "Ash Hound".to_string(),
+            template_id: Some("ash-hound".to_string()),
+            attack: 1,
+            armor: 3,
+            max_armor: 3,
+            position: hex(0, 2),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+            items: vec![CarriedItem {
+                id: "OI9".to_string(),
+                template_id: "ember-flask".to_string(),
+                name: "Ember Flask".to_string(),
+                passive: ItemPassiveEffect::StatBonus {
+                    attack: 1,
+                    armor: 0,
+                    max_ap: 0,
+                },
+                active: Some(ItemActiveEffect::HealCarrier { amount: 2 }),
+                active_used_this_turn: false,
+            }],
+        });
+
+        game.apply_action(MatchActionRequest::Attack {
+            attacker_id: "attacker".to_string(),
+            target_id: "carrier".to_string(),
+        })
+        .expect("adjacent attack should destroy the carrier");
+        assert!(!game.board.units.iter().any(|unit| unit.id == "carrier"));
+        assert_eq!(game.board.dropped_items.len(), 1);
+
+        game.apply_action(MatchActionRequest::MovePiece {
+            piece_id: "looter".to_string(),
+            to: hex(0, 2),
+        })
+        .expect("unit should move onto the dropped item");
+
+        let looter = game
+            .board
+            .units
+            .iter()
+            .find(|unit| unit.id == "looter")
+            .expect("looter survives");
+        assert_eq!(looter.position, hex(0, 2));
+        assert_eq!(looter.attack, 2);
+        assert_eq!(looter.items.len(), 1);
+        assert_eq!(looter.items[0].name, "Ember Flask");
+        assert!(game.board.dropped_items.is_empty());
+
+        game.apply_action(MatchActionRequest::ActivateItem {
+            unit_id: "looter".to_string(),
+            item_id: "OI9".to_string(),
+        })
+        .expect("picked up item should be usable by its new carrier");
     }
 
     #[test]
