@@ -19,9 +19,9 @@ describe("board renderer boundary", () => {
     );
   });
 
-  it("keeps active playable boards on the 2D renderer until 3D interaction parity ships", () => {
+  it("uses 3D for active playable boards when requested", () => {
     expect(selectBoardRenderer({ requestedMode: "3d", webglFailed: false, readOnly: false })).toBe(
-      "2d",
+      "3d",
     );
   });
 
@@ -29,9 +29,12 @@ describe("board renderer boundary", () => {
     expect(canCreateWebGLContext(undefined)).toBe(false);
   });
 
-  it("keeps the 3D shell non-interactive for replay-safe rendering in this slice", () => {
+  it("keeps read-only boards non-interactive while active 3D boards can be played", () => {
     expect(
       isBoardRendererInteractive({ renderer: "3d", readOnly: false, disabled: false }),
+    ).toBe(true);
+    expect(
+      isBoardRendererInteractive({ renderer: "3d", readOnly: true, disabled: false }),
     ).toBe(false);
     expect(
       isBoardRendererInteractive({ renderer: "2d", readOnly: true, disabled: false }),

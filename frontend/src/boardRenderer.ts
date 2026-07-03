@@ -17,9 +17,8 @@ export type BoardInteractionState = {
 export function selectBoardRenderer({
   requestedMode,
   webglFailed,
-  readOnly,
 }: BoardRendererSelection): BoardRendererKind {
-  if (requestedMode === "3d" && readOnly && !webglFailed) {
+  if (requestedMode === "3d" && !webglFailed) {
     return "3d";
   }
 
@@ -31,11 +30,7 @@ export function isBoardRendererInteractive({
   readOnly,
   disabled,
 }: BoardInteractionState) {
-  if (renderer === "3d") {
-    return false;
-  }
-
-  return !readOnly && !disabled;
+  return renderer === "3d" || renderer === "2d" ? !readOnly && !disabled : false;
 }
 
 export function canCreateWebGLContext(documentRef: Document | undefined = globalThis.document) {

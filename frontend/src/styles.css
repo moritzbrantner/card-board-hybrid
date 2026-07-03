@@ -655,6 +655,7 @@ h1 {
 }
 
 .board-3d-shell {
+  position: relative;
   width: min(100%, 980px);
   min-width: min(100%, 720px);
   height: clamp(520px, 62vh, 760px);
@@ -668,6 +669,84 @@ h1 {
 
 .board-3d-shell canvas {
   display: block;
+}
+
+.board-3d-hit-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.board-3d-hit-target {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  min-height: 48px;
+  border: 1px solid rgba(247, 243, 234, 0.18);
+  border-radius: 8px;
+  color: #fffaf0;
+  background: rgba(10, 13, 13, 0.18);
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) skewX(-8deg);
+}
+
+.board-3d-hit-target.occupied {
+  min-height: 60px;
+  background: rgba(10, 13, 13, 0.46);
+  box-shadow: inset 0 0 0 1px rgba(255, 250, 240, 0.08);
+}
+
+.board-3d-hit-target.occupied-player {
+  border-color: rgba(119, 179, 111, 0.58);
+}
+
+.board-3d-hit-target.occupied-opponent {
+  border-color: rgba(209, 102, 90, 0.58);
+}
+
+.board-3d-hit-target.legal {
+  border-color: var(--gold);
+  background: rgba(217, 184, 79, 0.24);
+  box-shadow: 0 0 0 2px rgba(217, 184, 79, 0.18);
+}
+
+.board-3d-hit-target.selected-piece {
+  border-color: #fffaf0;
+  box-shadow: 0 0 0 2px rgba(255, 250, 240, 0.32);
+}
+
+.board-3d-hit-target:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.board-3d-hit-target:not(:disabled):hover,
+.board-3d-hit-target:focus-visible {
+  border-color: var(--teal);
+  outline: none;
+}
+
+.board-3d-hit-target span,
+.board-3d-hit-target strong,
+.board-3d-hit-target em {
+  display: inline-grid;
+  place-items: center;
+  max-width: 48px;
+  border-radius: 999px;
+  padding: 2px 5px;
+  background: rgba(10, 13, 13, 0.78);
+  font-size: 0.62rem;
+  font-style: normal;
+  font-weight: 950;
+  line-height: 1;
+  transform: skewX(8deg);
+}
+
+.board-3d-hit-target strong {
+  color: var(--gold);
 }
 
 .board-3d-fallback {
