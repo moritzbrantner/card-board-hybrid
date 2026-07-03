@@ -854,7 +854,7 @@ h1 {
   background: rgba(10, 13, 13, 0.18);
   cursor: pointer;
   pointer-events: auto;
-  transform: translate(-50%, -50%) skewX(-8deg);
+  transform: translate(-50%, -50%);
 }
 
 .board-3d-hit-target.occupied {
@@ -914,7 +914,6 @@ h1 {
   font-style: normal;
   font-weight: 950;
   line-height: 1;
-  transform: skewX(8deg);
 }
 
 .board-3d-hit-target strong {

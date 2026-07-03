@@ -225,6 +225,56 @@ test("plays unit and spell card targets through the 3D board", async ({ page }) 
   );
 });
 
+test("keeps projected 3D hit targets usable after viewport resize", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await useStoredBoardVisualMode(page, "3d");
+  let match = playableMatch({
+    playerWizard: { q: 0, r: 1 },
+    opponentWizard: { q: 1, r: 1 },
+    hand: [emberSquire()],
+  });
+  const actions = [];
+
+  await mockMatchApi(page, async (action) => {
+    actions.push(action);
+    if (action.type === "playCard") {
+      match = playableMatch({
+        playerWizard: { q: 0, r: 1 },
+        opponentWizard: { q: 1, r: 1 },
+        hand: [],
+        units: [ashScout(action.target.coord)],
+      });
+    }
+
+    return matchResponse(match);
+  }, () => match);
+
+  await page.goto(`/match/${MATCH_ID}`);
+  await expect(page.locator('section[data-board-renderer="3d"]')).toBeVisible();
+  await expect.poll(() => hasPainted3dCanvas(page)).toBe(true);
+
+  const destination = tile(page, "q 0, r 0, empty hex");
+  await expect(destination).toBeVisible();
+  const beforeResize = await locatorCenter(destination);
+  await expectHitTargetInsideCanvas(page, destination);
+
+  await page.setViewportSize({ width: 390, height: 700 });
+  await expect(destination).toBeVisible();
+  await expect.poll(() => locatorCenter(destination)).not.toEqual(beforeResize);
+  await expectHitTargetInsideCanvas(page, destination);
+
+  await page.getByRole("button", { name: /Ember Squire/ }).dragTo(destination);
+  await expect.poll(() => actions).toEqual(
+    expect.arrayContaining([
+      {
+        type: "playCard",
+        cardId: "ember-squire-card",
+        target: { type: "hex", coord: { q: 0, r: 0 } },
+      },
+    ]),
+  );
+});
+
 test("respects disabled state, context menus, visible counts, and replay read-only in 3D mode", async ({
   page,
 }) => {
@@ -382,6 +432,26 @@ test("shows marker fallback notice when configured 3D models fail to load", asyn
 
 function tile(page, name) {
   return page.getByRole("button", { name });
+}
+
+async function locatorCenter(locator) {
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+
+  return {
+    x: Math.round(box.x + box.width / 2),
+    y: Math.round(box.y + box.height / 2),
+  };
+}
+
+async function expectHitTargetInsideCanvas(page, locator) {
+  const targetCenter = await locatorCenter(locator);
+  const canvasBox = await page.locator(".board-3d-shell canvas").boundingBox();
+  expect(canvasBox).not.toBeNull();
+  expect(targetCenter.x).toBeGreaterThanOrEqual(Math.floor(canvasBox.x));
+  expect(targetCenter.x).toBeLessThanOrEqual(Math.ceil(canvasBox.x + canvasBox.width));
+  expect(targetCenter.y).toBeGreaterThanOrEqual(Math.floor(canvasBox.y));
+  expect(targetCenter.y).toBeLessThanOrEqual(Math.ceil(canvasBox.y + canvasBox.height));
 }
 
 async function useStoredBoardVisualMode(page, mode) {

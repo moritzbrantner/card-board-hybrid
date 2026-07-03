@@ -1,4 +1,4 @@
-import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import {
   Component,
   type DragEvent,
@@ -11,7 +11,13 @@ import {
 } from "react";
 import { Box3, Group, Object3D, Vector3 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { axialToBoardPosition } from "./boardRenderer";
+import {
+  BOARD_3D_CAMERA,
+  BOARD_3D_GROUP_ROTATION_Y,
+  axialToBoardPosition,
+  projectBoardPositionToViewport,
+  type ProjectedBoardPosition,
+} from "./boardRenderer";
 import {
   BOARD_MODEL_MANIFEST,
   resolveBoardModel,
@@ -141,6 +147,9 @@ export function Board3DRenderer({
     () => new Map((animation?.pieces ?? []).map((pieceAnimation) => [pieceAnimation.pieceId, pieceAnimation])),
     [animation],
   );
+  const [projectedHitTargets, setProjectedHitTargets] = useState<Map<string, ProjectedBoardPosition>>(
+    () => new Map(),
+  );
 
   function handleTileClick(coord: HexCoord) {
     if (readOnly || disabled) {
@@ -187,7 +196,7 @@ export function Board3DRenderer({
         data-board-disabled={disabled ? "true" : "false"}
       >
         <Canvas
-          camera={{ position: [0, 7.6, 7.9], fov: 38, near: 0.1, far: 60 }}
+          camera={BOARD_3D_CAMERA}
           dpr={[1, 1.8]}
           fallback={<div className="board-3d-fallback" role="status">3D board unavailable.</div>}
           gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
@@ -199,7 +208,7 @@ export function Board3DRenderer({
           <color attach="background" args={["#101312"]} />
           <ambientLight intensity={0.85} />
           <directionalLight position={[2.5, 7, 3.5]} intensity={1.9} />
-          <group rotation={[0, Math.PI / 6, 0]}>
+          <group rotation={[0, BOARD_3D_GROUP_ROTATION_Y, 0]}>
             {tiles.map((tile) => {
               const interaction = tileInteractionByKey.get(coordKey(tile.coord));
 
@@ -231,12 +240,17 @@ export function Board3DRenderer({
               />
             ))}
           </group>
+          <ProjectedHitTargetSync
+            tileInteractions={tileInteractions}
+            onPositionsChange={setProjectedHitTargets}
+          />
         </Canvas>
         <div className="board-3d-hit-layer" aria-label="3D board controls">
           {tileInteractions.map((interaction) => (
             <Board3DHitTarget
               key={coordKey(interaction.coord)}
               interaction={interaction}
+              projectedPosition={projectedHitTargets.get(coordKey(interaction.coord))}
               readOnly={readOnly}
               disabled={disabled}
               onClick={handleTileClick}
@@ -248,6 +262,59 @@ export function Board3DRenderer({
       </div>
     </Board3DErrorBoundary>
   );
+}
+
+function ProjectedHitTargetSync({
+  tileInteractions,
+  onPositionsChange,
+}: {
+  tileInteractions: Board3DTileInteraction[];
+  onPositionsChange: (positions: Map<string, ProjectedBoardPosition>) => void;
+}) {
+  const { camera, size } = useThree();
+  const previousPositionsRef = useRef<Map<string, ProjectedBoardPosition>>(new Map());
+
+  useFrame(() => {
+    camera.updateMatrixWorld();
+    const nextPositions = new Map<string, ProjectedBoardPosition>();
+
+    for (const interaction of tileInteractions) {
+      nextPositions.set(
+        coordKey(interaction.coord),
+        projectBoardPositionToViewport(interaction.coord, camera, size),
+      );
+    }
+
+    if (!projectedPositionsEqual(previousPositionsRef.current, nextPositions)) {
+      previousPositionsRef.current = nextPositions;
+      onPositionsChange(nextPositions);
+    }
+  });
+
+  return null;
+}
+
+function projectedPositionsEqual(
+  left: Map<string, ProjectedBoardPosition>,
+  right: Map<string, ProjectedBoardPosition>,
+) {
+  if (left.size !== right.size) {
+    return false;
+  }
+
+  for (const [key, nextPosition] of right) {
+    const currentPosition = left.get(key);
+    if (
+      !currentPosition ||
+      currentPosition.visible !== nextPosition.visible ||
+      Math.abs(currentPosition.x - nextPosition.x) > 0.25 ||
+      Math.abs(currentPosition.y - nextPosition.y) > 0.25
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function HexTileMesh({
@@ -608,6 +675,7 @@ function FallbackPieceMarker({
 
 function Board3DHitTarget({
   interaction,
+  projectedPosition,
   readOnly,
   disabled,
   onClick,
@@ -615,15 +683,13 @@ function Board3DHitTarget({
   onContextMenu,
 }: {
   interaction: Board3DTileInteraction;
+  projectedPosition?: ProjectedBoardPosition;
   readOnly: boolean;
   disabled: boolean;
   onClick: (coord: HexCoord) => void;
   onDrop: (coord: HexCoord, cardId: string) => void;
   onContextMenu: (coord: HexCoord, event: { clientX: number; clientY: number }) => void;
 }) {
-  const [x, , z] = axialToBoardPosition(interaction.coord, 1);
-  const left = 50 + x * 8.25;
-  const top = 50 + z * 7.2;
   const className = [
     "board-3d-hit-target",
     interaction.hasPiece ? "occupied" : "",
@@ -639,7 +705,11 @@ function Board3DHitTarget({
     <button
       type="button"
       className={className}
-      style={{ left: `${left}%`, top: `${top}%` }}
+      style={{
+        left: projectedPosition ? `${projectedPosition.x}px` : "50%",
+        top: projectedPosition ? `${projectedPosition.y}px` : "50%",
+        visibility: projectedPosition?.visible ? "visible" : "hidden",
+      }}
       disabled={disabled && !readOnly}
       tabIndex={readOnly ? -1 : undefined}
       aria-label={interaction.title}
