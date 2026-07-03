@@ -81,6 +81,7 @@ export function SettingsPage({
     () => hotkeyValidationIssuesByCommand(hotkeyIssues),
     [hotkeyIssues],
   );
+  const controlsDisabled = busy || preferencesState.status === "loading";
 
   useEffect(() => {
     setTheme(preferences.theme);
@@ -191,7 +192,7 @@ export function SettingsPage({
             value={theme}
             options={THEME_OPTIONS}
             onChange={(value) => setTheme(value as PreferenceTheme)}
-            disabled={busy}
+            disabled={controlsDisabled}
           />
           <PreferenceSelect
             id="settings-motion"
@@ -199,7 +200,7 @@ export function SettingsPage({
             value={motion}
             options={MOTION_OPTIONS}
             onChange={(value) => setMotion(value as MotionPreference)}
-            disabled={busy}
+            disabled={controlsDisabled}
           />
           <PreferenceSelect
             id="settings-animation-speed"
@@ -207,7 +208,7 @@ export function SettingsPage({
             value={animationSpeed}
             options={SPEED_OPTIONS}
             onChange={(value) => setAnimationSpeed(value as AnimationSpeed)}
-            disabled={busy}
+            disabled={controlsDisabled}
           />
           <PreferenceSelect
             id="settings-board-scale"
@@ -215,7 +216,7 @@ export function SettingsPage({
             value={boardScale}
             options={SCALE_OPTIONS}
             onChange={(value) => setBoardScale(value as BoardScale)}
-            disabled={busy}
+            disabled={controlsDisabled}
           />
         </section>
 
@@ -226,7 +227,7 @@ export function SettingsPage({
               className="secondary-link"
               type="button"
               onClick={resetHotkeysToDefaults}
-              disabled={busy}
+              disabled={controlsDisabled}
             >
               <RotateCcw size={18} />
               Reset Defaults
@@ -257,7 +258,7 @@ export function SettingsPage({
                       setNotice(null);
                     }}
                     onKeyDown={(event) => handleHotkeyKeyDown(command.id, event)}
-                    disabled={busy}
+                    disabled={controlsDisabled}
                   >
                     <Keyboard size={18} />
                     {isRecording ? "Press key" : formatBinding(hotkeys[command.id])}
@@ -276,7 +277,7 @@ export function SettingsPage({
               className="primary-button"
               type="button"
               onClick={() => void handleSave()}
-              disabled={busy || preferencesState.status === "loading" || hotkeyIssues.length > 0}
+              disabled={controlsDisabled || hotkeyIssues.length > 0}
             >
               <Save size={18} />
               Save Settings
