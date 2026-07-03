@@ -222,6 +222,7 @@ export type AccountPreferences = {
   motion: MotionPreference;
   animationSpeed: AnimationSpeed;
   boardScale: BoardScale;
+  boardVisualMode: BoardVisualMode;
   hotkeys: HotkeyBinding[];
   updatedAt: number | null;
 };

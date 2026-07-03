@@ -19,6 +19,7 @@ export const DEFAULT_ACCOUNT_PREFERENCES: AccountPreferences = {
   motion: "system",
   animationSpeed: "normal",
   boardScale: "normal",
+  boardVisualMode: "3d",
   hotkeys: DEFAULT_HOTKEYS,
   updatedAt: null,
 };
@@ -27,6 +28,7 @@ const THEMES = ["system", "dark", "light", "highContrast"] as const;
 const MOTIONS = ["system", "reduced", "full"] as const;
 const ANIMATION_SPEEDS = ["slow", "normal", "fast"] as const;
 const BOARD_SCALES = ["compact", "normal", "large"] as const;
+const BOARD_VISUAL_MODES = ["2d", "3d"] as const;
 
 export function normalizeAccountPreferences(value: unknown): AccountPreferences {
   const payload = isRecord(value) ? (value as UnknownPreferences) : {};
@@ -39,6 +41,11 @@ export function normalizeAccountPreferences(value: unknown): AccountPreferences 
       DEFAULT_ACCOUNT_PREFERENCES.animationSpeed,
     ),
     boardScale: enumValue(payload.boardScale, BOARD_SCALES, DEFAULT_ACCOUNT_PREFERENCES.boardScale),
+    boardVisualMode: enumValue(
+      payload.boardVisualMode,
+      BOARD_VISUAL_MODES,
+      DEFAULT_ACCOUNT_PREFERENCES.boardVisualMode,
+    ),
     hotkeys: normalizeHotkeysWithDefaults(payload.hotkeys),
     updatedAt: typeof payload.updatedAt === "number" ? payload.updatedAt : null,
   };
@@ -46,11 +53,13 @@ export function normalizeAccountPreferences(value: unknown): AccountPreferences 
 
 export function accountPreferencesSavePayload(
   current: AccountPreferences,
-  nextVisuals: Pick<AccountPreferences, "theme" | "motion" | "animationSpeed" | "boardScale">,
+  nextVisuals: Pick<AccountPreferences, "theme" | "motion" | "animationSpeed" | "boardScale"> &
+    Partial<Pick<AccountPreferences, "boardVisualMode">>,
   nextHotkeys: HotkeyBinding[] = current.hotkeys,
 ): UpdatePreferencesRequest {
   return {
     ...nextVisuals,
+    boardVisualMode: nextVisuals.boardVisualMode ?? current.boardVisualMode,
     hotkeys: normalizeHotkeysWithDefaults(nextHotkeys),
   };
 }

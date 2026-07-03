@@ -14,6 +14,7 @@ describe("account preference normalization", () => {
       motion: "reduced",
       animationSpeed: "fast",
       boardScale: "large",
+      boardVisualMode: "2d",
       hotkeys: [
         { commandId: "openSettings", binding: "," },
         { commandId: "endTurn", binding: "Y" },
@@ -26,6 +27,7 @@ describe("account preference normalization", () => {
       motion: "reduced",
       animationSpeed: "fast",
       boardScale: "large",
+      boardVisualMode: "2d",
       updatedAt: 12,
     });
     expect(preferences.hotkeys).toHaveLength(DEFAULT_ACCOUNT_PREFERENCES.hotkeys.length);
@@ -44,6 +46,7 @@ describe("account preference normalization", () => {
         motion: "cinematic",
         animationSpeed: "instant",
         boardScale: "tiny",
+        boardVisualMode: "hologram",
         hotkeys: [],
       }),
     ).toMatchObject({
@@ -51,6 +54,7 @@ describe("account preference normalization", () => {
       motion: "system",
       animationSpeed: "normal",
       boardScale: "normal",
+      boardVisualMode: "3d",
     });
   });
 
@@ -65,6 +69,7 @@ describe("account preference normalization", () => {
         motion: "full",
         animationSpeed: "slow",
         boardScale: "compact",
+        boardVisualMode: "2d",
       },
     );
 
@@ -73,6 +78,7 @@ describe("account preference normalization", () => {
       motion: "full",
       animationSpeed: "slow",
       boardScale: "compact",
+      boardVisualMode: "2d",
     });
     expect(payload.hotkeys.find((hotkey) => hotkey.commandId === "endTurn")?.binding).toBe("Y");
     expect(payload.hotkeys).toHaveLength(DEFAULT_ACCOUNT_PREFERENCES.hotkeys.length);

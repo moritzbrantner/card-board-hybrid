@@ -268,6 +268,8 @@ impl<'a> IdentityModule<'a> {
                 board_visual_mode_to_db(board_visual_mode)
             ],
         )?;
+        preferences::sync_board_visual_mode_for_user(self.connection, user_id, board_visual_mode)
+            .map_err(preferences_error_to_identity_error)?;
         self.load_profile_by_id(user_id)
     }
 
@@ -432,11 +434,15 @@ pub fn migrate(connection: &Connection) -> Result<(), IdentityError> {
         ",
         [],
     )?;
-    preferences::migrate(connection).map_err(|error| match error {
+    preferences::migrate(connection).map_err(preferences_error_to_identity_error)?;
+    Ok(())
+}
+
+fn preferences_error_to_identity_error(error: preferences::PreferencesError) -> IdentityError {
+    match error {
         preferences::PreferencesError::Sqlite(error) => IdentityError::Sqlite(error),
         other => IdentityError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(other))),
-    })?;
-    Ok(())
+    }
 }
 
 #[cfg(debug_assertions)]

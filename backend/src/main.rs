@@ -2065,11 +2065,11 @@ mod tests {
     }
 
     fn default_preferences_payload() -> &'static str {
-        r#"{"theme":"system","motion":"system","animationSpeed":"normal","boardScale":"normal","hotkeys":[{"commandId":"cursorNorthwest","binding":"Q"},{"commandId":"cursorNortheast","binding":"W"},{"commandId":"cursorEast","binding":"E"},{"commandId":"cursorWest","binding":"A"},{"commandId":"cursorSouthwest","binding":"S"},{"commandId":"cursorSoutheast","binding":"D"},{"commandId":"confirm","binding":"Enter"},{"commandId":"cancel","binding":"Escape"},{"commandId":"endTurn","binding":"T"},{"commandId":"passPriority","binding":"P"},{"commandId":"openCardInfo","binding":"I"},{"commandId":"openSettings","binding":","},{"commandId":"openCatalog","binding":"C"},{"commandId":"openDecks","binding":"K"},{"commandId":"openMatchArchive","binding":"M"}]}"#
+        r#"{"theme":"system","motion":"system","animationSpeed":"normal","boardScale":"normal","boardVisualMode":"3d","hotkeys":[{"commandId":"cursorNorthwest","binding":"Q"},{"commandId":"cursorNortheast","binding":"W"},{"commandId":"cursorEast","binding":"E"},{"commandId":"cursorWest","binding":"A"},{"commandId":"cursorSouthwest","binding":"S"},{"commandId":"cursorSoutheast","binding":"D"},{"commandId":"confirm","binding":"Enter"},{"commandId":"cancel","binding":"Escape"},{"commandId":"endTurn","binding":"T"},{"commandId":"passPriority","binding":"P"},{"commandId":"openCardInfo","binding":"I"},{"commandId":"openSettings","binding":","},{"commandId":"openCatalog","binding":"C"},{"commandId":"openDecks","binding":"K"},{"commandId":"openMatchArchive","binding":"M"}]}"#
     }
 
     fn custom_preferences_payload() -> &'static str {
-        r#"{"theme":"highContrast","motion":"reduced","animationSpeed":"fast","boardScale":"large","hotkeys":[{"commandId":"cursorNorthwest","binding":"U"},{"commandId":"cursorNortheast","binding":"O"},{"commandId":"cursorEast","binding":"L"},{"commandId":"cursorWest","binding":"J"},{"commandId":"cursorSouthwest","binding":"N"},{"commandId":"cursorSoutheast","binding":"B"},{"commandId":"confirm","binding":"Enter"},{"commandId":"cancel","binding":"Escape"},{"commandId":"endTurn","binding":"Y"},{"commandId":"passPriority","binding":"R"},{"commandId":"openCardInfo","binding":"F"},{"commandId":"openSettings","binding":","},{"commandId":"openCatalog","binding":"G"},{"commandId":"openDecks","binding":"H"},{"commandId":"openMatchArchive","binding":"V"}]}"#
+        r#"{"theme":"highContrast","motion":"reduced","animationSpeed":"fast","boardScale":"large","boardVisualMode":"2d","hotkeys":[{"commandId":"cursorNorthwest","binding":"U"},{"commandId":"cursorNortheast","binding":"O"},{"commandId":"cursorEast","binding":"L"},{"commandId":"cursorWest","binding":"J"},{"commandId":"cursorSouthwest","binding":"N"},{"commandId":"cursorSoutheast","binding":"B"},{"commandId":"confirm","binding":"Enter"},{"commandId":"cancel","binding":"Escape"},{"commandId":"endTurn","binding":"Y"},{"commandId":"passPriority","binding":"R"},{"commandId":"openCardInfo","binding":"F"},{"commandId":"openSettings","binding":","},{"commandId":"openCatalog","binding":"G"},{"commandId":"openDecks","binding":"H"},{"commandId":"openMatchArchive","binding":"V"}]}"#
     }
 
     #[tokio::test]
@@ -2455,6 +2455,7 @@ mod tests {
         assert_eq!(preferences["motion"], "system");
         assert_eq!(preferences["animationSpeed"], "normal");
         assert_eq!(preferences["boardScale"], "normal");
+        assert_eq!(preferences["boardVisualMode"], "3d");
         assert_eq!(preferences["updatedAt"], serde_json::Value::Null);
         assert_eq!(preferences["hotkeys"].as_array().unwrap().len(), 15);
         assert_eq!(preferences["hotkeys"][0]["commandId"], "cursorNorthwest");
@@ -2490,6 +2491,7 @@ mod tests {
         assert_eq!(updated["motion"], "reduced");
         assert_eq!(updated["animationSpeed"], "fast");
         assert_eq!(updated["boardScale"], "large");
+        assert_eq!(updated["boardVisualMode"], "2d");
         assert!(updated["updatedAt"].as_i64().is_some());
         assert_eq!(updated["hotkeys"][0]["commandId"], "cursorNorthwest");
         assert_eq!(updated["hotkeys"][0]["binding"], "U");
@@ -2509,6 +2511,7 @@ mod tests {
         assert_eq!(loaded["motion"], "reduced");
         assert_eq!(loaded["animationSpeed"], "fast");
         assert_eq!(loaded["boardScale"], "large");
+        assert_eq!(loaded["boardVisualMode"], "2d");
         assert_eq!(loaded["hotkeys"], updated["hotkeys"]);
 
         let _ = fs::remove_file(path);
@@ -2594,6 +2597,7 @@ mod tests {
         assert_eq!(preferences["motion"], "full");
         assert_eq!(preferences["animationSpeed"], "slow");
         assert_eq!(preferences["boardScale"], "compact");
+        assert_eq!(preferences["boardVisualMode"], "3d");
         assert_eq!(preferences["hotkeys"].as_array().unwrap().len(), 15);
         assert_eq!(preferences["hotkeys"][0]["commandId"], "cursorNorthwest");
         assert_eq!(preferences["hotkeys"][0]["binding"], "Q");
@@ -2651,13 +2655,110 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"theme":"sepia","motion":"system","animationSpeed":"normal","boardScale":"normal","hotkeys":[]}"#,
+                    r#"{"theme":"system","motion":"system","animationSpeed":"normal","boardScale":"normal","boardVisualMode":"cinematic","hotkeys":[]}"#,
                 ))
                 .expect("request should build"),
         )
         .await;
 
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn preferences_load_legacy_profile_board_visual_mode() {
+        let path = test_db_path("preferences-legacy-board-mode");
+        {
+            let _store = SqliteMatchStore::new(&path).expect("store should migrate");
+        }
+        {
+            let connection = rusqlite::Connection::open(&path).expect("db should reopen");
+            connection
+                .pragma_update(None, "foreign_keys", "ON")
+                .expect("foreign keys should enable");
+            connection
+                .execute(
+                    "
+                    INSERT INTO users (
+                        id,
+                        email,
+                        email_normalized,
+                        password_hash,
+                        display_name,
+                        avatar_symbol,
+                        avatar_color,
+                        preferred_wizard_type,
+                        board_visual_mode
+                    )
+                    VALUES (502, 'legacy-board@example.com', 'legacy-board@example.com', 'unused', 'Legacy', 'rune', 'sky', 'runekeeper', '2d')
+                    ",
+                    [],
+                )
+                .expect("user should seed");
+            connection
+                .execute(
+                    "
+                    INSERT INTO auth_sessions (token, user_id, expires_at)
+                    VALUES ('legacy-board-token', 502, unixepoch() + 3600)
+                    ",
+                    [],
+                )
+                .expect("session should seed");
+        }
+
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should reopen"));
+        let (status, preferences) = json_request(
+            app,
+            Request::builder()
+                .uri("/api/preferences")
+                .header("authorization", "Bearer legacy-board-token")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(preferences["boardVisualMode"], "2d");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn legacy_profile_board_visual_mode_updates_sync_preferences() {
+        let path = test_db_path("profile-board-mode-sync");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "profile-sync@example.com").await;
+
+        let (status, updated) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/profile")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"displayName":"Profile Sync","handle":"profile-sync","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"runekeeper","boardVisualMode":"2d"}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(updated["boardVisualMode"], "2d");
+
+        let (status, preferences) = json_request(
+            app,
+            Request::builder()
+                .uri("/api/preferences")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(preferences["boardVisualMode"], "2d");
 
         let _ = fs::remove_file(path);
     }
@@ -2670,23 +2771,23 @@ mod tests {
 
         for (payload, expected_message) in [
             (
-                r#"{"theme":"system","motion":"system","animationSpeed":"normal","boardScale":"normal","hotkeys":[{"commandId":"unknown","binding":"Z"}]}"#,
+                r#"{"theme":"system","motion":"system","animationSpeed":"normal","boardScale":"normal","boardVisualMode":"3d","hotkeys":[{"commandId":"unknown","binding":"Z"}]}"#,
                 "Unknown hotkey command",
             ),
             (
-                r#"{"theme":"system","motion":"system","animationSpeed":"normal","boardScale":"normal","hotkeys":[{"commandId":"cursorNorthwest","binding":""}]}"#,
+                r#"{"theme":"system","motion":"system","animationSpeed":"normal","boardScale":"normal","boardVisualMode":"3d","hotkeys":[{"commandId":"cursorNorthwest","binding":""}]}"#,
                 "Hotkey bindings cannot be empty.",
             ),
             (
-                r#"{"theme":"system","motion":"system","animationSpeed":"normal","boardScale":"normal","hotkeys":[{"commandId":"cursorNorthwest","binding":"Q"},{"commandId":"cursorNortheast","binding":"Q"},{"commandId":"cursorEast","binding":"E"},{"commandId":"cursorWest","binding":"A"},{"commandId":"cursorSouthwest","binding":"S"},{"commandId":"cursorSoutheast","binding":"D"},{"commandId":"confirm","binding":"Enter"},{"commandId":"cancel","binding":"Escape"},{"commandId":"endTurn","binding":"T"},{"commandId":"passPriority","binding":"P"},{"commandId":"openCardInfo","binding":"I"},{"commandId":"openSettings","binding":","},{"commandId":"openCatalog","binding":"C"},{"commandId":"openDecks","binding":"K"},{"commandId":"openMatchArchive","binding":"M"}]}"#,
+                r#"{"theme":"system","motion":"system","animationSpeed":"normal","boardScale":"normal","boardVisualMode":"3d","hotkeys":[{"commandId":"cursorNorthwest","binding":"Q"},{"commandId":"cursorNortheast","binding":"Q"},{"commandId":"cursorEast","binding":"E"},{"commandId":"cursorWest","binding":"A"},{"commandId":"cursorSouthwest","binding":"S"},{"commandId":"cursorSoutheast","binding":"D"},{"commandId":"confirm","binding":"Enter"},{"commandId":"cancel","binding":"Escape"},{"commandId":"endTurn","binding":"T"},{"commandId":"passPriority","binding":"P"},{"commandId":"openCardInfo","binding":"I"},{"commandId":"openSettings","binding":","},{"commandId":"openCatalog","binding":"C"},{"commandId":"openDecks","binding":"K"},{"commandId":"openMatchArchive","binding":"M"}]}"#,
                 "Duplicate hotkey binding",
             ),
             (
-                r#"{"theme":"system","motion":"system","animationSpeed":"normal","boardScale":"normal","hotkeys":[{"commandId":"cursorNorthwest","binding":"Shift+Q"},{"commandId":"cursorNortheast","binding":"W"},{"commandId":"cursorEast","binding":"E"},{"commandId":"cursorWest","binding":"A"},{"commandId":"cursorSouthwest","binding":"S"},{"commandId":"cursorSoutheast","binding":"D"},{"commandId":"confirm","binding":"Enter"},{"commandId":"cancel","binding":"Escape"},{"commandId":"endTurn","binding":"T"},{"commandId":"passPriority","binding":"P"},{"commandId":"openCardInfo","binding":"I"},{"commandId":"openSettings","binding":","},{"commandId":"openCatalog","binding":"C"},{"commandId":"openDecks","binding":"K"},{"commandId":"openMatchArchive","binding":"M"}]}"#,
+                r#"{"theme":"system","motion":"system","animationSpeed":"normal","boardScale":"normal","boardVisualMode":"3d","hotkeys":[{"commandId":"cursorNorthwest","binding":"Shift+Q"},{"commandId":"cursorNortheast","binding":"W"},{"commandId":"cursorEast","binding":"E"},{"commandId":"cursorWest","binding":"A"},{"commandId":"cursorSouthwest","binding":"S"},{"commandId":"cursorSoutheast","binding":"D"},{"commandId":"confirm","binding":"Enter"},{"commandId":"cancel","binding":"Escape"},{"commandId":"endTurn","binding":"T"},{"commandId":"passPriority","binding":"P"},{"commandId":"openCardInfo","binding":"I"},{"commandId":"openSettings","binding":","},{"commandId":"openCatalog","binding":"C"},{"commandId":"openDecks","binding":"K"},{"commandId":"openMatchArchive","binding":"M"}]}"#,
                 "Malformed hotkey binding",
             ),
             (
-                r#"{"theme":"system","motion":"system","animationSpeed":"normal","boardScale":"normal","hotkeys":[{"commandId":"cursorNorthwest","binding":"Escape"},{"commandId":"cursorNortheast","binding":"W"},{"commandId":"cursorEast","binding":"E"},{"commandId":"cursorWest","binding":"A"},{"commandId":"cursorSouthwest","binding":"S"},{"commandId":"cursorSoutheast","binding":"D"},{"commandId":"confirm","binding":"Enter"},{"commandId":"cancel","binding":"Q"},{"commandId":"endTurn","binding":"T"},{"commandId":"passPriority","binding":"P"},{"commandId":"openCardInfo","binding":"I"},{"commandId":"openSettings","binding":","},{"commandId":"openCatalog","binding":"C"},{"commandId":"openDecks","binding":"K"},{"commandId":"openMatchArchive","binding":"M"}]}"#,
+                r#"{"theme":"system","motion":"system","animationSpeed":"normal","boardScale":"normal","boardVisualMode":"3d","hotkeys":[{"commandId":"cursorNorthwest","binding":"Escape"},{"commandId":"cursorNortheast","binding":"W"},{"commandId":"cursorEast","binding":"E"},{"commandId":"cursorWest","binding":"A"},{"commandId":"cursorSouthwest","binding":"S"},{"commandId":"cursorSoutheast","binding":"D"},{"commandId":"confirm","binding":"Enter"},{"commandId":"cancel","binding":"Q"},{"commandId":"endTurn","binding":"T"},{"commandId":"passPriority","binding":"P"},{"commandId":"openCardInfo","binding":"I"},{"commandId":"openSettings","binding":","},{"commandId":"openCatalog","binding":"C"},{"commandId":"openDecks","binding":"K"},{"commandId":"openMatchArchive","binding":"M"}]}"#,
                 "reserved",
             ),
         ] {

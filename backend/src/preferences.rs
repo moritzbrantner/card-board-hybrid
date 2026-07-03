@@ -5,6 +5,8 @@ use std::fmt;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
+use crate::identity::BoardVisualMode;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PreferenceTheme {
@@ -52,6 +54,7 @@ pub struct AccountPreferences {
     pub motion: MotionPreference,
     pub animation_speed: AnimationSpeed,
     pub board_scale: BoardScale,
+    pub board_visual_mode: BoardVisualMode,
     pub hotkeys: Vec<HotkeyBinding>,
     pub updated_at: Option<i64>,
 }
@@ -63,6 +66,7 @@ pub struct UpdatePreferencesRequest {
     pub motion: MotionPreference,
     pub animation_speed: AnimationSpeed,
     pub board_scale: BoardScale,
+    pub board_visual_mode: BoardVisualMode,
     pub hotkeys: Vec<HotkeyBinding>,
 }
 
@@ -111,7 +115,7 @@ impl<'a> PreferencesModule<'a> {
             .connection
             .query_row(
                 "
-                SELECT theme, motion, animation_speed, board_scale, hotkeys_json, updated_at
+                SELECT theme, motion, animation_speed, board_scale, board_visual_mode, hotkeys_json, updated_at
                 FROM account_preferences
                 WHERE user_id = ?1
                 ",
@@ -122,15 +126,19 @@ impl<'a> PreferencesModule<'a> {
                         motion: row.get(1)?,
                         animation_speed: row.get(2)?,
                         board_scale: row.get(3)?,
-                        hotkeys_json: row.get(4)?,
-                        updated_at: row.get(5)?,
+                        board_visual_mode: row.get(4)?,
+                        hotkeys_json: row.get(5)?,
+                        updated_at: row.get(6)?,
                     })
                 },
             )
             .optional()?;
 
         let Some(stored) = stored else {
-            return Ok(default_preferences(None));
+            return Ok(default_preferences(
+                self.legacy_board_visual_mode_for_user(user_id)?,
+                None,
+            ));
         };
 
         let stored_hotkeys: Vec<HotkeyBinding> = serde_json::from_str(&stored.hotkeys_json)?;
@@ -139,6 +147,7 @@ impl<'a> PreferencesModule<'a> {
             motion: motion_from_db(&stored.motion),
             animation_speed: animation_speed_from_db(&stored.animation_speed),
             board_scale: board_scale_from_db(&stored.board_scale),
+            board_visual_mode: board_visual_mode_from_db(&stored.board_visual_mode),
             hotkeys: merge_hotkeys_with_defaults(stored_hotkeys),
             updated_at: Some(stored.updated_at),
         })
@@ -160,15 +169,17 @@ impl<'a> PreferencesModule<'a> {
                 motion,
                 animation_speed,
                 board_scale,
+                board_visual_mode,
                 hotkeys_json,
                 updated_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, unixepoch())
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, unixepoch())
             ON CONFLICT(user_id) DO UPDATE SET
                 theme = excluded.theme,
                 motion = excluded.motion,
                 animation_speed = excluded.animation_speed,
                 board_scale = excluded.board_scale,
+                board_visual_mode = excluded.board_visual_mode,
                 hotkeys_json = excluded.hotkeys_json,
                 updated_at = excluded.updated_at
             ",
@@ -178,11 +189,35 @@ impl<'a> PreferencesModule<'a> {
                 motion_to_db(&request.motion),
                 animation_speed_to_db(&request.animation_speed),
                 board_scale_to_db(&request.board_scale),
+                board_visual_mode_to_db(request.board_visual_mode),
                 hotkeys_json
             ],
         )?;
+        sync_legacy_board_visual_mode_for_user(
+            self.connection,
+            user_id,
+            request.board_visual_mode,
+        )?;
 
         self.load_for_user(user_id)
+    }
+
+    fn legacy_board_visual_mode_for_user(
+        &self,
+        user_id: i64,
+    ) -> Result<BoardVisualMode, PreferencesError> {
+        let stored: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT board_visual_mode FROM users WHERE id = ?1",
+                params![user_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(stored
+            .as_deref()
+            .map(board_visual_mode_from_db)
+            .unwrap_or(BoardVisualMode::ThreeD))
     }
 }
 
@@ -191,6 +226,7 @@ struct StoredPreferencesRow {
     motion: String,
     animation_speed: String,
     board_scale: String,
+    board_visual_mode: String,
     hotkeys_json: String,
     updated_at: i64,
 }
@@ -204,24 +240,84 @@ pub fn migrate(connection: &Connection) -> Result<(), PreferencesError> {
             motion TEXT NOT NULL DEFAULT 'system',
             animation_speed TEXT NOT NULL DEFAULT 'normal',
             board_scale TEXT NOT NULL DEFAULT 'normal',
+            board_visual_mode TEXT NOT NULL DEFAULT '3d',
             hotkeys_json TEXT NOT NULL DEFAULT '[]',
             updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
         ",
     )?;
+    add_column_if_missing(
+        connection,
+        "account_preferences",
+        "board_visual_mode",
+        "TEXT NOT NULL DEFAULT '3d'",
+    )?;
+    connection.execute(
+        "
+        UPDATE account_preferences
+        SET board_visual_mode = COALESCE((
+            SELECT CASE users.board_visual_mode
+                WHEN '2d' THEN '2d'
+                WHEN '3d' THEN '3d'
+                ELSE '3d'
+            END
+            FROM users
+            WHERE users.id = account_preferences.user_id
+        ), '3d')
+        ",
+        [],
+    )?;
     Ok(())
 }
 
-pub fn default_preferences(updated_at: Option<i64>) -> AccountPreferences {
+fn default_preferences(
+    board_visual_mode: BoardVisualMode,
+    updated_at: Option<i64>,
+) -> AccountPreferences {
     AccountPreferences {
         theme: PreferenceTheme::System,
         motion: MotionPreference::System,
         animation_speed: AnimationSpeed::Normal,
         board_scale: BoardScale::Normal,
+        board_visual_mode,
         hotkeys: default_hotkeys(),
         updated_at,
     }
+}
+
+pub fn sync_board_visual_mode_for_user(
+    connection: &Connection,
+    user_id: i64,
+    board_visual_mode: BoardVisualMode,
+) -> Result<(), PreferencesError> {
+    connection.execute(
+        "
+        INSERT INTO account_preferences (
+            user_id,
+            board_visual_mode,
+            updated_at
+        )
+        VALUES (?1, ?2, unixepoch())
+        ON CONFLICT(user_id) DO UPDATE SET
+            board_visual_mode = excluded.board_visual_mode,
+            updated_at = excluded.updated_at
+        ",
+        params![user_id, board_visual_mode_to_db(board_visual_mode)],
+    )?;
+    Ok(())
+}
+
+pub fn sync_legacy_board_visual_mode_for_user(
+    connection: &Connection,
+    user_id: i64,
+    board_visual_mode: BoardVisualMode,
+) -> Result<(), PreferencesError> {
+    connection.execute(
+        "UPDATE users SET board_visual_mode = ?2 WHERE id = ?1",
+        params![user_id, board_visual_mode_to_db(board_visual_mode)],
+    )?;
+    Ok(())
 }
 
 fn default_hotkeys() -> Vec<HotkeyBinding> {
@@ -480,4 +576,39 @@ fn board_scale_from_db(value: &str) -> BoardScale {
         "large" => BoardScale::Large,
         _ => BoardScale::Normal,
     }
+}
+
+fn board_visual_mode_to_db(mode: BoardVisualMode) -> &'static str {
+    match mode {
+        BoardVisualMode::TwoD => "2d",
+        BoardVisualMode::ThreeD => "3d",
+    }
+}
+
+fn board_visual_mode_from_db(value: &str) -> BoardVisualMode {
+    match value {
+        "2d" => BoardVisualMode::TwoD,
+        _ => BoardVisualMode::ThreeD,
+    }
+}
+
+fn add_column_if_missing(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), PreferencesError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for existing in columns {
+        if existing? == column {
+            return Ok(());
+        }
+    }
+
+    connection.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+        [],
+    )?;
+    Ok(())
 }
