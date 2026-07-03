@@ -141,6 +141,16 @@ export type DeckListResponse = {
   decks: DeckRecipeSummary[];
 };
 
+export type PublicDeckRecipeResponse = {
+  owner: {
+    id: number;
+    handle: string;
+    displayName: string;
+    avatar: GeneratedAvatar;
+  };
+  deck: DeckRecipeSummary;
+};
+
 export type SystemDeckRecipe = {
   id: string;
   name: string;
@@ -180,6 +190,7 @@ export type SoloAiOpponentSelection =
 
 export type AuthUser = {
   id: number;
+  handle: string;
   email: string;
   displayName: string;
   avatar: GeneratedAvatar;

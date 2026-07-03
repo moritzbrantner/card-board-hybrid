@@ -1,5 +1,6 @@
 import {
   Copy,
+  ExternalLink,
   House,
   Minus,
   Plus,
@@ -43,10 +44,11 @@ import {
   filterCatalogCards,
   manaCostFilterLabel,
   selectedCatalogCard,
-  selectedDeckCardRows,
+  deckVisualCards,
   type DeckCatalogFilters,
   type ManaCostFilter,
 } from "./decks/deckDesignerModel";
+import { DeckVisualCardGrid } from "./decks/DeckVisualCardGrid";
 
 export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { currentUser: AuthUser }) {
   const [deckLoadState, setDeckLoadState] = useState<DeckLoadState>({ status: "loading" });
@@ -131,8 +133,8 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
     [catalogCards, catalogFilters],
   );
   const deckCardRows = useMemo(
-    () => selectedDeckCardRows(catalogCards, cardCounts, rules),
-    [catalogCards, cardCounts, rules],
+    () => deckVisualCards(catalogCards, localCards, rules),
+    [catalogCards, localCards, rules],
   );
   const selectedCard = useMemo(
     () => selectedCatalogCard(catalogCards, selectedCardTemplateId),
@@ -446,6 +448,16 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
               <Save size={18} />
               Save
             </button>
+            {selectedDeckId ? (
+              <button
+                className="secondary-link deck-public-link"
+                type="button"
+                onClick={() => onNavigate(`/@${currentUser.handle}/decks/${selectedDeckId}`)}
+              >
+                <ExternalLink size={18} />
+                ID #{selectedDeckId}
+              </button>
+            ) : null}
             <button className="secondary-link" type="button" onClick={() => void handleDuplicate()} disabled={busy || !selectedDeckId}>
               <Copy size={18} />
               Duplicate
@@ -466,46 +478,13 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
             <span>{stats.totalCards}/{stats.minCards}</span>
           </div>
 
-          <div className="picked-card-list">
-            {deckCardRows.length === 0 ? (
-              <div className="deck-empty-state">
-                <WandSparkles size={22} />
-                <strong>No Cards picked</strong>
-                <span>Add Cards from the catalog to build this Deck recipe.</span>
-              </div>
-            ) : (
-              deckCardRows.map((row) => (
-                <div
-                  key={row.card.id}
-                  className={`picked-card-row ${row.card.rarity} ${
-                    selectedCardTemplateId === row.card.templateId ? "selected" : ""
-                  }`}
-                >
-                  <button
-                    type="button"
-                    className="deck-row-select"
-                    onClick={() => setSelectedCardTemplateId(row.card.templateId)}
-                    aria-label={`Select ${row.card.name}`}
-                  >
-                    <span>
-                      <strong>{row.card.name}</strong>
-                      <small>
-                        {rarityLabel(row.card.rarity)} · {row.card.cost} mana · {row.kindLabel} · {row.kindDetail}
-                      </small>
-                    </span>
-                  </button>
-                  <p>{row.card.text}</p>
-                  <DeckCountControls
-                    card={row.card}
-                    count={row.count}
-                    copyLimitReached={row.copyLimitReached}
-                    busy={busy}
-                    onAdjust={adjustCount}
-                  />
-                </div>
-              ))
-            )}
-          </div>
+          <DeckVisualCardGrid
+            cards={deckCardRows}
+            selectedTemplateId={selectedCardTemplateId}
+            busy={busy}
+            onSelect={setSelectedCardTemplateId}
+            onAdjust={adjustCount}
+          />
         </section>
 
         <aside className="deck-details-panel" aria-label="Deck details">

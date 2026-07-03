@@ -159,6 +159,14 @@ impl<'a> DeckLibrary<'a> {
         self.load_user_deck(user_id, deck_id)
     }
 
+    pub fn load_public_for_user(
+        &self,
+        user_id: i64,
+        deck_id: i64,
+    ) -> Result<Option<DeckRecipeSummary>, DeckLibraryError> {
+        self.load_user_deck(user_id, deck_id)
+    }
+
     pub fn create_for_user(
         &mut self,
         user_id: i64,

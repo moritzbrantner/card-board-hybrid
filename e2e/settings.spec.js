@@ -220,6 +220,7 @@ async function mockSettingsApi(page, handlers = {}) {
 function authUser() {
   return {
     id: 1,
+    handle: "rune-player",
     email: "player@local.dev",
     displayName: "Rune Player",
     avatar: { symbol: "sparkles", color: "emerald" },

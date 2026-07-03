@@ -22,9 +22,11 @@ test("signed-in players build a Deck recipe from the catalog sidebar", async ({ 
   const editor = page.getByLabel("Deck editor");
   const details = page.getByLabel("Deck details");
 
+  await expect(editor.getByRole("button", { name: "ID #10" })).toBeVisible();
   await expect(details.getByRole("heading", { name: "Draft deck" })).toBeVisible();
   await expect(details.getByText("Select a Card")).toBeVisible();
   await expect(editor.getByText("Ember Squire")).toBeVisible();
+  await expect(editor.locator('img[src="/card-art/ember-squire.svg"]')).toBeVisible();
   await expect(editor.getByText("Starfire Bolt")).toHaveCount(0);
 
   await catalog.getByPlaceholder("Search cards").fill("damage");
@@ -59,6 +61,25 @@ test("signed-in players build a Deck recipe from the catalog sidebar", async ({ 
     wizardType: "runekeeper",
     runeIds: [],
   });
+
+  await editor.getByRole("button", { name: "ID #10" }).click();
+  await expect(page).toHaveURL(/\/@rune-player\/decks\/10$/);
+  await expect(page.getByRole("heading", { name: "Arcane Draft" })).toBeVisible();
+  await expect(page.getByLabel("Deck cards").locator('img[src="/card-art/starfire-bolt.svg"]')).toBeVisible();
+});
+
+test("signed-out players can open a public read-only Deck recipe URL", async ({ page }) => {
+  await page.addInitScript((authKey) => {
+    localStorage.removeItem(authKey);
+  }, AUTH_TOKEN_STORAGE_KEY);
+  await mockDeckDesignerApi(page, []);
+
+  await page.goto("/@rune-player/decks/10");
+
+  await expect(page.getByRole("heading", { name: "Arcane Draft" })).toBeVisible();
+  await expect(page.getByText("Shared by @rune-player")).toBeVisible();
+  await expect(page.getByLabel("Deck cards").locator('img[src="/card-art/ember-squire.svg"]')).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
 });
 
 async function mockDeckDesignerApi(page, savedRequests) {
@@ -113,6 +134,28 @@ async function mockDeckDesignerApi(page, savedRequests) {
 
     if (url.pathname === "/api/decks" && request.method() === "GET") {
       await route.fulfill({ json: { rules: deckRules(), decks: accountDecks } });
+      return;
+    }
+
+    const publicDeckMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/decks\/(\d+)$/);
+    if (publicDeckMatch && request.method() === "GET") {
+      const [, handle, deckId] = publicDeckMatch;
+      const deck = accountDecks.find((candidate) => candidate.id === Number(deckId));
+      if (handle !== "rune-player" || !deck) {
+        await route.fulfill({ status: 404, json: { message: "Deck recipe was not found." } });
+        return;
+      }
+      await route.fulfill({
+        json: {
+          owner: {
+            id: 1,
+            handle: "rune-player",
+            displayName: "Rune Player",
+            avatar: { symbol: "spark", color: "emerald" },
+          },
+          deck,
+        },
+      });
       return;
     }
 
@@ -192,6 +235,7 @@ function legalityFor(cards) {
 function authUser() {
   return {
     id: 1,
+    handle: "rune-player",
     email: "player@local.dev",
     displayName: "Rune Player",
     avatar: { symbol: "spark", color: "emerald" },

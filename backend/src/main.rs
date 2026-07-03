@@ -28,7 +28,7 @@ use deck_recipe_legality::DeckLegalityPreviewRequest;
 use futures_util::StreamExt;
 use identity::{
     AccountProfile, BoardVisualMode, CreatedAuthSession, GeneratedAvatar, IdentityError,
-    IdentityModule,
+    IdentityModule, PublicAccountProfile,
 };
 use match_access::{Actor, MatchAccess};
 use match_session::{
@@ -94,6 +94,7 @@ struct AuthRequest {
 #[serde(rename_all = "camelCase")]
 struct AuthUserResponse {
     id: i64,
+    handle: String,
     email: String,
     display_name: String,
     avatar: GeneratedAvatarResponse,
@@ -122,10 +123,27 @@ struct GeneratedAvatarResponse {
     color: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PublicDeckOwnerResponse {
+    id: i64,
+    handle: String,
+    display_name: String,
+    avatar: GeneratedAvatarResponse,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PublicDeckRecipeResponse {
+    owner: PublicDeckOwnerResponse,
+    deck: deck_library::DeckRecipeSummary,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateProfileRequest {
     display_name: String,
+    handle: String,
     avatar: GeneratedAvatarRequest,
     #[serde(default)]
     preferred_wizard_type: Option<WizardType>,
@@ -335,6 +353,7 @@ fn create_app(store: SqliteMatchStore) -> Router {
         .route("/api/health", get(health))
         .route("/api/catalog/cards", get(catalog_cards))
         .route("/api/system-decks", get(system_decks))
+        .route("/api/users/{handle}/decks/{deck_id}", get(load_public_deck))
         .route("/api/decks", get(list_decks).post(create_deck))
         .route("/api/decks/legality-preview", post(preview_deck_legality))
         .route(
@@ -491,6 +510,38 @@ async fn load_deck(
         }
     };
     Json(deck).into_response()
+}
+
+async fn load_public_deck(
+    State(state): State<SharedState>,
+    Path((handle, deck_id)): Path<(String, i64)>,
+) -> impl IntoResponse {
+    let response = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let owner = {
+            let identity = IdentityModule::new(store.connection_mut());
+            match identity.public_profile_by_handle(&handle) {
+                Ok(Some(owner)) => owner,
+                Ok(None) => return deck_not_found_response(),
+                Err(error) => return identity_error_response(error),
+            }
+        };
+        let decks = DeckLibrary::new(store.connection_mut());
+        let deck = match decks.load_public_for_user(owner.id, deck_id) {
+            Ok(Some(deck)) => deck,
+            Ok(None) => return deck_not_found_response(),
+            Err(error) => return deck_error_response(error),
+        };
+        PublicDeckRecipeResponse {
+            owner: PublicDeckOwnerResponse::from(owner),
+            deck,
+        }
+    };
+
+    Json(response).into_response()
 }
 
 async fn update_deck(
@@ -700,6 +751,7 @@ async fn update_profile(
         let mut identity = IdentityModule::new(store.connection_mut());
         match identity.update_profile(
             profile.id,
+            &request.handle,
             display_name,
             GeneratedAvatar {
                 symbol: request.avatar.symbol,
@@ -1657,8 +1709,14 @@ fn progression_error_response(error: ProgressionError) -> axum::response::Respon
 }
 
 fn identity_error_response(error: IdentityError) -> axum::response::Response {
+    let status = match error {
+        IdentityError::Validation(_) => StatusCode::BAD_REQUEST,
+        IdentityError::Sqlite(_) | IdentityError::PasswordHash(_) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    };
     (
-        StatusCode::INTERNAL_SERVER_ERROR,
+        status,
         Json(ApiError {
             message: error.to_string(),
         }),
@@ -2000,6 +2058,7 @@ impl From<AccountProfile> for AuthUserResponse {
     fn from(profile: AccountProfile) -> Self {
         Self {
             id: profile.id,
+            handle: profile.public_handle,
             email: profile.email,
             display_name: profile.display_name,
             avatar: GeneratedAvatarResponse {
@@ -2009,6 +2068,20 @@ impl From<AccountProfile> for AuthUserResponse {
             preferred_wizard_type: profile.preferred_wizard_type,
             board_visual_mode: profile.board_visual_mode,
             progression_summary: progression::summary_for_xp(profile.total_xp),
+        }
+    }
+}
+
+impl From<PublicAccountProfile> for PublicDeckOwnerResponse {
+    fn from(profile: PublicAccountProfile) -> Self {
+        Self {
+            id: profile.id,
+            handle: profile.public_handle,
+            display_name: profile.display_name,
+            avatar: GeneratedAvatarResponse {
+                symbol: profile.avatar.symbol,
+                color: profile.avatar.color,
+            },
         }
     }
 }
@@ -2268,6 +2341,7 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(current_user["email"], "player@example.com");
+        assert_eq!(current_user["handle"], "player");
         assert_eq!(current_user["displayName"], "player");
         assert!(current_user["avatar"]["symbol"].as_str().is_some());
         assert!(current_user["avatar"]["color"].as_str().is_some());
@@ -2449,6 +2523,57 @@ mod tests {
         assert_eq!(draft["wizardType"], "runekeeper");
         assert_eq!(draft["runeIds"].as_array().unwrap().len(), 0);
         assert_eq!(draft["legality"]["legal"], false);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn public_deck_url_returns_owner_and_deck_without_auth_or_email() {
+        let path = test_db_path("decks-public-read");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let owner_token = register_test_account(app.clone(), "public-owner@example.com").await;
+        let _other_token = register_test_account(app.clone(), "other-owner@example.com").await;
+
+        let (status, deck) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/decks")
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"name":"Public Draft","cards":[{"templateId":"ember-squire","count":1}]}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let deck_id = deck["id"].as_i64().expect("deck id should exist");
+
+        let (status, public_deck) = json_request(
+            app.clone(),
+            Request::builder()
+                .uri(format!("/api/users/public-owner/decks/{deck_id}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(public_deck["owner"]["handle"], "public-owner");
+        assert_eq!(public_deck["owner"]["displayName"], "public-owner");
+        assert!(public_deck["owner"].get("email").is_none());
+        assert_eq!(public_deck["deck"]["id"], deck_id);
+        assert_eq!(public_deck["deck"]["name"], "Public Draft");
+
+        let (status, _body) = json_request(
+            app,
+            Request::builder()
+                .uri(format!("/api/users/other-owner/decks/{deck_id}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
 
         let _ = fs::remove_file(path);
     }
@@ -2655,13 +2780,14 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"displayName":"Rune Pilot","avatar":{"symbol":"shield","color":"indigo"},"preferredWizardType":"chronomancer","boardVisualMode":"2d"}"#,
+                    r#"{"displayName":"Rune Pilot","handle":"rune-pilot","avatar":{"symbol":"shield","color":"indigo"},"preferredWizardType":"chronomancer","boardVisualMode":"2d"}"#,
                 ))
                 .expect("request should build"),
         )
         .await;
 
         assert_eq!(status, StatusCode::OK);
+        assert_eq!(updated["handle"], "rune-pilot");
         assert_eq!(updated["displayName"], "Rune Pilot");
         assert_eq!(updated["avatar"]["symbol"], "shield");
         assert_eq!(updated["avatar"]["color"], "indigo");
@@ -2679,11 +2805,59 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::OK);
+        assert_eq!(loaded["handle"], "rune-pilot");
         assert_eq!(loaded["displayName"], "Rune Pilot");
         assert_eq!(loaded["avatar"]["symbol"], "shield");
         assert_eq!(loaded["avatar"]["color"], "indigo");
         assert_eq!(loaded["preferredWizardType"], "chronomancer");
         assert_eq!(loaded["boardVisualMode"], "2d");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn profile_rejects_invalid_or_duplicate_public_handles() {
+        let path = test_db_path("profile-handle-validation");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let first_token = register_test_account(app.clone(), "first@example.com").await;
+        let second_token = register_test_account(app.clone(), "second@example.com").await;
+
+        let (status, body) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/profile")
+                .header("authorization", format!("Bearer {first_token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"displayName":"First","handle":"no","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"runekeeper","boardVisualMode":"3d"}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            body["message"]
+                .as_str()
+                .expect("message should be a string")
+                .contains("Public handle")
+        );
+
+        let (status, body) = json_request(
+            app,
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/profile")
+                .header("authorization", format!("Bearer {second_token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"displayName":"Second","handle":"first","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"runekeeper","boardVisualMode":"3d"}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["message"], "Public handle is already taken.");
 
         let _ = fs::remove_file(path);
     }
@@ -3169,8 +3343,16 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("migrated user should load");
+        let public_handle: String = connection
+            .query_row(
+                "SELECT public_handle FROM users WHERE email_normalized = 'migrated@example.com'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("migrated public handle should load");
 
         assert_eq!(board_visual_mode, "3d");
+        assert_eq!(public_handle, "migrated");
 
         let _ = fs::remove_file(path);
     }
@@ -3189,7 +3371,7 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"displayName":"Avatar","avatar":{"symbol":"dragon","color":"void"},"preferredWizardType":"runekeeper"}"#,
+                    r#"{"displayName":"Avatar","handle":"avatar","avatar":{"symbol":"dragon","color":"void"},"preferredWizardType":"runekeeper"}"#,
                 ))
                 .expect("request should build"),
         )
@@ -3215,7 +3397,7 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"displayName":"Avatar","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"stormcaller"}"#,
+                    r#"{"displayName":"Avatar","handle":"avatar","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"stormcaller"}"#,
                 ))
                 .expect("request should build"),
         )
@@ -3240,7 +3422,7 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"displayName":"Avatar","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"runekeeper","boardVisualMode":"cinematic"}"#,
+                    r#"{"displayName":"Avatar","handle":"avatar","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"runekeeper","boardVisualMode":"cinematic"}"#,
                 ))
                 .expect("request should build"),
         )

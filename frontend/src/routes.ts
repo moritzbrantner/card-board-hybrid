@@ -69,3 +69,16 @@ export function sharedMatchRouteFromPath(path: string) {
       }
     : null;
 }
+
+export function publicDeckRouteFromPath(path: string) {
+  const normalized = path.replace(/\/+$/, "");
+  const match = normalized.match(/^\/@([^/]+)\/decks\/(\d+)$/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    handle: decodeURIComponent(match[1]),
+    deckId: Number(match[2]),
+  };
+}

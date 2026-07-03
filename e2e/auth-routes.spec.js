@@ -233,6 +233,7 @@ for (const { path, heading } of [
   { path: "/", heading: "Choose Your Loadout" },
   { path: "/catalog", heading: "Card Catalog" },
   { path: "/settings", heading: "Settings" },
+  { path: "/@rune-player/decks/10", heading: "Arcane Draft" },
 ]) {
   test(`signed-out players can open public route ${path}`, async ({ page }) => {
     await mockAuthApi(page);
@@ -336,6 +337,38 @@ async function mockAuthApi(page, authRequests = []) {
       return;
     }
 
+    if (url.pathname === "/api/users/rune-player/decks/10") {
+      await route.fulfill({
+        json: {
+          owner: {
+            id: 1,
+            handle: "rune-player",
+            displayName: "Rune Player",
+            avatar: { symbol: "spark", color: "emerald" },
+          },
+          deck: {
+            id: 10,
+            name: "Arcane Draft",
+            isDefault: false,
+            wizardType: "runekeeper",
+            runeIds: [],
+            cards: [],
+            legality: {
+              legal: false,
+              totalCards: 0,
+              basicCards: 0,
+              advancedCards: 0,
+              rareCards: 0,
+              messages: ["Deck recipe needs at least 30 cards."],
+            },
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        },
+      });
+      return;
+    }
+
     if (url.pathname === "/api/decks") {
       await route.fulfill({ json: { rules: deckRules(), decks: [] } });
       return;
@@ -377,6 +410,7 @@ function authSession(email) {
 function authUser(email) {
   return {
     id: 1,
+    handle: "rune-player",
     email,
     displayName: "Rune Player",
     avatar: { symbol: "spark", color: "emerald" },

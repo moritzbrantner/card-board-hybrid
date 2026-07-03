@@ -19,6 +19,7 @@ const EXPERIENCED_LOCAL_USER_ID: i64 = 10_000;
 #[derive(Clone, Debug)]
 pub struct AccountProfile {
     pub id: i64,
+    pub public_handle: String,
     pub email: String,
     pub display_name: String,
     pub avatar: GeneratedAvatar,
@@ -31,6 +32,14 @@ pub struct AccountProfile {
 pub struct GeneratedAvatar {
     pub symbol: String,
     pub color: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct PublicAccountProfile {
+    pub id: i64,
+    pub public_handle: String,
+    pub display_name: String,
+    pub avatar: GeneratedAvatar,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -60,6 +69,7 @@ type LoginProfileRow = (
     String,
     String,
     String,
+    String,
     i64,
 );
 
@@ -67,6 +77,7 @@ type LoginProfileRow = (
 pub enum IdentityError {
     Sqlite(rusqlite::Error),
     PasswordHash(argon2::password_hash::Error),
+    Validation(String),
 }
 
 impl fmt::Display for IdentityError {
@@ -76,6 +87,7 @@ impl fmt::Display for IdentityError {
             Self::PasswordHash(error) => {
                 write!(f, "could not process password credentials: {error}")
             }
+            Self::Validation(message) => write!(f, "{message}"),
         }
     }
 }
@@ -138,6 +150,14 @@ impl<'a> IdentityModule<'a> {
             return Ok(None);
         }
 
+        let user_id = self.connection.last_insert_rowid();
+        let display_name = default_display_name(email);
+        let public_handle = unique_public_handle(self.connection, user_id, &display_name)?;
+        self.connection.execute(
+            "UPDATE users SET public_handle = ?2 WHERE id = ?1",
+            params![user_id, public_handle],
+        )?;
+
         let profile = self
             .load_profile_by_normalized_email(normalized_email)?
             .expect("newly inserted account should load");
@@ -153,7 +173,7 @@ impl<'a> IdentityModule<'a> {
             .connection
             .query_row(
                 "
-                SELECT id, email, password_hash, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode, total_xp
+                SELECT id, public_handle, email, password_hash, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode, total_xp
                 FROM users
                 WHERE email_normalized = ?1
                 ",
@@ -169,6 +189,7 @@ impl<'a> IdentityModule<'a> {
                         row.get(6)?,
                         row.get(7)?,
                         row.get(8)?,
+                        row.get(9)?,
                     ))
                 },
             )
@@ -176,6 +197,7 @@ impl<'a> IdentityModule<'a> {
 
         let Some((
             id,
+            public_handle,
             email,
             password_hash,
             display_name,
@@ -195,6 +217,7 @@ impl<'a> IdentityModule<'a> {
 
         self.create_session(AccountProfile {
             id,
+            public_handle,
             email,
             display_name,
             avatar: GeneratedAvatar {
@@ -215,7 +238,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT users.id, users.email, users.display_name, users.avatar_symbol, users.avatar_color, users.preferred_wizard_type, users.board_visual_mode, users.total_xp
+                SELECT users.id, users.public_handle, users.email, users.display_name, users.avatar_symbol, users.avatar_color, users.preferred_wizard_type, users.board_visual_mode, users.total_xp
                 FROM auth_sessions
                 JOIN users ON users.id = auth_sessions.user_id
                 WHERE auth_sessions.token = ?1
@@ -225,15 +248,16 @@ impl<'a> IdentityModule<'a> {
                 |row| {
                     Ok(AccountProfile {
                         id: row.get(0)?,
-                        email: row.get(1)?,
-                        display_name: row.get(2)?,
+                        public_handle: row.get(1)?,
+                        email: row.get(2)?,
+                        display_name: row.get(3)?,
                         avatar: GeneratedAvatar {
-                            symbol: row.get(3)?,
-                            color: row.get(4)?,
+                            symbol: row.get(4)?,
+                            color: row.get(5)?,
                         },
-                        preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(5)?),
-                        board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(6)?),
-                        total_xp: row.get(7)?,
+                        preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(6)?),
+                        board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(7)?),
+                        total_xp: row.get(8)?,
                     })
                 },
             )
@@ -244,23 +268,32 @@ impl<'a> IdentityModule<'a> {
     pub fn update_profile(
         &mut self,
         user_id: i64,
+        public_handle: &str,
         display_name: &str,
         avatar: GeneratedAvatar,
         preferred_wizard_type: WizardType,
         board_visual_mode: BoardVisualMode,
     ) -> Result<Option<AccountProfile>, IdentityError> {
+        let public_handle = normalize_requested_public_handle(public_handle)?;
+        if public_handle_is_taken(self.connection, user_id, &public_handle)? {
+            return Err(IdentityError::Validation(
+                "Public handle is already taken.".to_string(),
+            ));
+        }
         self.connection.execute(
             "
             UPDATE users
-            SET display_name = ?2,
-                avatar_symbol = ?3,
-                avatar_color = ?4,
-                preferred_wizard_type = ?5,
-                board_visual_mode = ?6
+            SET public_handle = ?2,
+                display_name = ?3,
+                avatar_symbol = ?4,
+                avatar_color = ?5,
+                preferred_wizard_type = ?6,
+                board_visual_mode = ?7
             WHERE id = ?1
             ",
             params![
                 user_id,
+                public_handle,
                 display_name,
                 avatar.symbol,
                 avatar.color,
@@ -271,6 +304,34 @@ impl<'a> IdentityModule<'a> {
         preferences::sync_board_visual_mode_for_user(self.connection, user_id, board_visual_mode)
             .map_err(preferences_error_to_identity_error)?;
         self.load_profile_by_id(user_id)
+    }
+
+    pub fn public_profile_by_handle(
+        &self,
+        public_handle: &str,
+    ) -> Result<Option<PublicAccountProfile>, IdentityError> {
+        self.connection
+            .query_row(
+                "
+                SELECT id, public_handle, display_name, avatar_symbol, avatar_color
+                FROM users
+                WHERE public_handle = ?1
+                ",
+                params![public_handle],
+                |row| {
+                    Ok(PublicAccountProfile {
+                        id: row.get(0)?,
+                        public_handle: row.get(1)?,
+                        display_name: row.get(2)?,
+                        avatar: GeneratedAvatar {
+                            symbol: row.get(3)?,
+                            color: row.get(4)?,
+                        },
+                    })
+                },
+            )
+            .optional()
+            .map_err(IdentityError::from)
     }
 
     pub fn logout(&mut self, session_token: &str) -> Result<(), IdentityError> {
@@ -309,7 +370,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT id, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode, total_xp
+                SELECT id, public_handle, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode, total_xp
                 FROM users
                 WHERE email_normalized = ?1
                 ",
@@ -317,15 +378,16 @@ impl<'a> IdentityModule<'a> {
                 |row| {
                     Ok(AccountProfile {
                         id: row.get(0)?,
-                        email: row.get(1)?,
-                        display_name: row.get(2)?,
+                        public_handle: row.get(1)?,
+                        email: row.get(2)?,
+                        display_name: row.get(3)?,
                         avatar: GeneratedAvatar {
-                            symbol: row.get(3)?,
-                            color: row.get(4)?,
+                            symbol: row.get(4)?,
+                            color: row.get(5)?,
                         },
-                        preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(5)?),
-                        board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(6)?),
-                        total_xp: row.get(7)?,
+                        preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(6)?),
+                        board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(7)?),
+                        total_xp: row.get(8)?,
                     })
                 },
             )
@@ -337,7 +399,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT id, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode, total_xp
+                SELECT id, public_handle, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode, total_xp
                 FROM users
                 WHERE id = ?1
                 ",
@@ -345,15 +407,16 @@ impl<'a> IdentityModule<'a> {
                 |row| {
                     Ok(AccountProfile {
                         id: row.get(0)?,
-                        email: row.get(1)?,
-                        display_name: row.get(2)?,
+                        public_handle: row.get(1)?,
+                        email: row.get(2)?,
+                        display_name: row.get(3)?,
                         avatar: GeneratedAvatar {
-                            symbol: row.get(3)?,
-                            color: row.get(4)?,
+                            symbol: row.get(4)?,
+                            color: row.get(5)?,
                         },
-                        preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(5)?),
-                        board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(6)?),
-                        total_xp: row.get(7)?,
+                        preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(6)?),
+                        board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(7)?),
+                        total_xp: row.get(8)?,
                     })
                 },
             )
@@ -369,6 +432,7 @@ pub fn migrate(connection: &Connection) -> Result<(), IdentityError> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT NOT NULL,
             email_normalized TEXT NOT NULL UNIQUE,
+            public_handle TEXT UNIQUE,
             password_hash TEXT NOT NULL,
             display_name TEXT NOT NULL DEFAULT '',
             avatar_symbol TEXT NOT NULL DEFAULT 'sparkles',
@@ -389,6 +453,7 @@ pub fn migrate(connection: &Connection) -> Result<(), IdentityError> {
             ON auth_sessions(user_id);
         ",
     )?;
+    add_column_if_missing(connection, "users", "public_handle", "TEXT")?;
     add_column_if_missing(
         connection,
         "users",
@@ -432,6 +497,11 @@ pub fn migrate(connection: &Connection) -> Result<(), IdentityError> {
         WHERE display_name = ''
             AND instr(email, '@') > 1
         ",
+        [],
+    )?;
+    backfill_public_handles(connection)?;
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS users_public_handle_idx ON users(public_handle)",
         [],
     )?;
     preferences::migrate(connection).map_err(preferences_error_to_identity_error)?;
@@ -480,13 +550,20 @@ pub fn seed_experienced_local_account(connection: &Connection) -> Result<i64, Id
         ],
     )?;
 
-    connection
+    let user_id = connection
         .query_row(
             "SELECT id FROM users WHERE email_normalized = ?1",
             params![EXPERIENCED_LOCAL_EMAIL],
             |row| row.get(0),
         )
-        .map_err(IdentityError::from)
+        .map_err(IdentityError::from)?;
+    let public_handle = unique_public_handle(connection, user_id, "Experienced")?;
+    connection.execute(
+        "UPDATE users SET public_handle = ?2 WHERE id = ?1",
+        params![user_id, public_handle],
+    )?;
+
+    Ok(user_id)
 }
 
 pub fn normalized_email(email: &str) -> Option<(String, String)> {
@@ -504,6 +581,148 @@ fn default_display_name(email: &str) -> String {
         "Player".to_string()
     } else {
         name.to_string()
+    }
+}
+
+fn backfill_public_handles(connection: &Connection) -> Result<(), IdentityError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT id, display_name, email
+        FROM users
+        WHERE public_handle IS NULL OR public_handle = ''
+        ORDER BY id ASC
+        ",
+    )?;
+    let users = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(statement);
+
+    for (user_id, display_name, email) in users {
+        let seed = if display_name.trim().is_empty() {
+            default_display_name(&email)
+        } else {
+            display_name
+        };
+        let public_handle = unique_public_handle(connection, user_id, &seed)?;
+        connection.execute(
+            "UPDATE users SET public_handle = ?2 WHERE id = ?1",
+            params![user_id, public_handle],
+        )?;
+    }
+
+    Ok(())
+}
+
+fn unique_public_handle(
+    connection: &Connection,
+    user_id: i64,
+    seed: &str,
+) -> Result<String, IdentityError> {
+    let base = generated_public_handle(seed, user_id);
+    if !public_handle_is_taken(connection, user_id, &base)? {
+        return Ok(base);
+    }
+
+    for attempt in 0..100 {
+        let suffix = if attempt == 0 {
+            format!("-{user_id}")
+        } else {
+            format!("-{user_id}-{attempt}")
+        };
+        let prefix_len = 24usize.saturating_sub(suffix.len());
+        let mut prefix = base.chars().take(prefix_len).collect::<String>();
+        prefix = prefix.trim_matches('-').to_string();
+        let candidate = format!("{prefix}{suffix}");
+        if !public_handle_is_taken(connection, user_id, &candidate)? {
+            return Ok(candidate);
+        }
+    }
+
+    Err(IdentityError::Validation(
+        "Could not generate a unique public handle.".to_string(),
+    ))
+}
+
+fn generated_public_handle(seed: &str, user_id: i64) -> String {
+    let mut handle = slugify_public_handle(seed);
+    if handle.len() < 3 {
+        handle = slugify_public_handle(&format!("{handle}-{user_id}"));
+    }
+    if handle.len() < 3 {
+        handle = format!("user-{user_id}");
+    }
+    trim_public_handle_length(&handle)
+}
+
+fn normalize_requested_public_handle(handle: &str) -> Result<String, IdentityError> {
+    let normalized = handle.trim().to_ascii_lowercase();
+    if public_handle_is_valid(&normalized) {
+        return Ok(normalized);
+    }
+
+    Err(IdentityError::Validation(
+        "Public handle must be 3 to 24 lowercase letters, numbers, or hyphens, and cannot start or end with a hyphen.".to_string(),
+    ))
+}
+
+fn public_handle_is_valid(handle: &str) -> bool {
+    let bytes = handle.as_bytes();
+    if !(3..=24).contains(&bytes.len()) {
+        return false;
+    }
+    if bytes.first() == Some(&b'-') || bytes.last() == Some(&b'-') {
+        return false;
+    }
+    bytes
+        .iter()
+        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
+}
+
+fn public_handle_is_taken(
+    connection: &Connection,
+    user_id: i64,
+    public_handle: &str,
+) -> Result<bool, IdentityError> {
+    let existing: Option<i64> = connection
+        .query_row(
+            "SELECT id FROM users WHERE public_handle = ?1 AND id != ?2",
+            params![public_handle, user_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(existing.is_some())
+}
+
+fn slugify_public_handle(seed: &str) -> String {
+    let mut handle = String::new();
+    let mut last_was_hyphen = false;
+    for byte in seed.bytes() {
+        let normalized = byte.to_ascii_lowercase();
+        if normalized.is_ascii_lowercase() || normalized.is_ascii_digit() {
+            handle.push(normalized as char);
+            last_was_hyphen = false;
+        } else if !last_was_hyphen {
+            handle.push('-');
+            last_was_hyphen = true;
+        }
+    }
+    trim_public_handle_length(handle.trim_matches('-'))
+}
+
+fn trim_public_handle_length(handle: &str) -> String {
+    let mut trimmed = handle.chars().take(24).collect::<String>();
+    trimmed = trimmed.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "player".to_string()
+    } else {
+        trimmed
     }
 }
 

@@ -12,6 +12,7 @@ import {
   currentRoutePath,
   matchRouteFromPath,
   protectedLoginRoute,
+  publicDeckRouteFromPath,
   replayRouteFromPath,
   routeFromPath,
   safeAuthNextPath,
@@ -23,6 +24,7 @@ import { DecksPage } from "./pages/DecksPage";
 import { MatchArchivePage } from "./pages/MatchArchivePage";
 import { MatchPage } from "./pages/MatchPage";
 import { MatchPicker } from "./pages/MatchPicker";
+import { PublicDeckPage } from "./pages/PublicDeckPage";
 import { ReplayPage } from "./pages/ReplayPage";
 import { RouteRedirect } from "./pages/RouteRedirect";
 import { SharedMatchPage } from "./pages/SharedMatchPage";
@@ -141,6 +143,20 @@ export function App() {
 
   if (normalizedPath === "/catalog") {
     return <CatalogPage onNavigate={navigate} />;
+  }
+
+  const publicDeckRoute = publicDeckRouteFromPath(path);
+  if (publicDeckRoute) {
+    return (
+      <PublicDeckPage
+        key={`${publicDeckRoute.handle}:${publicDeckRoute.deckId}`}
+        handle={publicDeckRoute.handle}
+        deckId={publicDeckRoute.deckId}
+        currentUser={currentUser}
+        onNavigate={navigate}
+        onSignOut={handleSignOut}
+      />
+    );
   }
 
   if (normalizedPath === "/profile") {

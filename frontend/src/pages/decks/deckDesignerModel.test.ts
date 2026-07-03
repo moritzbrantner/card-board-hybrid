@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   cardCopyState,
   catalogFilterOptions,
+  deckVisualCards,
   filterCatalogCards,
   selectedCatalogCard,
   selectedDeckCardRows,
@@ -40,6 +41,33 @@ describe("deck designer model", () => {
       kindDetail: "1/2 ap 2",
     });
     expect(rows[0].card.name).toBe("Ember Squire");
+  });
+
+  it("builds visual card entries for saved Deck recipe counts", () => {
+    const visualCards = deckVisualCards(
+      cards,
+      [
+        { templateId: "starfire-bolt", count: 2 },
+        { templateId: "ember-squire", count: 1 },
+        { templateId: "missing-card", count: 4 },
+      ],
+      rules,
+    );
+
+    expect(visualCards.map((row) => row.card.name)).toEqual(["Ember Squire", "Starfire Bolt"]);
+    expect(visualCards[0]).toMatchObject({
+      count: 1,
+      copyLimit: 4,
+      kindLabel: "Unit",
+      kindDetail: "1/2 ap 2",
+    });
+    expect(visualCards[0].card.artPath).toBe("/card-art/ember-squire.svg");
+    expect(visualCards[1]).toMatchObject({
+      count: 2,
+      copyLimit: 3,
+      kindLabel: "Spell",
+      kindDetail: "damage 2 rng 3 pri 2",
+    });
   });
 
   it("filters the catalog by search, kind, rarity, and mana", () => {

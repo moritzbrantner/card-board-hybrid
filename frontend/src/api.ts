@@ -16,6 +16,7 @@ import type {
   MatchResponse,
   MatchState,
   ProgressionResponse,
+  PublicDeckRecipeResponse,
   SoloAiOpponentSelection,
   SharedMatchResponse,
   SystemDeckListResponse,
@@ -78,12 +79,13 @@ export function loadProfile() {
 
 export function updateProfile(
   displayName: string,
+  handle: string,
   avatar: GeneratedAvatar,
   preferredWizardType: WizardType,
 ) {
   return request<AccountProfile>("/api/profile", {
     method: "PATCH",
-    body: JSON.stringify({ displayName, avatar, preferredWizardType }),
+    body: JSON.stringify({ displayName, handle, avatar, preferredWizardType }),
   });
 }
 
@@ -136,6 +138,12 @@ export function loadDecks() {
 
 export function loadDeck(deckId: number) {
   return request<DeckRecipeDetail>(`/api/decks/${encodeURIComponent(deckId)}`);
+}
+
+export function loadPublicDeck(handle: string, deckId: number) {
+  return request<PublicDeckRecipeResponse>(
+    `/api/users/${encodeURIComponent(handle)}/decks/${encodeURIComponent(deckId)}`,
+  );
 }
 
 export function createDeck(name: string, cards: DeckCardCount[], isDefault = false) {

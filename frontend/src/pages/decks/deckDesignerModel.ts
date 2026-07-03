@@ -2,6 +2,7 @@ import { copyLimitForRarity, runeNamesForLoadout, skillNamesForWizard } from "..
 import { kindSummary, wizardOptionByType } from "../../labels";
 import type {
   CatalogCard,
+  DeckCardCount,
   DeckLegality,
   DeckRules,
   ProgressionResponse,
@@ -29,6 +30,14 @@ export type DeckCardRow = {
   count: number;
   copyLimit: number;
   copyLimitReached: boolean;
+  kindLabel: string;
+  kindDetail: string;
+};
+
+export type DeckVisualCard = {
+  card: CatalogCard;
+  count: number;
+  copyLimit: number;
   kindLabel: string;
   kindDetail: string;
 };
@@ -65,20 +74,38 @@ export function selectedDeckCardRows(
   cardCounts: Record<string, number>,
   rules: DeckRules | null,
 ): DeckCardRow[] {
+  return deckVisualCards(catalogCards, cardsFromCountRecord(cardCounts), rules).map((card) => ({
+    ...card,
+    copyLimitReached: card.count >= card.copyLimit,
+  }));
+}
+
+export function deckVisualCards(
+  catalogCards: CatalogCard[],
+  cards: DeckCardCount[],
+  rules: DeckRules | null,
+): DeckVisualCard[] {
+  const counts = new Map(
+    cards
+      .filter((card) => card.count > 0)
+      .map((card) => [card.templateId, card.count]),
+  );
+
   return catalogCards
     .map((card) => {
-      const copyState = cardCopyState(card, cardCounts, rules);
-      if (copyState.count <= 0) {
+      const count = counts.get(card.templateId) ?? 0;
+      if (count <= 0) {
         return null;
       }
       return {
         card,
-        ...copyState,
+        count,
+        copyLimit: copyLimitForRarity(card.rarity, rules),
         kindLabel: cardKindLabel(card),
         kindDetail: cardKindDetail(card),
       };
     })
-    .filter((row): row is DeckCardRow => row !== null)
+    .filter((card): card is DeckVisualCard => card !== null)
     .sort((left, right) => left.card.name.localeCompare(right.card.name));
 }
 
@@ -193,4 +220,8 @@ export function manaCostFilterLabel(filter: ManaCostFilter) {
     return "5+ mana";
   }
   return `${filter} mana`;
+}
+
+function cardsFromCountRecord(cardCounts: Record<string, number>): DeckCardCount[] {
+  return Object.entries(cardCounts).map(([templateId, count]) => ({ templateId, count }));
 }

@@ -2626,6 +2626,49 @@ h1 {
   grid-column: 1 / -1;
 }
 
+.public-deck-layout {
+  display: grid;
+  gap: 18px;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+}
+
+.public-deck-summary,
+.public-deck-cards {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--panel);
+}
+
+.public-owner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.public-owner > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.public-owner span:not(.profile-avatar) {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.public-owner strong {
+  color: #fffaf0;
+  overflow-wrap: anywhere;
+}
+
 .deck-recipe-strip {
   grid-column: 1 / -1;
   display: grid;
@@ -2910,14 +2953,12 @@ h1 {
   font: inherit;
 }
 
-.deck-catalog-list,
-.picked-card-list {
+.deck-catalog-list {
   display: grid;
   gap: 10px;
 }
 
 .deck-catalog-row,
-.picked-card-row,
 .deck-stats-panel,
 .selected-card-panel {
   border: 1px solid var(--line);
@@ -2933,27 +2974,132 @@ h1 {
   align-items: center;
 }
 
-.picked-card-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 10px;
-}
-
-.picked-card-row.selected,
 .deck-catalog-row:focus-within,
 .selected-card-details.basic,
-.picked-card-row.basic {
+.picked-card-tile.basic {
   border-color: rgba(88, 183, 161, 0.42);
 }
 
 .selected-card-details.advanced,
-.picked-card-row.advanced {
+.picked-card-tile.advanced {
   border-color: rgba(122, 167, 217, 0.44);
 }
 
 .selected-card-details.rare,
-.picked-card-row.rare {
+.picked-card-tile.rare {
   border-color: rgba(217, 184, 79, 0.52);
+}
+
+.picked-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.picked-card-tile {
+  display: grid;
+  grid-template-rows: 116px 1fr;
+  min-width: 0;
+  min-height: 286px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.picked-card-tile.selected {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(217, 184, 79, 0.22);
+}
+
+.picked-card-art-button {
+  position: relative;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: #111412;
+  cursor: pointer;
+}
+
+.picked-card-art-button:disabled,
+.picked-card-title-button:disabled {
+  cursor: default;
+}
+
+.picked-card-art-button img {
+  display: block;
+  width: 100%;
+  height: 116px;
+  object-fit: cover;
+}
+
+.picked-card-count-badge {
+  position: absolute;
+  right: 9px;
+  bottom: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 28px;
+  border: 1px solid rgba(247, 243, 234, 0.18);
+  border-radius: 8px;
+  color: #fffaf0;
+  background: rgba(16, 19, 18, 0.78);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.picked-card-tile-body {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.picked-card-title-button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.picked-card-title-button strong {
+  overflow-wrap: anywhere;
+  line-height: 1.08;
+}
+
+.picked-card-title-button small,
+.picked-card-tile-body p,
+.picked-card-readonly-count {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.picked-card-tile-body p {
+  min-height: 32px;
+  margin: 0;
+}
+
+.picked-card-readonly-count {
+  align-self: end;
+  color: #fffaf0;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.deck-visual-grid-empty {
+  min-height: 180px;
 }
 
 .deck-row-select {
@@ -2975,7 +3121,6 @@ h1 {
 }
 
 .deck-row-select small,
-.picked-card-row p,
 .selected-card-details p,
 .deck-empty-state span,
 .deck-message-list li {
@@ -3001,11 +3146,6 @@ h1 {
 .deck-add-button {
   width: 38px;
   height: 38px;
-}
-
-.picked-card-row p {
-  grid-column: 1 / -1;
-  margin: 0;
 }
 
 .deck-count-controls {

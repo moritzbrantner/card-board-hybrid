@@ -129,6 +129,7 @@ async function mockExperiencedAccountApi(page) {
 function experiencedUser() {
   return {
     id: 100,
+    handle: "experienced",
     email: EXPERIENCED_EMAIL,
     displayName: "Experienced",
     avatar: { symbol: "sparkles", color: "emerald" },

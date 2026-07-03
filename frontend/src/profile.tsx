@@ -50,6 +50,7 @@ export function ProfilePage({
   onSignOut,
 }: ProfilePageProps) {
   const [displayName, setDisplayName] = useState(currentUser.displayName);
+  const [handle, setHandle] = useState(currentUser.handle);
   const [avatar, setAvatar] = useState<GeneratedAvatar>(currentUser.avatar);
   const [preferredWizardType, setPreferredWizardType] = useState<WizardType>(
     currentUser.preferredWizardType,
@@ -112,11 +113,13 @@ export function ProfilePage({
     try {
       const updated = await updateProfile(
         displayName,
+        handle,
         avatar,
         preferredWizardType,
       );
       onProfileUpdated(updated);
       setDisplayName(updated.displayName);
+      setHandle(updated.handle);
       setAvatar(updated.avatar);
       setPreferredWizardType(updated.preferredWizardType);
       setNotice("Profile saved.");
@@ -154,6 +157,13 @@ export function ProfilePage({
               value={displayName}
               onChange={(event) => setDisplayName(event.target.value)}
               maxLength={32}
+            />
+            <label htmlFor="profile-public-handle">Public Handle</label>
+            <input
+              id="profile-public-handle"
+              value={handle}
+              onChange={(event) => setHandle(event.target.value)}
+              maxLength={24}
             />
             <span>{currentUser.email}</span>
           </div>
