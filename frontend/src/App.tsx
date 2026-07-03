@@ -18,6 +18,7 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Settings as SettingsIcon,
   Shield,
   Sparkles,
   Sword,
@@ -28,7 +29,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   attack,
   activateItem,
@@ -45,6 +46,7 @@ import {
   loadDecks,
   loadMatch,
   loadMatches,
+  loadPreferences,
   loadProgression,
   loadReplay,
   loadSharedMatch,
@@ -58,6 +60,7 @@ import {
   registerAccount,
   sharedMatchWebSocketUrl,
   updateDeck,
+  updatePreferences,
   updateProfile,
 } from "./api";
 import {
@@ -79,9 +82,18 @@ import {
   type BoardRendererFallbackReason,
 } from "./boardRenderer";
 import { ProfilePage } from "./profile";
+import {
+  DEFAULT_ACCOUNT_PREFERENCES,
+  normalizeAccountPreferences,
+  resolveMotionPreference,
+  type EffectiveMotion,
+  visualPreferencesCssAttributes,
+  visualPreferencesLiveAiDelayMs,
+} from "./preferences";
 import { clearAuthToken, getAuthToken, saveAuthToken } from "./session";
+import { SettingsPage, type SettingsState } from "./settings";
 import { WIZARD_OPTIONS } from "./wizards";
-import { LIVE_AI_FRAME_DELAY_MS, liveAiPlaybackFrames } from "./livePlayback";
+import { liveAiPlaybackFrames } from "./livePlayback";
 import {
   createMatchVisualCatalog,
   type CardVisualIdentity,
@@ -125,6 +137,7 @@ import type {
   WizardType,
   ActionTarget,
   BoardVisualMode,
+  AccountPreferences,
 } from "./types";
 import type {
   CSSProperties,
@@ -211,6 +224,13 @@ type BoardVisualModeProps = {
 
 type AccountPreferenceProps = AccountProps & {
   onCurrentUserUpdated: (user: AuthUser) => void;
+  visualPreferences: AppliedVisualPreferences;
+};
+
+type AppliedVisualPreferences = {
+  preferences: AccountPreferences;
+  effectiveMotion: EffectiveMotion;
+  liveAiDelayMs: number;
 };
 
 function currentRoutePath() {
@@ -305,6 +325,84 @@ function usePrefersReducedMotion() {
   return prefersReducedMotion;
 }
 
+function usePrefersDarkTheme() {
+  const [prefersDarkTheme, setPrefersDarkTheme] = useState(() =>
+    window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleChange = () => setPrefersDarkTheme(query.matches);
+    handleChange();
+    query.addEventListener("change", handleChange);
+    return () => query.removeEventListener("change", handleChange);
+  }, []);
+
+  return prefersDarkTheme;
+}
+
+function useAccountPreferences(currentUser: AuthUser | null) {
+  const [state, setState] = useState<SettingsState>({
+    status: "ready",
+    preferences: DEFAULT_ACCOUNT_PREFERENCES,
+  });
+
+  const refresh = useCallback(async () => {
+    if (!currentUser) {
+      setState({ status: "ready", preferences: DEFAULT_ACCOUNT_PREFERENCES });
+      return;
+    }
+
+    setState((current) => ({ status: "loading", preferences: current.preferences }));
+    try {
+      const loaded = normalizeAccountPreferences(await loadPreferences());
+      setState({ status: "ready", preferences: loaded });
+    } catch (error) {
+      setState((current) => ({
+        status: "error",
+        preferences: current.preferences,
+        message: error instanceof Error ? error.message : "Could not load settings",
+      }));
+    }
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const save = useCallback(async (preferences: Parameters<typeof updatePreferences>[0]) => {
+    const updated = normalizeAccountPreferences(await updatePreferences(preferences));
+    setState({ status: "ready", preferences: updated });
+  }, []);
+
+  return { state, refresh, save };
+}
+
+function useAppliedVisualPreferences(preferences: AccountPreferences): AppliedVisualPreferences {
+  const prefersDarkTheme = usePrefersDarkTheme();
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const effectiveMotion = resolveMotionPreference(preferences.motion, prefersReducedMotion);
+
+  useEffect(() => {
+    const attributes = visualPreferencesCssAttributes(preferences, {
+      prefersDarkTheme,
+      prefersReducedMotion,
+    });
+    for (const [name, value] of Object.entries(attributes)) {
+      document.documentElement.setAttribute(name, value);
+    }
+  }, [preferences, prefersDarkTheme, prefersReducedMotion]);
+
+  return {
+    preferences,
+    effectiveMotion,
+    liveAiDelayMs: visualPreferencesLiveAiDelayMs(
+      preferences.animationSpeed,
+      effectiveMotion,
+    ),
+  };
+}
+
 export function App() {
   const [path, setPath] = useState(() => currentRoutePath());
   const [authState, setAuthState] = useState<AuthState>(() =>
@@ -372,12 +470,13 @@ export function App() {
   const { pathname, searchParams } = routeFromPath(path);
   const normalizedPath = pathname.replace(/\/+$/, "");
   const authNextPath = safeAuthNextPath(searchParams.get("next"));
+  const currentUser = authState.status === "signedIn" ? authState.user : null;
+  const preferences = useAccountPreferences(currentUser);
+  const visualPreferences = useAppliedVisualPreferences(preferences.state.preferences);
 
   if (authState.status === "loading") {
     return <ShellMessage title="Rune Lanes" message="Checking account" />;
   }
-
-  const currentUser = authState.status === "signedIn" ? authState.user : null;
 
   if (normalizedPath === "/login" || normalizedPath === "/register") {
     if (currentUser) {
@@ -408,6 +507,22 @@ export function App() {
         currentUser={currentUser}
         onNavigate={navigate}
         onProfileUpdated={(profile) => setAuthState({ status: "signedIn", user: profile })}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
+
+  if (normalizedPath === "/settings") {
+    if (!currentUser) {
+      return <RouteRedirect to={protectedLoginRoute("/settings")} onNavigate={replaceRoute} />;
+    }
+
+    return (
+      <SettingsPage
+        preferencesState={preferences.state}
+        onNavigate={navigate}
+        onSave={preferences.save}
+        onRefresh={preferences.refresh}
         onSignOut={handleSignOut}
       />
     );
@@ -455,6 +570,7 @@ export function App() {
         currentUser={currentUser}
         onSignOut={handleSignOut}
         onCurrentUserUpdated={(user) => setAuthState({ status: "signedIn", user })}
+        visualPreferences={visualPreferences}
       />
     );
   }
@@ -470,6 +586,7 @@ export function App() {
         currentUser={currentUser}
         onSignOut={handleSignOut}
         onCurrentUserUpdated={(user) => setAuthState({ status: "signedIn", user })}
+        visualPreferences={visualPreferences}
       />
     );
   }
@@ -484,6 +601,7 @@ export function App() {
         currentUser={currentUser}
         onSignOut={handleSignOut}
         onCurrentUserUpdated={(user) => setAuthState({ status: "signedIn", user })}
+        visualPreferences={visualPreferences}
       />
     );
   }
@@ -1235,6 +1353,9 @@ function AccountActions({ currentUser, onSignOut, onNavigate }: AccountProps) {
         {currentUser.displayName}
         <span className="level-badge">Lv. {currentUser.progressionSummary.level}</span>
       </button>
+      <button className="icon-button" type="button" onClick={() => onNavigate("/settings")} title="Settings">
+        <SettingsIcon size={18} />
+      </button>
       <button className="icon-button" type="button" onClick={onSignOut} title="Sign out">
         <LogOut size={18} />
       </button>
@@ -1860,6 +1981,7 @@ function MatchPage({
   currentUser,
   onSignOut,
   onCurrentUserUpdated,
+  visualPreferences,
 }: {
   matchId: string;
   onNavigate: (to: string) => void;
@@ -1880,7 +2002,7 @@ function MatchPage({
   const [notice, setNotice] = useState<string | null>(null);
   const [boardAnimation, setBoardAnimation] = useState<BoardAnimationCue | null>(null);
   const animationSequenceRef = useRef(0);
-  const prefersReducedMotion = usePrefersReducedMotion();
+  const reducedMotion = visualPreferences.effectiveMotion === "reduced";
 
   useEffect(() => {
     setLoadState({ status: "loading" });
@@ -1988,7 +2110,7 @@ function MatchPage({
           next: nextMatch,
           event,
           sequence: ++animationSequenceRef.current,
-          reducedMotion: prefersReducedMotion,
+          reducedMotion,
         }),
       );
       previousMatch = nextMatch;
@@ -2000,7 +2122,7 @@ function MatchPage({
     }
 
     for (const frame of playbackFrames) {
-      await delay(LIVE_AI_FRAME_DELAY_MS);
+      await delay(visualPreferences.liveAiDelayMs);
       acceptMatch(frame.matchState, frame.event);
     }
 
@@ -2030,10 +2152,10 @@ function MatchPage({
     const scheduledAction = action;
     const timeoutId = window.setTimeout(() => {
       void runAction(scheduledAction);
-    }, 1000);
+    }, visualPreferences.liveAiDelayMs);
 
     return () => window.clearTimeout(timeoutId);
-  }, [readyMatch, busy, matchId, playerHasPriorityResponse]);
+  }, [readyMatch, busy, matchId, playerHasPriorityResponse, visualPreferences.liveAiDelayMs]);
 
   async function handleCreateSeparateMatch() {
     setBusy(true);
@@ -2365,6 +2487,7 @@ function SharedMatchPage({
   currentUser,
   onSignOut,
   onCurrentUserUpdated,
+  visualPreferences,
 }: {
   matchId: string;
   seatToken: string;
@@ -2403,7 +2526,7 @@ function SharedMatchPage({
   const socketRef = useRef<WebSocket | null>(null);
   const latestSharedMatchRef = useRef<MatchState | null>(null);
   const animationSequenceRef = useRef(0);
-  const prefersReducedMotion = usePrefersReducedMotion();
+  const reducedMotion = visualPreferences.effectiveMotion === "reduced";
 
   useEffect(() => {
     setLoadState({ status: "loading" });
@@ -2507,7 +2630,7 @@ function SharedMatchPage({
               previous: latestSharedMatchRef.current,
               next: message.payload.matchState,
               sequence: ++animationSequenceRef.current,
-              reducedMotion: prefersReducedMotion,
+              reducedMotion,
             }),
           );
         }
@@ -2550,7 +2673,7 @@ function SharedMatchPage({
       socketRef.current = null;
       socket.close();
     };
-  }, [matchId, seatToken, prefersReducedMotion]);
+  }, [matchId, seatToken, reducedMotion]);
 
   const shared = loadState.status === "ready" ? loadState.shared : null;
   const match = shared?.matchState ?? null;
@@ -3091,6 +3214,7 @@ function ReplayPage({
   currentUser,
   onSignOut,
   onCurrentUserUpdated,
+  visualPreferences,
 }: {
   matchId: string;
   onNavigate: (to: string) => void;
@@ -3102,7 +3226,7 @@ function ReplayPage({
   const [loadState, setLoadState] = useState<ReplayLoadState>({ status: "loading" });
   const [frameIndex, setFrameIndex] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
-  const prefersReducedMotion = usePrefersReducedMotion();
+  const reducedMotion = visualPreferences.effectiveMotion === "reduced";
 
   useEffect(() => {
     setLoadState({ status: "loading" });
@@ -3145,7 +3269,7 @@ function ReplayPage({
     next: match,
     event: frame.event,
     sequence: clampedFrameIndex,
-    reducedMotion: prefersReducedMotion,
+    reducedMotion,
   });
 
   async function handleBoardVisualModeChange(mode: BoardVisualMode) {

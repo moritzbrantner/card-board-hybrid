@@ -23,6 +23,8 @@ import type {
   AccountProfile,
   GeneratedAvatar,
   BoardVisualMode,
+  AccountPreferences,
+  UpdatePreferencesRequest,
 } from "./types";
 import { clearAuthToken, getAuthToken } from "./session";
 
@@ -92,6 +94,17 @@ export function loadProfileMatches() {
 
 export function loadProgression() {
   return request<ProgressionResponse>("/api/progression");
+}
+
+export function loadPreferences() {
+  return request<AccountPreferences>("/api/preferences");
+}
+
+export function updatePreferences(preferences: UpdatePreferencesRequest) {
+  return request<AccountPreferences>("/api/preferences", {
+    method: "PATCH",
+    body: JSON.stringify(preferences),
+  });
 }
 
 export function unlockWizardSkill(wizardType: WizardType, nodeId: string) {
