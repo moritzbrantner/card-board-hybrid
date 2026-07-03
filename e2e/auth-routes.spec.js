@@ -202,7 +202,7 @@ test("signing out clears the session and returns to the public match picker", as
   await page.getByTitle("Sign out").click();
 
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("heading", { name: "Choose Your Wizard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Choose Your Loadout" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign In" })).toBeVisible();
   await expect
     .poll(() => page.evaluate((key) => localStorage.getItem(key), AUTH_TOKEN_STORAGE_KEY))
@@ -215,7 +215,7 @@ test("protected route redirects replace the protected URL in browser history", a
 
   for (const protectedPath of ["/profile", "/decks", "/matches"]) {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Choose Your Wizard" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Choose Your Loadout" })).toBeVisible();
 
     await page.goto(protectedPath);
 
@@ -225,12 +225,12 @@ test("protected route redirects replace the protected URL in browser history", a
     await page.goBack();
 
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("heading", { name: "Choose Your Wizard" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Choose Your Loadout" })).toBeVisible();
   }
 });
 
 for (const { path, heading } of [
-  { path: "/", heading: "Choose Your Wizard" },
+  { path: "/", heading: "Choose Your Loadout" },
   { path: "/catalog", heading: "Card Catalog" },
   { path: "/settings", heading: "Settings" },
 ]) {
@@ -382,6 +382,15 @@ function authUser(email) {
     avatar: { symbol: "spark", color: "emerald" },
     preferredWizardType: "runekeeper",
     boardVisualMode: "2d",
+    progressionSummary: {
+      totalXp: 0,
+      level: 1,
+      currentLevelXp: 0,
+      nextLevelXp: 100,
+      xpIntoLevel: 0,
+      xpToNextLevel: 100,
+      runeSlots: 1,
+    },
   };
 }
 

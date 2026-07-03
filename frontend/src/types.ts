@@ -126,6 +126,8 @@ export type DeckRecipeSummary = {
   id: number;
   name: string;
   isDefault: boolean;
+  wizardType: WizardType;
+  runeIds: string[];
   cards: DeckCardCount[];
   legality: DeckLegality;
   createdAt: number;
@@ -151,6 +153,19 @@ export type SystemDeckListResponse = {
   rules: DeckRules;
   decks: SystemDeckRecipe[];
 };
+
+export type DeckChoice =
+  | {
+      source: "starter";
+    }
+  | {
+      source: "system";
+      systemDeckId: string;
+    }
+  | {
+      source: "account";
+      deckId: number;
+    };
 
 export type SoloAiOpponentSelection =
   | {

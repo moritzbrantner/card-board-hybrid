@@ -146,6 +146,8 @@ struct CreateMatchRequest {
     #[serde(default)]
     wizard_type: Option<WizardType>,
     #[serde(default)]
+    player_deck: Option<DeckChoiceRequest>,
+    #[serde(default)]
     player_deck_id: Option<i64>,
     #[serde(default)]
     ai_opponent: Option<AiOpponentRequest>,
@@ -170,9 +172,23 @@ enum AiOpponentRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(
+    tag = "source",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum DeckChoiceRequest {
+    Starter,
+    System { system_deck_id: String },
+    Account { deck_id: i64 },
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JoinSharedMatchRequest {
     wizard_type: WizardType,
+    #[serde(default)]
+    deck_choice: Option<DeckChoiceRequest>,
     #[serde(default)]
     deck_recipe_id: Option<i64>,
     #[serde(default)]
@@ -423,11 +439,15 @@ async fn create_deck(
         Ok(profile) => profile,
         Err(response) => return response,
     };
+    let request = default_deck_configuration(request, profile.preferred_wizard_type);
     let deck = {
         let mut store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
+        if let Err(response) = validate_deck_configuration(&mut store, profile.id, &request) {
+            return response;
+        }
         let mut decks = DeckLibrary::new(store.connection_mut());
         match decks.create_for_user(profile.id, request) {
             Ok(deck) => deck,
@@ -483,11 +503,15 @@ async fn update_deck(
         Ok(profile) => profile,
         Err(response) => return response,
     };
+    let request = default_deck_configuration(request, profile.preferred_wizard_type);
     let deck = {
         let mut store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
+        if let Err(response) = validate_deck_configuration(&mut store, profile.id, &request) {
+            return response;
+        }
         let mut decks = DeckLibrary::new(store.connection_mut());
         match decks.update_for_user(profile.id, deck_id, request) {
             Ok(Some(deck)) => deck,
@@ -905,6 +929,7 @@ async fn create_match(
     let request = if body.is_empty() || body.iter().all(|byte| byte.is_ascii_whitespace()) {
         CreateMatchRequest {
             wizard_type: None,
+            player_deck: None,
             player_deck_id: None,
             ai_opponent: None,
             rune_ids: None,
@@ -929,22 +954,30 @@ async fn create_match(
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        let player_wizard_type = request.wizard_type.unwrap_or_else(|| {
-            profile
-                .as_ref()
-                .map(|profile| profile.preferred_wizard_type)
-                .unwrap_or_default()
-        });
-        let (opponent_wizard_type, player_snapshot, opponent_snapshot) =
-            match resolve_solo_deck_choices(
+        let (player_wizard_type, player_snapshot, requested_rune_ids) =
+            match resolve_player_loadout_choice(
                 &mut store,
                 profile.as_ref().map(|profile| profile.id),
+                profile
+                    .as_ref()
+                    .map(|profile| profile.preferred_wizard_type)
+                    .unwrap_or_default(),
+                request.wizard_type,
+                request.player_deck,
                 request.player_deck_id,
-                request.ai_opponent,
+                request.rune_ids,
             ) {
                 Ok(loadouts) => loadouts,
                 Err(response) => return response,
             };
+        let (opponent_wizard_type, opponent_snapshot) = match resolve_solo_ai_choice(
+            &mut store,
+            profile.as_ref().map(|profile| profile.id),
+            request.ai_opponent,
+        ) {
+            Ok(loadout) => loadout,
+            Err(response) => return response,
+        };
         let player_deck = match deck_library::deck_from_snapshot(Side::Player, &player_snapshot) {
             Ok(deck) => deck,
             Err(error) => return deck_error_response(error),
@@ -959,7 +992,7 @@ async fn create_match(
             match progression.match_loadout(
                 profile.as_ref().map(|profile| profile.id),
                 player_wizard_type,
-                request.rune_ids,
+                requested_rune_ids,
             ) {
                 Ok(loadout) => loadout,
                 Err(error) => return progression_error_response(error),
@@ -1043,9 +1076,10 @@ async fn join_shared_match(
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        let deck_recipe = match resolve_optional_account_deck_choice(
+        let deck_recipe = match resolve_shared_deck_choice(
             &mut store,
             profile.as_ref().map(|profile| profile.id),
+            request.deck_choice,
             request.deck_recipe_id,
         ) {
             Ok(deck_recipe) => deck_recipe,
@@ -1702,14 +1736,106 @@ fn generated_avatar_is_valid(avatar: &GeneratedAvatarRequest) -> bool {
     clippy::result_large_err,
     reason = "route helpers return Axum responses directly"
 )]
-fn resolve_solo_deck_choices(
+fn default_deck_configuration(
+    mut request: SaveDeckRequest,
+    preferred_wizard_type: WizardType,
+) -> SaveDeckRequest {
+    request.wizard_type.get_or_insert(preferred_wizard_type);
+    request
+}
+
+#[allow(
+    clippy::result_large_err,
+    reason = "route helpers return Axum responses directly"
+)]
+fn validate_deck_configuration(
+    store: &mut SqliteMatchStore,
+    user_id: i64,
+    request: &SaveDeckRequest,
+) -> Result<(), axum::response::Response> {
+    let wizard_type = request.wizard_type.unwrap_or_default();
+    let mut progression = ProgressionModule::new(store.connection_mut());
+    match progression.match_loadout(Some(user_id), wizard_type, Some(request.rune_ids.clone())) {
+        Ok(_) => Ok(()),
+        Err(error) => Err(progression_error_response(error)),
+    }
+}
+
+#[allow(
+    clippy::result_large_err,
+    reason = "route helpers return Axum responses directly"
+)]
+fn resolve_player_loadout_choice(
     store: &mut SqliteMatchStore,
     user_id: Option<i64>,
-    player_deck_id: Option<i64>,
+    preferred_wizard_type: WizardType,
+    requested_wizard_type: Option<WizardType>,
+    player_deck: Option<DeckChoiceRequest>,
+    legacy_player_deck_id: Option<i64>,
+    requested_rune_ids: Option<Vec<String>>,
+) -> Result<(WizardType, DeckRecipeSnapshot, Option<Vec<String>>), axum::response::Response> {
+    match player_deck {
+        Some(DeckChoiceRequest::Starter) => Ok((
+            requested_wizard_type.unwrap_or(preferred_wizard_type),
+            starter_deck_snapshot(),
+            requested_rune_ids,
+        )),
+        None if legacy_player_deck_id.is_none() => Ok((
+            requested_wizard_type.unwrap_or(preferred_wizard_type),
+            starter_deck_snapshot(),
+            requested_rune_ids,
+        )),
+        Some(DeckChoiceRequest::System { system_deck_id }) => {
+            let Some(system_deck) = system_deck_by_id(&system_deck_id) else {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiError {
+                        message: format!("Unknown system deck: {system_deck_id}"),
+                    }),
+                )
+                    .into_response());
+            };
+            let snapshot = match system_deck_snapshot(&system_deck_id) {
+                Ok(snapshot) => snapshot,
+                Err(error) => return Err(deck_error_response(error)),
+            };
+            Ok((
+                requested_wizard_type.unwrap_or(system_deck.wizard_type),
+                snapshot,
+                requested_rune_ids,
+            ))
+        }
+        Some(DeckChoiceRequest::Account { deck_id }) => {
+            let (snapshot, configured) = resolve_account_deck_loadout(store, user_id, deck_id)?;
+            Ok((
+                requested_wizard_type.unwrap_or(configured.0),
+                snapshot,
+                requested_rune_ids.or(Some(configured.1)),
+            ))
+        }
+        None => {
+            let deck_id =
+                legacy_player_deck_id.expect("legacy deck id should exist in this branch");
+            let snapshot = resolve_required_account_deck_choice(store, user_id, deck_id)?;
+            Ok((
+                requested_wizard_type.unwrap_or(preferred_wizard_type),
+                snapshot,
+                requested_rune_ids,
+            ))
+        }
+    }
+}
+
+#[allow(
+    clippy::result_large_err,
+    reason = "route helpers return Axum responses directly"
+)]
+fn resolve_solo_ai_choice(
+    store: &mut SqliteMatchStore,
+    user_id: Option<i64>,
     ai_opponent: Option<AiOpponentRequest>,
-) -> Result<(WizardType, DeckRecipeSnapshot, DeckRecipeSnapshot), axum::response::Response> {
-    let player_snapshot = resolve_optional_account_deck_choice(store, user_id, player_deck_id)?;
-    let (opponent_wizard_type, opponent_snapshot) = match ai_opponent {
+) -> Result<(WizardType, DeckRecipeSnapshot), axum::response::Response> {
+    let loadout = match ai_opponent {
         Some(AiOpponentRequest::System { system_deck_id }) => {
             let Some(system_deck) = system_deck_by_id(&system_deck_id) else {
                 return Err((
@@ -1735,8 +1861,32 @@ fn resolve_solo_deck_choices(
         }
         None => (WizardType::Runekeeper, starter_deck_snapshot()),
     };
+    Ok(loadout)
+}
 
-    Ok((opponent_wizard_type, player_snapshot, opponent_snapshot))
+#[allow(
+    clippy::result_large_err,
+    reason = "route helpers return Axum responses directly"
+)]
+fn resolve_shared_deck_choice(
+    store: &mut SqliteMatchStore,
+    user_id: Option<i64>,
+    deck_choice: Option<DeckChoiceRequest>,
+    legacy_deck_id: Option<i64>,
+) -> Result<DeckRecipeSnapshot, axum::response::Response> {
+    match deck_choice {
+        Some(DeckChoiceRequest::Starter) => Ok(starter_deck_snapshot()),
+        Some(DeckChoiceRequest::System { system_deck_id }) => {
+            match system_deck_snapshot(&system_deck_id) {
+                Ok(snapshot) => Ok(snapshot),
+                Err(error) => Err(deck_error_response(error)),
+            }
+        }
+        Some(DeckChoiceRequest::Account { deck_id }) => {
+            resolve_required_account_deck_choice(store, user_id, deck_id)
+        }
+        None => resolve_optional_account_deck_choice(store, user_id, legacy_deck_id),
+    }
 }
 
 #[allow(
@@ -1752,6 +1902,32 @@ fn resolve_optional_account_deck_choice(
         Some(deck_id) => resolve_required_account_deck_choice(store, user_id, deck_id),
         None => Ok(starter_deck_snapshot()),
     }
+}
+
+#[allow(
+    clippy::result_large_err,
+    reason = "route helpers return Axum responses directly"
+)]
+fn resolve_account_deck_loadout(
+    store: &mut SqliteMatchStore,
+    user_id: Option<i64>,
+    deck_id: i64,
+) -> Result<(DeckRecipeSnapshot, (WizardType, Vec<String>)), axum::response::Response> {
+    let Some(user_id) = user_id else {
+        return Err(unauthorized_response());
+    };
+    let mut decks = DeckLibrary::new(store.connection_mut());
+    let snapshot = match decks.legal_snapshot_for_user(user_id, deck_id) {
+        Ok(Some(snapshot)) => snapshot,
+        Ok(None) => return Err(deck_not_found_response()),
+        Err(error) => return Err(deck_error_response(error)),
+    };
+    let configured = match decks.configuration_for_user(user_id, deck_id) {
+        Ok(Some(configured)) => configured,
+        Ok(None) => return Err(deck_not_found_response()),
+        Err(error) => return Err(deck_error_response(error)),
+    };
+    Ok((snapshot, configured))
 }
 
 #[allow(
@@ -2250,6 +2426,8 @@ mod tests {
         assert_eq!(library["decks"].as_array().unwrap().len(), 1);
         assert_eq!(library["decks"][0]["name"], "Balanced Starter");
         assert_eq!(library["decks"][0]["isDefault"], true);
+        assert_eq!(library["decks"][0]["wizardType"], "runekeeper");
+        assert_eq!(library["decks"][0]["runeIds"].as_array().unwrap().len(), 0);
         assert_eq!(library["decks"][0]["legality"]["legal"], true);
 
         let (status, draft) = json_request(
@@ -2268,7 +2446,56 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(draft["name"], "Tiny Draft");
+        assert_eq!(draft["wizardType"], "runekeeper");
+        assert_eq!(draft["runeIds"].as_array().unwrap().len(), 0);
         assert_eq!(draft["legality"]["legal"], false);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn deck_recipes_store_wizard_configuration_and_validate_runes() {
+        let path = test_db_path("decks-wizard-config");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "configured@example.com").await;
+
+        let (status, rejected) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/decks")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"name":"Locked Rune","wizardType":"pyromancer","runeIds":["vitality"],"cards":[]}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            rejected["message"]
+                .as_str()
+                .expect("message should be a string")
+                .contains("not unlocked")
+        );
+
+        let (status, created) = json_request(
+            app,
+            Request::builder()
+                .method("POST")
+                .uri("/api/decks")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"name":"Configured","wizardType":"pyromancer","runeIds":[],"cards":[]}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(created["wizardType"], "pyromancer");
+        assert_eq!(created["runeIds"].as_array().unwrap().len(), 0);
 
         let _ = fs::remove_file(path);
     }
@@ -2381,6 +2608,33 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
             created["matchState"]["opponent"]["wizard"]["wizardType"],
+            "pyromancer"
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn signed_out_players_can_start_with_system_loadouts() {
+        let path = test_db_path("player-system-loadout");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, created) = json_request(
+            app,
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"playerDeck":{"source":"system","systemDeckId":"ember-burn"}}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            created["matchState"]["player"]["wizard"]["wizardType"],
             "pyromancer"
         );
 

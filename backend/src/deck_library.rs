@@ -26,6 +26,8 @@ pub struct DeckRecipeSummary {
     pub id: i64,
     pub name: String,
     pub is_default: bool,
+    pub wizard_type: WizardType,
+    pub rune_ids: Vec<String>,
     pub cards: Vec<DeckCardCount>,
     pub legality: DeckLegality,
     pub created_at: i64,
@@ -63,6 +65,10 @@ pub struct SaveDeckRequest {
     pub cards: Vec<DeckCardCountRequest>,
     #[serde(default)]
     pub is_default: Option<bool>,
+    #[serde(default)]
+    pub wizard_type: Option<WizardType>,
+    #[serde(default)]
+    pub rune_ids: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -162,6 +168,8 @@ impl<'a> DeckLibrary<'a> {
         let name = normalize_deck_name(&request.name)?;
         let cards = normalize_requested_cards(request.cards)?;
         let is_default = request.is_default.unwrap_or(false);
+        let wizard_type = request.wizard_type.unwrap_or_default();
+        let rune_ids_json = serde_json::to_string(&request.rune_ids)?;
 
         let transaction = self.connection.transaction()?;
         if is_default {
@@ -169,10 +177,24 @@ impl<'a> DeckLibrary<'a> {
         }
         transaction.execute(
             "
-            INSERT INTO deck_recipes (user_id, name, is_default, created_at, updated_at)
-            VALUES (?1, ?2, ?3, unixepoch(), unixepoch())
+            INSERT INTO deck_recipes (
+                user_id,
+                name,
+                is_default,
+                wizard_type,
+                rune_ids_json,
+                created_at,
+                updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, unixepoch(), unixepoch())
             ",
-            params![user_id, name, is_default],
+            params![
+                user_id,
+                name,
+                is_default,
+                wizard_type_to_db(wizard_type),
+                rune_ids_json
+            ],
         )?;
         let deck_id = transaction.last_insert_rowid();
         replace_deck_cards(&transaction, deck_id, &cards)?;
@@ -190,6 +212,8 @@ impl<'a> DeckLibrary<'a> {
     ) -> Result<Option<DeckRecipeSummary>, DeckLibraryError> {
         let name = normalize_deck_name(&request.name)?;
         let cards = normalize_requested_cards(request.cards)?;
+        let wizard_type = request.wizard_type.unwrap_or_default();
+        let rune_ids_json = serde_json::to_string(&request.rune_ids)?;
         let exists = self.deck_exists_for_user(user_id, deck_id)?;
         if !exists {
             return Ok(None);
@@ -204,10 +228,19 @@ impl<'a> DeckLibrary<'a> {
             UPDATE deck_recipes
             SET name = ?3,
                 is_default = CASE WHEN ?4 THEN 1 ELSE is_default END,
+                wizard_type = ?5,
+                rune_ids_json = ?6,
                 updated_at = unixepoch()
             WHERE id = ?1 AND user_id = ?2
             ",
-            params![deck_id, user_id, name, request.is_default.unwrap_or(false)],
+            params![
+                deck_id,
+                user_id,
+                name,
+                request.is_default.unwrap_or(false),
+                wizard_type_to_db(wizard_type),
+                rune_ids_json,
+            ],
         )?;
         replace_deck_cards(&transaction, deck_id, &cards)?;
         transaction.commit()?;
@@ -235,6 +268,8 @@ impl<'a> DeckLibrary<'a> {
                 })
                 .collect(),
             is_default: Some(false),
+            wizard_type: Some(source.wizard_type),
+            rune_ids: source.rune_ids,
         };
         self.create_for_user(user_id, request).map(Some)
     }
@@ -282,6 +317,16 @@ impl<'a> DeckLibrary<'a> {
         }))
     }
 
+    pub fn configuration_for_user(
+        &mut self,
+        user_id: i64,
+        deck_id: i64,
+    ) -> Result<Option<(WizardType, Vec<String>)>, DeckLibraryError> {
+        Ok(self
+            .load_for_user(user_id, deck_id)?
+            .map(|deck| (deck.wizard_type, deck.rune_ids)))
+    }
+
     fn ensure_starter_deck(&mut self, user_id: i64) -> Result<(), DeckLibraryError> {
         let count: i64 = self.connection.query_row(
             "SELECT COUNT(*) FROM deck_recipes WHERE user_id = ?1",
@@ -296,10 +341,22 @@ impl<'a> DeckLibrary<'a> {
         let transaction = self.connection.transaction()?;
         transaction.execute(
             "
-            INSERT INTO deck_recipes (user_id, name, is_default, created_at, updated_at)
-            VALUES (?1, ?2, 1, unixepoch(), unixepoch())
+            INSERT INTO deck_recipes (
+                user_id,
+                name,
+                is_default,
+                wizard_type,
+                rune_ids_json,
+                created_at,
+                updated_at
+            )
+            VALUES (?1, ?2, 1, ?3, '[]', unixepoch(), unixepoch())
             ",
-            params![user_id, starter.name],
+            params![
+                user_id,
+                starter.name,
+                wizard_type_to_db(WizardType::Runekeeper)
+            ],
         )?;
         let deck_id = transaction.last_insert_rowid();
         replace_deck_cards(&transaction, deck_id, &starter.cards)?;
@@ -334,7 +391,7 @@ impl<'a> DeckLibrary<'a> {
     fn load_user_decks(&self, user_id: i64) -> Result<Vec<DeckRecipeSummary>, DeckLibraryError> {
         let mut statement = self.connection.prepare(
             "
-            SELECT id, name, is_default, created_at, updated_at
+            SELECT id, name, is_default, wizard_type, rune_ids_json, created_at, updated_at
             FROM deck_recipes
             WHERE user_id = ?1
             ORDER BY is_default DESC, updated_at DESC, id ASC
@@ -345,19 +402,23 @@ impl<'a> DeckLibrary<'a> {
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)? == 1,
-                row.get::<_, i64>(3)?,
-                row.get::<_, i64>(4)?,
+                wizard_type_from_db(&row.get::<_, String>(3)?),
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, i64>(6)?,
             ))
         })?;
 
         let mut decks = Vec::new();
         for row in rows {
-            let (id, name, is_default, created_at, updated_at) = row?;
+            let (id, name, is_default, wizard_type, rune_ids_json, created_at, updated_at) = row?;
             let cards = load_deck_cards(self.connection, id)?;
             decks.push(DeckRecipeSummary {
                 id,
                 name,
                 is_default,
+                wizard_type,
+                rune_ids: serde_json::from_str(&rune_ids_json)?,
                 legality: validate_recipe(&cards),
                 cards,
                 created_at,
@@ -376,7 +437,7 @@ impl<'a> DeckLibrary<'a> {
             .connection
             .query_row(
                 "
-            SELECT id, name, is_default, created_at, updated_at
+            SELECT id, name, is_default, wizard_type, rune_ids_json, created_at, updated_at
             FROM deck_recipes
             WHERE id = ?1 AND user_id = ?2
             ",
@@ -386,25 +447,31 @@ impl<'a> DeckLibrary<'a> {
                         row.get::<_, i64>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, i64>(2)? == 1,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, i64>(4)?,
+                        wizard_type_from_db(&row.get::<_, String>(3)?),
+                        row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
                     ))
                 },
             )
             .optional()?;
 
-        row.map(|(id, name, is_default, created_at, updated_at)| {
-            let cards = load_deck_cards(self.connection, id)?;
-            Ok(DeckRecipeSummary {
-                id,
-                name,
-                is_default,
-                legality: validate_recipe(&cards),
-                cards,
-                created_at,
-                updated_at,
-            })
-        })
+        row.map(
+            |(id, name, is_default, wizard_type, rune_ids_json, created_at, updated_at)| {
+                let cards = load_deck_cards(self.connection, id)?;
+                Ok(DeckRecipeSummary {
+                    id,
+                    name,
+                    is_default,
+                    wizard_type,
+                    rune_ids: serde_json::from_str(&rune_ids_json)?,
+                    legality: validate_recipe(&cards),
+                    cards,
+                    created_at,
+                    updated_at,
+                })
+            },
+        )
         .transpose()
     }
 
@@ -429,6 +496,8 @@ pub fn migrate(connection: &Connection) -> Result<(), DeckLibraryError> {
             user_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             is_default INTEGER NOT NULL DEFAULT 0,
+            wizard_type TEXT NOT NULL DEFAULT 'runekeeper',
+            rune_ids_json TEXT NOT NULL DEFAULT '[]',
             created_at INTEGER NOT NULL DEFAULT (unixepoch()),
             updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -444,6 +513,43 @@ pub fn migrate(connection: &Connection) -> Result<(), DeckLibraryError> {
             ON deck_recipes(user_id);
         ",
     )?;
+    let wizard_type_added = add_column_if_missing(
+        connection,
+        "deck_recipes",
+        "wizard_type",
+        "TEXT NOT NULL DEFAULT 'runekeeper'",
+    )?;
+    let rune_ids_added = add_column_if_missing(
+        connection,
+        "deck_recipes",
+        "rune_ids_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    if wizard_type_added {
+        connection.execute_batch(
+            "
+            UPDATE deck_recipes
+            SET wizard_type = COALESCE((
+                SELECT users.preferred_wizard_type
+                FROM users
+                WHERE users.id = deck_recipes.user_id
+            ), wizard_type);
+            ",
+        )?;
+    }
+    if rune_ids_added && table_exists(connection, "wizard_rune_loadouts")? {
+        connection.execute_batch(
+            "
+            UPDATE deck_recipes
+            SET rune_ids_json = COALESCE((
+                SELECT wizard_rune_loadouts.rune_ids_json
+                FROM wizard_rune_loadouts
+                WHERE wizard_rune_loadouts.user_id = deck_recipes.user_id
+                  AND wizard_rune_loadouts.wizard_type = deck_recipes.wizard_type
+            ), rune_ids_json);
+            ",
+        )?;
+    }
     Ok(())
 }
 
@@ -694,6 +800,56 @@ fn clear_default_deck(
         params![user_id],
     )?;
     Ok(())
+}
+
+fn add_column_if_missing(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<bool, DeckLibraryError> {
+    let columns = connection
+        .prepare(&format!("PRAGMA table_info({table})"))?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if columns.iter().any(|existing| existing == column) {
+        return Ok(false);
+    }
+    connection.execute_batch(&format!(
+        "ALTER TABLE {table} ADD COLUMN {column} {definition};"
+    ))?;
+    Ok(true)
+}
+
+fn table_exists(connection: &Connection, table: &str) -> Result<bool, DeckLibraryError> {
+    let exists: Option<i64> = connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![table],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(exists.is_some())
+}
+
+fn wizard_type_to_db(wizard_type: WizardType) -> &'static str {
+    match wizard_type {
+        WizardType::Runekeeper => "runekeeper",
+        WizardType::Pyromancer => "pyromancer",
+        WizardType::Chronomancer => "chronomancer",
+        WizardType::Warden => "warden",
+        WizardType::Battlemage => "battlemage",
+    }
+}
+
+fn wizard_type_from_db(value: &str) -> WizardType {
+    match value {
+        "pyromancer" => WizardType::Pyromancer,
+        "chronomancer" => WizardType::Chronomancer,
+        "warden" => WizardType::Warden,
+        "battlemage" => WizardType::Battlemage,
+        _ => WizardType::Runekeeper,
+    }
 }
 
 fn load_deck_cards(

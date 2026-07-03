@@ -9,6 +9,7 @@ import type {
   DeckListResponse,
   DeckRecipeDetail,
   DeckRecipeSummary,
+  DeckChoice,
   MatchArchiveResponse,
   MatchActionRequest,
   MatchReplayResponse,
@@ -149,10 +150,14 @@ export function updateDeck(
   name: string,
   cards: DeckCardCount[],
   isDefault = false,
+  configuration?: {
+    wizardType: WizardType;
+    runeIds: string[];
+  },
 ) {
   return request<DeckRecipeSummary>(`/api/decks/${encodeURIComponent(deckId)}`, {
     method: "PATCH",
-    body: JSON.stringify({ name, cards, isDefault }),
+    body: JSON.stringify({ name, cards, isDefault, ...configuration }),
   });
 }
 
@@ -194,6 +199,7 @@ function matchAction(matchId: string, action: MatchActionRequest) {
 
 export function createMatch(options?: {
   wizardType?: WizardType;
+  playerDeck?: DeckChoice;
   playerDeckId?: number;
   aiOpponent?: SoloAiOpponentSelection;
   runeIds?: string[];
@@ -223,12 +229,13 @@ export function joinSharedMatch(
   wizardType: WizardType,
   deckRecipeId?: number,
   runeIds?: string[],
+  deckChoice?: DeckChoice,
 ) {
   return request<SharedMatchResponse>(
     `/api/shared-matches/${encodeURIComponent(matchId)}/seats/${encodeURIComponent(seatToken)}/join`,
     {
       method: "POST",
-      body: JSON.stringify({ wizardType, deckRecipeId, runeIds }),
+      body: JSON.stringify({ wizardType, deckRecipeId, runeIds, deckChoice }),
     },
   );
 }

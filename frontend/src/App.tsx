@@ -58,6 +58,7 @@ import {
   playCard,
   previewDeckLegality,
   registerAccount,
+  saveWizardRuneLoadout,
   sharedMatchWebSocketUrl,
   updateDeck,
   updatePreferences,
@@ -100,6 +101,7 @@ import {
 } from "./preferences";
 import { clearAuthToken, getAuthToken, saveAuthToken } from "./session";
 import { SettingsPage, type SettingsState } from "./settings";
+import { WizardPreview3D } from "./WizardPreview3D";
 import { WIZARD_OPTIONS } from "./wizards";
 import { liveAiPlaybackFrames } from "./livePlayback";
 import { dispatchHotkeyEvent, type HotkeyHandlers } from "./hotkeyRuntime";
@@ -118,6 +120,7 @@ import type {
   DeckCardCount,
   DeckLegality,
   DeckListResponse,
+  DeckChoice,
   DeckRules,
   DeckRecipeSummary,
   HexCoord,
@@ -130,6 +133,7 @@ import type {
   MatchState,
   ProgressionResponse,
   RuneDefinition,
+  SkillNodeDefinition,
   Rarity,
   ReplayFrame,
   ReplayEvent,
@@ -928,6 +932,13 @@ function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { curr
   const [cardCounts, setCardCounts] = useState<Record<string, number>>({});
   const [previewLegality, setPreviewLegality] = useState<DeckLegality | null>(null);
   const [defaultDeck, setDefaultDeck] = useState(false);
+  const [selectedWizardType, setSelectedWizardType] = useState<WizardType>(
+    currentUser.preferredWizardType,
+  );
+  const [selectedRuneIds, setSelectedRuneIds] = useState<string[]>([]);
+  const [progressionLoadState, setProgressionLoadState] = useState<ProgressionLoadState>({
+    status: "loading",
+  });
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -941,6 +952,14 @@ function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { curr
         setCatalogLoadState({
           status: "error",
           message: error instanceof Error ? error.message : "Could not load catalog",
+        }),
+      );
+    loadProgression()
+      .then((progression) => setProgressionLoadState({ status: "ready", progression }))
+      .catch((error: unknown) =>
+        setProgressionLoadState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not load progression",
         }),
       );
   }, []);
@@ -970,6 +989,8 @@ function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { curr
     setDefaultDeck(deck?.isDefault ?? false);
     setCardCounts(countsFromCards(deck?.cards ?? []));
     setPreviewLegality(deck?.legality ?? null);
+    setSelectedWizardType(deck?.wizardType ?? currentUser.preferredWizardType);
+    setSelectedRuneIds(deck?.runeIds ?? []);
     setNotice(null);
   }
 
@@ -1033,7 +1054,10 @@ function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { curr
     setBusy(true);
     setNotice(null);
     try {
-      const saved = await updateDeck(selectedDeckId, deckName, localCards, defaultDeck);
+      const saved = await updateDeck(selectedDeckId, deckName, localCards, defaultDeck, {
+        wizardType: selectedWizardType,
+        runeIds: selectedRuneIds,
+      });
       await reloadDecks(saved.id);
       setNotice("Deck saved.");
     } catch (error) {
@@ -1092,7 +1116,11 @@ function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { curr
     }
   }
 
-  if (deckLoadState.status === "loading" || catalogLoadState.status === "loading") {
+  if (
+    deckLoadState.status === "loading" ||
+    catalogLoadState.status === "loading" ||
+    progressionLoadState.status === "loading"
+  ) {
     return <ShellMessage title="Decks" message="Loading deck library" />;
   }
 
@@ -1102,6 +1130,10 @@ function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { curr
 
   if (catalogLoadState.status === "error") {
     return <ShellMessage title="Decks" message={catalogLoadState.message} />;
+  }
+
+  if (progressionLoadState.status === "error") {
+    return <ShellMessage title="Decks" message={progressionLoadState.message} />;
   }
 
   return (
@@ -1165,6 +1197,39 @@ function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { curr
               Delete
             </button>
           </div>
+
+          <section className="deck-config-panel" aria-label="Wizard configuration">
+            <div className="preferred-wizard-control">
+              <span>Wizard</span>
+              <select
+                value={selectedWizardType}
+                onChange={(event) => {
+                  const wizardType = event.target.value as WizardType;
+                  setSelectedWizardType(wizardType);
+                  setSelectedRuneIds(defaultRuneIdsForWizard(progressionLoadState.progression, wizardType));
+                }}
+              >
+                {WIZARD_OPTIONS.map((wizard) => (
+                  <option key={wizard.id} value={wizard.id}>
+                    {wizard.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="deck-config-skills">
+              <span>Active Skills</span>
+              <strong>
+                {skillNamesForWizard(progressionLoadState.progression, selectedWizardType).join(", ") ||
+                  "Base skill only"}
+              </strong>
+            </div>
+            <RuneSelector
+              progression={progressionLoadState.progression}
+              wizardType={selectedWizardType}
+              selectedRuneIds={selectedRuneIds}
+              onChange={setSelectedRuneIds}
+            />
+          </section>
 
           {previewLegality ? <DeckLegalityPanel legality={previewLegality} /> : null}
           {notice ? <p className="notice">{notice}</p> : null}
@@ -1284,6 +1349,33 @@ function aiSelectionFromValue(
       : null;
   }
   return null;
+}
+
+function deckChoiceFromValue(value: string): DeckChoice {
+  if (value.startsWith("system:")) {
+    return { source: "system", systemDeckId: value.slice("system:".length) };
+  }
+  if (value !== "starter") {
+    const deckId = Number(value);
+    if (Number.isFinite(deckId)) {
+      return { source: "account", deckId };
+    }
+  }
+  return { source: "starter" };
+}
+
+function deckChoiceValue(choice: DeckChoice | null) {
+  if (!choice) {
+    return "starter";
+  }
+  switch (choice.source) {
+    case "starter":
+      return "starter";
+    case "system":
+      return `system:${choice.systemDeckId}`;
+    case "account":
+      return String(choice.deckId);
+  }
 }
 
 function DetailStat({ label, value }: { label: string; value: string | number }) {
@@ -1424,6 +1516,192 @@ function AccountActions({ currentUser, onSignOut, onNavigate }: AccountProps) {
   );
 }
 
+type HomeLoadout =
+  | {
+      kind: "system";
+      id: string;
+      name: string;
+      wizardType: WizardType;
+      cardCount: number;
+      legal: boolean;
+      runeIds: string[];
+      deckChoice: DeckChoice;
+      deck?: never;
+    }
+  | {
+      kind: "account";
+      id: string;
+      name: string;
+      wizardType: WizardType;
+      cardCount: number;
+      legal: boolean;
+      runeIds: string[];
+      deckChoice: DeckChoice;
+      deck: DeckRecipeSummary;
+    };
+
+function TopNav({ currentUser, onNavigate, onSignOut }: AccountProps) {
+  return (
+    <nav className="top-nav" aria-label="Primary navigation">
+      <button className="brand-button" type="button" onClick={() => onNavigate("/")}>
+        <WandSparkles size={19} />
+        Rune Lanes
+      </button>
+      <div className="top-nav-links">
+        <button className="secondary-link" type="button" onClick={() => onNavigate("/")}>
+          <House size={18} />
+          Play
+        </button>
+        <button className="secondary-link" type="button" onClick={() => onNavigate("/catalog/")}>
+          <LibraryBig size={18} />
+          Catalog
+        </button>
+        {currentUser ? (
+          <>
+            <button className="secondary-link" type="button" onClick={() => onNavigate("/decks")}>
+              <Layers size={18} />
+              Decks
+            </button>
+            <button className="secondary-link" type="button" onClick={() => onNavigate("/matches")}>
+              <History size={18} />
+              Matches
+            </button>
+          </>
+        ) : null}
+      </div>
+      <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+    </nav>
+  );
+}
+
+function LoadoutCard({
+  loadout,
+  selected,
+  progression,
+  onSelect,
+  busy,
+}: {
+  loadout: HomeLoadout;
+  selected: boolean;
+  progression: ProgressionResponse | null;
+  onSelect: (loadout: HomeLoadout) => void;
+  busy: boolean;
+}) {
+  const wizard = wizardOptionByType(loadout.wizardType);
+  const effectiveRuneIds =
+    loadout.kind === "system" && progression
+      ? defaultRuneIdsForWizard(progression, loadout.wizardType)
+      : loadout.runeIds;
+  const runeNames = runeNamesForLoadout(progression, effectiveRuneIds);
+  const skillNames = skillNamesForWizard(progression, loadout.wizardType);
+
+  return (
+    <button
+      className={`loadout-card ${selected ? "selected" : ""} ${!loadout.legal ? "draft" : ""}`}
+      type="button"
+      aria-pressed={selected}
+      onClick={() => onSelect(loadout)}
+      disabled={busy || !loadout.legal}
+    >
+      <span className="loadout-card-model">
+        <WizardPreview3D wizardType={loadout.wizardType} label={wizard?.name ?? "Wizard"} />
+      </span>
+      <span className="loadout-card-body">
+        <span className="loadout-card-heading">
+          <span>
+            <strong>{loadout.name}</strong>
+            <small>{loadout.kind === "system" ? "Preconfigured" : "Custom deck recipe"}</small>
+          </span>
+          <WandSparkles size={18} />
+        </span>
+        <span className="wizard-stat-row">
+          <span>
+            <Heart size={13} />
+            {wizard?.hp ?? 0}
+          </span>
+          <span>
+            <Sword size={13} />
+            {wizard?.attack ?? 0}
+          </span>
+          <span>
+            <Zap size={13} />
+            {wizard?.ap ?? 0}
+          </span>
+          <span>
+            <Layers size={13} />
+            {loadout.cardCount}
+          </span>
+        </span>
+        <span className="loadout-detail-list">
+          <span>{wizard?.name ?? "Wizard"}</span>
+          <span>{runeNames.length > 0 ? runeNames.join(", ") : "No runes equipped"}</span>
+          <span>{skillNames.length > 0 ? skillNames.join(", ") : "Base skill only"}</span>
+          {!loadout.legal ? <span>Draft deck cannot start a match</span> : null}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function systemDeckToLoadout(deck: SystemDeckRecipe): HomeLoadout {
+  return {
+    kind: "system",
+    id: `system:${deck.id}`,
+    name: deck.name,
+    wizardType: deck.wizardType,
+    cardCount: deck.legality.totalCards,
+    legal: deck.legality.legal,
+    runeIds: [],
+    deckChoice: { source: "system", systemDeckId: deck.id },
+  };
+}
+
+function accountDeckToLoadout(deck: DeckRecipeSummary): HomeLoadout {
+  return {
+    kind: "account",
+    id: `account:${deck.id}`,
+    name: deck.name,
+    wizardType: deck.wizardType,
+    cardCount: deck.legality.totalCards,
+    legal: deck.legality.legal,
+    runeIds: deck.runeIds,
+    deckChoice: { source: "account", deckId: deck.id },
+    deck,
+  };
+}
+
+function runeIdsForHomeLoadout(loadout: HomeLoadout, progression: ProgressionResponse | null) {
+  if (loadout.kind === "system" && progression) {
+    return defaultRuneIdsForWizard(progression, loadout.wizardType);
+  }
+  return loadout.runeIds;
+}
+
+function runeNamesForLoadout(progression: ProgressionResponse | null, runeIds: string[]) {
+  if (!progression) {
+    return runeIds;
+  }
+  return runeIds.map((runeId) => progression.runes.find((rune) => rune.id === runeId)?.name ?? runeId);
+}
+
+function skillNamesForWizard(progression: ProgressionResponse | null, wizardType: WizardType) {
+  if (!progression) {
+    return [];
+  }
+  const wizard = progression.wizards.find((candidate) => candidate.wizardType === wizardType);
+  const tree = progression.skillTrees.find((candidate) => candidate.wizardType === wizardType);
+  if (!tree) {
+    return [];
+  }
+  const activeSkillIds = new Set([
+    ...tree.nodes.filter((node) => node.root).map((node) => node.id),
+    ...(wizard?.unlockedSkillIds ?? []),
+  ]);
+  return tree.nodes
+    .filter((node: SkillNodeDefinition) => activeSkillIds.has(node.id))
+    .map((node) => node.name);
+}
+
 function MatchPicker({
   onNavigate,
   currentUser,
@@ -1432,9 +1710,6 @@ function MatchPicker({
   onNavigate: (to: string) => void;
 } & AccountProps) {
   const [matchId, setMatchId] = useState("");
-  const [selectedWizardType, setSelectedWizardType] = useState<WizardType>(
-    () => currentUser?.preferredWizardType ?? "runekeeper",
-  );
   const [deckLoadState, setDeckLoadState] = useState<DeckLoadState | null>(
     currentUser ? { status: "loading" } : null,
   );
@@ -1444,7 +1719,7 @@ function MatchPicker({
   const [progressionLoadState, setProgressionLoadState] = useState<ProgressionLoadState | null>(
     currentUser ? { status: "loading" } : null,
   );
-  const [selectedPlayerDeckId, setSelectedPlayerDeckId] = useState<string>("");
+  const [selectedLoadoutId, setSelectedLoadoutId] = useState("system:balanced-starter");
   const [selectedAiDeck, setSelectedAiDeck] = useState<string>("system:balanced-starter");
   const [selectedAiWizardType, setSelectedAiWizardType] = useState<WizardType>("runekeeper");
   const [selectedRuneIds, setSelectedRuneIds] = useState<string[]>([]);
@@ -1471,7 +1746,7 @@ function MatchPicker({
     if (!currentUser) {
       setDeckLoadState(null);
       setProgressionLoadState(null);
-      setSelectedPlayerDeckId("");
+      setSelectedLoadoutId("system:balanced-starter");
       setSelectedRuneIds([]);
       return;
     }
@@ -1481,11 +1756,16 @@ function MatchPicker({
         setDeckLoadState({ status: "ready", response });
         const defaultDeck = response.decks.find((deck) => deck.isDefault && deck.legality.legal);
         const selectedDeck = response.decks.find(
-          (deck) => deck.legality.legal && String(deck.id) === selectedPlayerDeckId,
+          (deck) => deck.legality.legal && `account:${deck.id}` === selectedLoadoutId,
         );
-        const fallbackDeck =
-          defaultDeck ?? selectedDeck ?? response.decks.find((deck) => deck.legality.legal) ?? null;
-        setSelectedPlayerDeckId(fallbackDeck ? String(fallbackDeck.id) : "");
+        const firstLegalDeck = response.decks.find((deck) => deck.legality.legal);
+        const fallbackDeck = selectedLoadoutId.startsWith("account:")
+          ? selectedDeck ?? defaultDeck ?? firstLegalDeck ?? null
+          : defaultDeck ?? null;
+        if (fallbackDeck) {
+          setSelectedLoadoutId(`account:${fallbackDeck.id}`);
+          setSelectedRuneIds(fallbackDeck.runeIds);
+        }
       })
       .catch((error: unknown) =>
         setDeckLoadState({
@@ -1497,7 +1777,17 @@ function MatchPicker({
     loadProgression()
       .then((progression) => {
         setProgressionLoadState({ status: "ready", progression });
-        setSelectedRuneIds(defaultRuneIdsForWizard(progression, selectedWizardType));
+        if (!selectedLoadoutId.startsWith("account:")) {
+          const selectedSystemDeck = systemDeckLoadState.status === "ready"
+            ? systemDeckLoadState.response.decks.find((deck) => `system:${deck.id}` === selectedLoadoutId)
+            : null;
+          setSelectedRuneIds(
+            defaultRuneIdsForWizard(
+              progression,
+              selectedSystemDeck?.wizardType ?? currentUser.preferredWizardType,
+            ),
+          );
+        }
       })
       .catch((error: unknown) =>
         setProgressionLoadState({
@@ -1507,21 +1797,52 @@ function MatchPicker({
       );
   }, [currentUser]);
 
+  const systemDecks =
+    systemDeckLoadState.status === "ready" ? systemDeckLoadState.response.decks : [];
+  const accountDecks = deckLoadState?.status === "ready" ? deckLoadState.response.decks : [];
+  const legalAccountDecks = accountDecks.filter((deck) => deck.legality.legal);
+  const loadouts = useMemo(
+    () => [
+      ...systemDecks.map(systemDeckToLoadout),
+      ...accountDecks.map(accountDeckToLoadout),
+    ],
+    [systemDecks, accountDecks],
+  );
+  const selectedLoadout =
+    loadouts.find((loadout) => loadout.id === selectedLoadoutId) ??
+    loadouts[0] ??
+    null;
+  const selectedAiDeckIsAccount = selectedAiDeck.startsWith("account:");
+
   useEffect(() => {
-    if (progressionLoadState?.status === "ready") {
-      setSelectedRuneIds(defaultRuneIdsForWizard(progressionLoadState.progression, selectedWizardType));
+    if (!selectedLoadout && loadouts[0]) {
+      setSelectedLoadoutId(loadouts[0].id);
+      setSelectedRuneIds(loadouts[0].runeIds);
+      return;
     }
-  }, [selectedWizardType, progressionLoadState?.status]);
+    if (!selectedLoadout) {
+      return;
+    }
+    setSelectedRuneIds(
+      runeIdsForHomeLoadout(
+        selectedLoadout,
+        progressionLoadState?.status === "ready" ? progressionLoadState.progression : null,
+      ),
+    );
+  }, [selectedLoadout?.id, loadouts.length, progressionLoadState?.status]);
 
   async function handleCreateMatch() {
+    if (!selectedLoadout) {
+      setNotice("Choose a loadout.");
+      return;
+    }
     setBusy(true);
     setNotice(null);
     try {
       const aiOpponent = aiSelectionFromValue(selectedAiDeck, selectedAiWizardType);
-      const playerDeckId = selectedPlayerDeckId ? Number(selectedPlayerDeckId) : null;
       const created = await createMatch({
-        wizardType: selectedWizardType,
-        ...(playerDeckId !== null ? { playerDeckId } : {}),
+        wizardType: selectedLoadout.wizardType,
+        playerDeck: selectedLoadout.deckChoice,
         ...(aiOpponent ? { aiOpponent } : {}),
         ...(selectedRuneIds.length > 0 ? { runeIds: selectedRuneIds } : {}),
       });
@@ -1534,16 +1855,24 @@ function MatchPicker({
   }
 
   async function handleCreateSharedMatch() {
+    if (!selectedLoadout) {
+      setNotice("Choose a loadout.");
+      return;
+    }
     setBusy(true);
     setNotice(null);
     try {
-      const created = await createSharedMatch(selectedWizardType);
+      const created = await createSharedMatch(selectedLoadout.wizardType);
       sessionStorage.setItem(
         `rune-lanes-invite:${created.matchId}`,
         `${window.location.origin}${created.inviteSeatUrl}`,
       );
-      sessionStorage.setItem(`rune-lanes-wizard:${created.matchId}`, selectedWizardType);
+      sessionStorage.setItem(`rune-lanes-wizard:${created.matchId}`, selectedLoadout.wizardType);
       sessionStorage.setItem(`rune-lanes-runes:${created.matchId}`, JSON.stringify(selectedRuneIds));
+      sessionStorage.setItem(
+        `rune-lanes-deck-choice:${created.matchId}`,
+        JSON.stringify(selectedLoadout.deckChoice),
+      );
       onNavigate(created.playerSeatUrl);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not create multiplayer match");
@@ -1562,87 +1891,154 @@ function MatchPicker({
     onNavigate(`/match/${encodeURIComponent(normalized)}`);
   }
 
-  const accountDecks = deckLoadState?.status === "ready" ? deckLoadState.response.decks : [];
-  const legalAccountDecks = accountDecks.filter((deck) => deck.legality.legal);
-  const signedInDecksReady = currentUser !== null && deckLoadState?.status === "ready";
-  const hasNoLegalAccountDecks = signedInDecksReady && legalAccountDecks.length === 0;
-  const systemDecks =
-    systemDeckLoadState.status === "ready" ? systemDeckLoadState.response.decks : [];
-  const selectedAiDeckIsAccount = selectedAiDeck.startsWith("account:");
-  const cannotCreateSoloMatch =
-    busy || (currentUser !== null && deckLoadState?.status === "loading");
+  async function handleSelectLoadout(loadout: HomeLoadout) {
+    setSelectedLoadoutId(loadout.id);
+    setSelectedRuneIds(
+      runeIdsForHomeLoadout(
+        loadout,
+        progressionLoadState?.status === "ready" ? progressionLoadState.progression : null,
+      ),
+    );
+    setNotice(null);
+  }
+
+  async function handleRuneChange(runeIds: string[]) {
+    if (!selectedLoadout || progressionLoadState?.status !== "ready") {
+      return;
+    }
+    setSelectedRuneIds(runeIds);
+    try {
+      if (selectedLoadout.kind === "system") {
+        const updated = await saveWizardRuneLoadout(selectedLoadout.wizardType, runeIds);
+        setProgressionLoadState({ status: "ready", progression: updated });
+        setNotice(null);
+        return;
+      }
+
+      if (!selectedLoadout.deck) {
+        return;
+      }
+      const updatedDeck = await updateDeck(
+        selectedLoadout.deck.id,
+        selectedLoadout.deck.name,
+        selectedLoadout.deck.cards,
+        selectedLoadout.deck.isDefault,
+        { wizardType: selectedLoadout.deck.wizardType, runeIds },
+      );
+      setDeckLoadState((current) => {
+        if (current?.status !== "ready") {
+          return current;
+        }
+        return {
+          status: "ready",
+          response: {
+            ...current.response,
+            decks: current.response.decks.map((deck) =>
+              deck.id === updatedDeck.id ? updatedDeck : deck,
+            ),
+          },
+        };
+      });
+      setNotice(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not save rune loadout");
+    }
+  }
 
   return (
-    <main className="app-shell picker-shell">
-      <section className="match-picker" aria-label="Match picker">
-        <header className="picker-header">
-          <div>
-            <p className="eyebrow">Rune Lanes</p>
-            <h1>Choose Your Wizard</h1>
-          </div>
-          <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+    <main className="app-shell home-shell">
+      <TopNav currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+      <section className="home-layout" aria-label="Match loadout selector">
+        <header className="home-heading">
+          <p className="eyebrow">Rune Lanes</p>
+          <h1>Choose Your Loadout</h1>
         </header>
-        <fieldset className="wizard-picker" aria-label="Wizard type">
-          <legend>Wizard Type</legend>
-          <div className="wizard-options">
-            {WIZARD_OPTIONS.map((wizard) => (
-              <button
-                key={wizard.id}
-                className={`wizard-option ${selectedWizardType === wizard.id ? "selected" : ""}`}
-                type="button"
-                aria-pressed={selectedWizardType === wizard.id}
-                onClick={() => setSelectedWizardType(wizard.id)}
-                disabled={busy}
-              >
-                <span className="wizard-option-header">
-                  <span>
-                    <strong>{wizard.name}</strong>
-                    <span>{wizard.role}</span>
-                  </span>
-                  <WandSparkles size={18} />
-                </span>
-                <span className="wizard-option-text">{wizard.text}</span>
-                <span className="wizard-stat-row">
-                  <span>
-                    <Heart size={13} />
-                    {wizard.hp}
-                  </span>
-                  <span>
-                    <Sword size={13} />
-                    {wizard.attack}
-                  </span>
-                  <span>
-                    <Zap size={13} />
-                    {wizard.ap}
-                  </span>
-                </span>
-              </button>
-            ))}
+
+        <section className="loadout-stage" aria-label="Preconfigured loadouts">
+          <div className="loadout-section-heading">
+            <div>
+              <span>Preconfigured</span>
+              <strong>System loadouts</strong>
+            </div>
           </div>
-        </fieldset>
-        <section className="setup-deck-selectors" aria-label="Deck selection">
-          {currentUser ? (
-            <label>
-              Your Deck Recipe
-              <select
-                value={selectedPlayerDeckId}
-                onChange={(event) => setSelectedPlayerDeckId(event.target.value)}
-                disabled={busy || deckLoadState?.status === "loading"}
-              >
-                {hasNoLegalAccountDecks ? <option value="">No legal deck recipes</option> : null}
-                {accountDecks.length === 0 && !hasNoLegalAccountDecks ? (
-                  <option value="">No account deck recipes</option>
-                ) : null}
-                {accountDecks.map((deck) => (
-                  <option key={deck.id} value={deck.id} disabled={!deck.legality.legal}>
-                    {deck.legality.legal
-                      ? deck.name
-                      : `${deck.name} - Draft - cannot start a match`}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <div className="loadout-grid">
+            {systemDeckLoadState.status === "loading" ? (
+              <p className="notice">Loading system loadouts</p>
+            ) : null}
+            {systemDecks.map((deck) => {
+              const loadout = systemDeckToLoadout(deck);
+              return (
+                <LoadoutCard
+                  key={loadout.id}
+                  loadout={loadout}
+                  selected={selectedLoadout?.id === loadout.id}
+                  progression={progressionLoadState?.status === "ready" ? progressionLoadState.progression : null}
+                  onSelect={handleSelectLoadout}
+                  busy={busy}
+                />
+              );
+            })}
+          </div>
+        </section>
+
+        {currentUser ? (
+          <section className="loadout-stage" aria-label="Custom deck loadouts">
+            <div className="loadout-section-heading">
+              <div>
+                <span>Custom</span>
+                <strong>Your deck recipes</strong>
+              </div>
+              <button className="secondary-link" type="button" onClick={() => onNavigate("/decks")}>
+                <Layers size={18} />
+                Manage
+              </button>
+            </div>
+            <div className="loadout-grid">
+              {deckLoadState?.status === "loading" ? <p className="notice">Loading deck library</p> : null}
+              {accountDecks.map((deck) => {
+                const loadout = accountDeckToLoadout(deck);
+                return (
+                  <LoadoutCard
+                    key={loadout.id}
+                    loadout={loadout}
+                    selected={selectedLoadout?.id === loadout.id}
+                    progression={progressionLoadState?.status === "ready" ? progressionLoadState.progression : null}
+                    onSelect={handleSelectLoadout}
+                    busy={busy}
+                  />
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="home-setup-panel" aria-label="Match setup">
+          {selectedLoadout ? (
+            <div className="selected-loadout-summary">
+              <span>Selected</span>
+              <strong>{selectedLoadout.name}</strong>
+              <small>{wizardTypeLabel(selectedLoadout.wizardType)} · {selectedLoadout.cardCount} cards</small>
+            </div>
           ) : null}
+          {progressionLoadState?.status === "ready" && selectedLoadout ? (
+            <RuneSelector
+              progression={progressionLoadState.progression}
+              wizardType={selectedLoadout.wizardType}
+              selectedRuneIds={selectedRuneIds}
+              onChange={(runeIds) => void handleRuneChange(runeIds)}
+            />
+          ) : null}
+          {!currentUser ? (
+            <p className="notice">Sign in to equip runes, use custom deck recipes, and earn mastery.</p>
+          ) : null}
+          {progressionLoadState?.status === "error" ? (
+            <p className="notice">{progressionLoadState.message}</p>
+          ) : null}
+          {deckLoadState?.status === "error" ? <p className="notice">{deckLoadState.message}</p> : null}
+          {systemDeckLoadState.status === "error" ? (
+            <p className="notice">{systemDeckLoadState.message}</p>
+          ) : null}
+          <div className="setup-deck-selectors" aria-label="AI opponent selection">
           <label>
             AI Deck
             <select
@@ -1678,37 +2074,15 @@ function MatchPicker({
               </select>
             </label>
           ) : null}
-          {deckLoadState?.status === "error" ? <p className="notice">{deckLoadState.message}</p> : null}
-          {systemDeckLoadState.status === "error" ? (
-            <p className="notice">{systemDeckLoadState.message}</p>
-          ) : null}
-          {hasNoLegalAccountDecks ? (
-            <div className="deck-empty-guidance">
-              <p>Create or repair a deck recipe before choosing a custom player deck.</p>
-              <button className="secondary-link" type="button" onClick={() => onNavigate("/decks")}>
-                <Layers size={18} />
-                Decks
-              </button>
-            </div>
-          ) : null}
+          </div>
         </section>
-        {progressionLoadState?.status === "ready" ? (
-          <RuneSelector
-            progression={progressionLoadState.progression}
-            wizardType={selectedWizardType}
-            selectedRuneIds={selectedRuneIds}
-            onChange={setSelectedRuneIds}
-          />
-        ) : null}
-        {progressionLoadState?.status === "error" ? (
-          <p className="notice">{progressionLoadState.message}</p>
-        ) : null}
-        <div className="picker-actions">
+
+        <div className="picker-actions home-actions">
           <button
             className="primary-button"
             type="button"
             onClick={() => void handleCreateMatch()}
-            disabled={cannotCreateSoloMatch}
+            disabled={busy || !selectedLoadout}
           >
             <Plus size={18} />
             New Solo Match
@@ -1717,24 +2091,10 @@ function MatchPicker({
             className="primary-button"
             type="button"
             onClick={() => void handleCreateSharedMatch()}
-            disabled={busy}
+            disabled={busy || !selectedLoadout}
           >
             <Users size={18} />
             New Multiplayer Match
-          </button>
-          <button className="secondary-link" type="button" onClick={() => onNavigate("/catalog/")}>
-            <LibraryBig size={18} />
-            Card Catalog
-          </button>
-          {currentUser ? (
-            <button className="secondary-link" type="button" onClick={() => onNavigate("/decks")}>
-              <Layers size={18} />
-              Decks
-            </button>
-          ) : null}
-          <button className="secondary-link" type="button" onClick={() => onNavigate("/matches")}>
-            <History size={18} />
-            Match Archive
           </button>
         </div>
         <form className="open-match-form" onSubmit={handleOpenMatch}>
@@ -2746,10 +3106,16 @@ function SharedMatchPage({
   const [deckLoadState, setDeckLoadState] = useState<DeckLoadState | null>(
     currentUser ? { status: "loading" } : null,
   );
+  const [systemDeckLoadState, setSystemDeckLoadState] = useState<SystemDeckLoadState>({
+    status: "loading",
+  });
   const [progressionLoadState, setProgressionLoadState] = useState<ProgressionLoadState | null>(
     currentUser ? { status: "loading" } : null,
   );
-  const [selectedDeckId, setSelectedDeckId] = useState<string>("starter");
+  const [selectedDeckId, setSelectedDeckId] = useState<string>(() => {
+    const stored = sessionStorage.getItem(`rune-lanes-deck-choice:${matchId}`);
+    return deckChoiceValue(parseDeckChoice(stored));
+  });
   const [selectedRuneIds, setSelectedRuneIds] = useState<string[]>(() => {
     const stored = sessionStorage.getItem(`rune-lanes-runes:${matchId}`);
     return stored ? parseRuneIds(stored) : [];
@@ -2791,6 +3157,17 @@ function SharedMatchPage({
     loadCatalog()
       .then((response) => setCatalogCards(response.cards))
       .catch(() => setCatalogCards([]));
+  }, []);
+
+  useEffect(() => {
+    loadSystemDecks()
+      .then((response) => setSystemDeckLoadState({ status: "ready", response }))
+      .catch((error: unknown) =>
+        setSystemDeckLoadState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not load system decks",
+        }),
+      );
   }, []);
 
   const visualCatalog = useMemo(
@@ -3166,11 +3543,18 @@ function SharedMatchPage({
         matchId,
         seatToken,
         selectedWizardType,
-        selectedDeckId === "starter" ? undefined : Number(selectedDeckId),
+        selectedDeckId === "starter" || selectedDeckId.startsWith("system:")
+          ? undefined
+          : Number(selectedDeckId),
         selectedRuneIds,
+        deckChoiceFromValue(selectedDeckId),
       );
       sessionStorage.setItem(`rune-lanes-wizard:${matchId}`, selectedWizardType);
       sessionStorage.setItem(`rune-lanes-runes:${matchId}`, JSON.stringify(selectedRuneIds));
+      sessionStorage.setItem(
+        `rune-lanes-deck-choice:${matchId}`,
+        JSON.stringify(deckChoiceFromValue(selectedDeckId)),
+      );
       setLoadState({ status: "ready", shared: joined });
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not join match");
@@ -3314,6 +3698,8 @@ function SharedMatchPage({
       deckLoadState?.status === "ready"
         ? deckLoadState.response.decks.filter((deck) => deck.legality.legal)
         : [];
+    const systemDecks =
+      systemDeckLoadState.status === "ready" ? systemDeckLoadState.response.decks : [];
     const lobbyActionLabel = shared.viewerReady
       ? hasUnsavedWizardChoice
         ? "Update Wizard"
@@ -3357,9 +3743,14 @@ function SharedMatchPage({
               <select
                 value={selectedDeckId}
                 onChange={(event) => setSelectedDeckId(event.target.value)}
-                disabled={busy || !currentUser || deckLoadState?.status === "loading"}
+                disabled={busy || systemDeckLoadState.status === "loading"}
               >
                 <option value="starter">Starter</option>
+                {systemDecks.map((deck) => (
+                  <option key={deck.id} value={`system:${deck.id}`}>
+                    {deck.name}
+                  </option>
+                ))}
                 {legalDecks.map((deck) => (
                   <option key={deck.id} value={deck.id}>
                     {deck.name}
@@ -3368,6 +3759,9 @@ function SharedMatchPage({
               </select>
             </label>
             {deckLoadState?.status === "error" ? <p className="notice">{deckLoadState.message}</p> : null}
+            {systemDeckLoadState.status === "error" ? (
+              <p className="notice">{systemDeckLoadState.message}</p>
+            ) : null}
           </section>
           {progressionLoadState?.status === "ready" ? (
             <RuneSelector
@@ -5061,6 +5455,35 @@ function parseRuneIds(value: string) {
       : [];
   } catch {
     return [];
+  }
+}
+
+function parseDeckChoice(value: string | null): DeckChoice | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || !("source" in parsed)) {
+      return null;
+    }
+    const source = parsed.source;
+    if (source === "starter") {
+      return { source: "starter" };
+    }
+    if (
+      source === "system" &&
+      "systemDeckId" in parsed &&
+      typeof parsed.systemDeckId === "string"
+    ) {
+      return { source: "system", systemDeckId: parsed.systemDeckId };
+    }
+    if (source === "account" && "deckId" in parsed && typeof parsed.deckId === "number") {
+      return { source: "account", deckId: parsed.deckId };
+    }
+    return null;
+  } catch {
+    return null;
   }
 }
 

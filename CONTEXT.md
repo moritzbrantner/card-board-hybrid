@@ -52,6 +52,10 @@ _Avoid_: beginner deck
 A saved list of card-template counts used to create a shuffled match deck.
 _Avoid_: deck, pile
 
+**Configured deck recipe**:
+An account-owned deck recipe with a saved Wizard and rune loadout for use as a match loadout.
+_Avoid_: deck settings, deck profile
+
 **Deck library**:
 The set of named deck recipes owned by an account.
 _Avoid_: collection
@@ -67,6 +71,10 @@ _Avoid_: invalid deck
 **System deck recipe**:
 A predefined legal recipe shipped by Rune Lanes, used for starter/default play and AI opponent choices.
 _Avoid_: AI-only deck
+
+**Match loadout**:
+The pre-match choice for one side, combining a Wizard, a deck recipe or system deck recipe, and a rune loadout.
+_Avoid_: build, preset
 
 **Solo match**:
 A match where one human controls Player and the backend AI controls Opponent.
