@@ -1,15 +1,38 @@
 import { expect, test } from "@playwright/test";
 
 const AUTH_TOKEN_STORAGE_KEY = "rune-lanes-auth-token";
+const BOARD_VISUAL_MODE_STORAGE_KEY = "rune-lanes-board-visual-mode";
 
-test("signed-out players visiting settings are redirected to login with next", async ({ page }) => {
+test("signed-out players save local board visual mode from settings", async ({ page }) => {
   await mockSettingsApi(page);
+  await page.addInitScript(
+    ({ authKey, boardKey }) => {
+      localStorage.removeItem(authKey);
+      if (localStorage.getItem(boardKey) === null) {
+        localStorage.setItem(boardKey, "3d");
+      }
+    },
+    { authKey: AUTH_TOKEN_STORAGE_KEY, boardKey: BOARD_VISUAL_MODE_STORAGE_KEY },
+  );
 
   await page.goto("/settings");
 
-  await expect(page).toHaveURL(/\/login\?/);
-  expect(new URL(page.url()).searchParams.get("next")).toBe("/settings");
-  await expect(page.getByRole("heading", { name: "Sign In" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.getByText("Local preferences")).toBeVisible();
+  await expect(page.getByLabel("Theme")).toHaveCount(0);
+  await expect(page.getByLabel("Board visual mode")).toHaveValue("3d");
+  await expect(page.getByRole("button", { name: "Sign out" })).toHaveCount(0);
+
+  await page.getByLabel("Board visual mode").selectOption("2d");
+  await page.getByRole("button", { name: "Save Settings" }).click();
+
+  await expect(page.getByText("Settings saved.")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate((key) => localStorage.getItem(key), BOARD_VISUAL_MODE_STORAGE_KEY))
+    .toBe("2d");
+
+  await page.reload();
+  await expect(page.getByLabel("Board visual mode")).toHaveValue("2d");
 });
 
 test("settings load, save, apply, and persist visual preferences", async ({ page }) => {
@@ -32,11 +55,13 @@ test("settings load, save, apply, and persist visual preferences", async ({ page
 
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(page.getByLabel("Theme")).toHaveValue("system");
+  await expect(page.getByLabel("Board visual mode")).toHaveValue("2d");
 
   await page.getByLabel("Theme").selectOption("highContrast");
   await page.getByLabel("Motion").selectOption("reduced");
   await page.getByLabel("Animation speed").selectOption("fast");
   await page.getByLabel("Board scale").selectOption("large");
+  await page.getByLabel("Board visual mode").selectOption("3d");
   await page.getByRole("button", { name: "Save Settings" }).click();
 
   await expect(page.getByText("Settings saved.")).toBeVisible();
@@ -46,6 +71,7 @@ test("settings load, save, apply, and persist visual preferences", async ({ page
     motion: "reduced",
     animationSpeed: "fast",
     boardScale: "large",
+    boardVisualMode: "3d",
   });
   expect(savedPayloads[0].hotkeys).toHaveLength(15);
   await expect
@@ -68,6 +94,7 @@ test("settings load, save, apply, and persist visual preferences", async ({ page
   await expect(page.getByLabel("Motion")).toHaveValue("reduced");
   await expect(page.getByLabel("Animation speed")).toHaveValue("fast");
   await expect(page.getByLabel("Board scale")).toHaveValue("large");
+  await expect(page.getByLabel("Board visual mode")).toHaveValue("3d");
 });
 
 test("settings record, validate, reset, and persist hotkeys", async ({ page }) => {
@@ -216,6 +243,7 @@ function defaultPreferences() {
     motion: "system",
     animationSpeed: "normal",
     boardScale: "normal",
+    boardVisualMode: "2d",
     hotkeys: [
       { commandId: "cursorNorthwest", binding: "Q" },
       { commandId: "cursorNortheast", binding: "W" },

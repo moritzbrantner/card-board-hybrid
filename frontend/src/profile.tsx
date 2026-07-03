@@ -114,7 +114,6 @@ export function ProfilePage({
         displayName,
         avatar,
         preferredWizardType,
-        currentUser.boardVisualMode,
       );
       onProfileUpdated(updated);
       setDisplayName(updated.displayName);

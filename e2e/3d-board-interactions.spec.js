@@ -173,12 +173,17 @@ test("persists Board visual mode switches locally", async ({ page }) => {
 
   await mockMatchApi(page, async () => matchResponse(match), () => match);
 
-  await page.goto(`/match/${MATCH_ID}`);
-  await page.getByRole("button", { name: "2D" }).click();
-  await expect(page.locator('section[data-board-renderer="2d"]')).toBeVisible();
+  await page.goto("/settings");
+  await expect(page.getByLabel("Board visual mode")).toHaveValue("3d");
+  await page.getByLabel("Board visual mode").selectOption("2d");
+  await page.getByRole("button", { name: "Save Settings" }).click();
+  await expect(page.getByText("Settings saved.")).toBeVisible();
   await expect
     .poll(() => page.evaluate((key) => localStorage.getItem(key), BOARD_VISUAL_MODE_STORAGE_KEY))
     .toBe("2d");
+
+  await page.goto(`/match/${MATCH_ID}`);
+  await expect(page.locator('section[data-board-renderer="2d"]')).toBeVisible();
 
   await page.reload();
   await expect(page.locator('section[data-board-renderer="2d"]')).toBeVisible();

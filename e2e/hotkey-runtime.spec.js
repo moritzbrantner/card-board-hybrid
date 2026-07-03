@@ -208,6 +208,7 @@ function preferences() {
     motion: "system",
     animationSpeed: "normal",
     boardScale: "normal",
+    boardVisualMode: "2d",
     hotkeys: [
       { commandId: "cursorNorthwest", binding: "Q" },
       { commandId: "cursorNortheast", binding: "W" },

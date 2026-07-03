@@ -61,7 +61,6 @@ import {
   sharedMatchWebSocketUrl,
   updateDeck,
   updatePreferences,
-  updateProfile,
 } from "./api";
 import {
   effectiveBoardVisualMode,
@@ -227,13 +226,7 @@ type AccountProps = {
   onNavigate: (to: string) => void;
 };
 
-type BoardVisualModeProps = {
-  boardVisualMode: BoardVisualMode;
-  onBoardVisualModeChange: (mode: BoardVisualMode) => Promise<void>;
-};
-
 type AccountPreferenceProps = AccountProps & {
-  onCurrentUserUpdated: (user: AuthUser) => void;
   visualPreferences: AppliedVisualPreferences;
 };
 
@@ -291,39 +284,6 @@ function protectedLoginRoute(nextPath: string) {
   return `/login?next=${encodeURIComponent(nextPath)}`;
 }
 
-function useBoardVisualModePreference(
-  currentUser: AuthUser | null,
-  onCurrentUserUpdated: (user: AuthUser) => void,
-) {
-  const [boardVisualMode, setBoardVisualModeState] = useState<BoardVisualMode>(() =>
-    effectiveBoardVisualMode(currentUser),
-  );
-
-  useEffect(() => {
-    setBoardVisualModeState(effectiveBoardVisualMode(currentUser));
-  }, [currentUser?.id, currentUser?.boardVisualMode]);
-
-  async function setBoardVisualMode(mode: BoardVisualMode) {
-    setBoardVisualModeState(mode);
-
-    if (!currentUser) {
-      saveLocalBoardVisualMode(mode);
-      return;
-    }
-
-    const updated = await updateProfile(
-      currentUser.displayName,
-      currentUser.avatar,
-      currentUser.preferredWizardType,
-      mode,
-    );
-    onCurrentUserUpdated(updated);
-    setBoardVisualModeState(updated.boardVisualMode);
-  }
-
-  return [boardVisualMode, setBoardVisualMode] as const;
-}
-
 function usePrefersReducedMotion() {
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(() =>
     window.matchMedia("(prefers-reduced-motion: reduce)").matches,
@@ -360,7 +320,7 @@ function useAccountPreferences(currentUser: AuthUser | null) {
   const [accountPreferences, setAccountPreferences] = useState<AccountPreferencesState>({
     state: {
       status: "ready",
-      preferences: DEFAULT_ACCOUNT_PREFERENCES,
+      preferences: localAccountPreferences(),
     },
     loadedUserId: null,
   });
@@ -369,7 +329,7 @@ function useAccountPreferences(currentUser: AuthUser | null) {
   const refresh = useCallback(async () => {
     if (!currentUser) {
       setAccountPreferences({
-        state: { status: "ready", preferences: DEFAULT_ACCOUNT_PREFERENCES },
+        state: { status: "ready", preferences: localAccountPreferences() },
         loadedUserId: null,
       });
       return;
@@ -403,6 +363,21 @@ function useAccountPreferences(currentUser: AuthUser | null) {
 
   const save = useCallback(
     async (preferences: Parameters<typeof updatePreferences>[0]) => {
+      if (currentUserId === null) {
+        saveLocalBoardVisualMode(preferences.boardVisualMode);
+        setAccountPreferences({
+          state: {
+            status: "ready",
+            preferences: normalizeAccountPreferences({
+              ...localAccountPreferences(),
+              boardVisualMode: preferences.boardVisualMode,
+            }),
+          },
+          loadedUserId: null,
+        });
+        return;
+      }
+
       const updated = normalizeAccountPreferences(await updatePreferences(preferences));
       setAccountPreferences({
         state: { status: "ready", preferences: updated },
@@ -418,6 +393,13 @@ function useAccountPreferences(currentUser: AuthUser | null) {
       : accountPreferences.state;
 
   return { state, refresh, save };
+}
+
+function localAccountPreferences(): AccountPreferences {
+  return {
+    ...DEFAULT_ACCOUNT_PREFERENCES,
+    boardVisualMode: effectiveBoardVisualMode(null),
+  };
 }
 
 function useHotkeyHandlers(hotkeys: AccountPreferences["hotkeys"], handlers: HotkeyHandlers) {
@@ -588,13 +570,10 @@ export function App() {
   }
 
   if (normalizedPath === "/settings") {
-    if (!currentUser) {
-      return <RouteRedirect to={protectedLoginRoute("/settings")} onNavigate={replaceRoute} />;
-    }
-
     return (
       <SettingsPage
         preferencesState={preferences.state}
+        isSignedIn={Boolean(currentUser)}
         onNavigate={navigate}
         onSave={preferences.save}
         onRefresh={preferences.refresh}
@@ -644,7 +623,6 @@ export function App() {
         onNavigate={navigate}
         currentUser={currentUser}
         onSignOut={handleSignOut}
-        onCurrentUserUpdated={(user) => setAuthState({ status: "signedIn", user })}
         visualPreferences={visualPreferences}
       />
     );
@@ -660,7 +638,6 @@ export function App() {
         onNavigate={navigate}
         currentUser={currentUser}
         onSignOut={handleSignOut}
-        onCurrentUserUpdated={(user) => setAuthState({ status: "signedIn", user })}
         visualPreferences={visualPreferences}
       />
     );
@@ -675,7 +652,6 @@ export function App() {
         onNavigate={navigate}
         currentUser={currentUser}
         onSignOut={handleSignOut}
-        onCurrentUserUpdated={(user) => setAuthState({ status: "signedIn", user })}
         visualPreferences={visualPreferences}
       />
     );
@@ -1438,37 +1414,6 @@ function AccountActions({ currentUser, onSignOut, onNavigate }: AccountProps) {
   );
 }
 
-function BoardVisualModeQuickControl({
-  boardVisualMode,
-  onBoardVisualModeChange,
-  disabled = false,
-}: BoardVisualModeProps & { disabled?: boolean }) {
-  return (
-    <fieldset className="board-visual-mode-quick" aria-label="Board visual mode">
-      <button
-        className={boardVisualMode === "2d" ? "active" : ""}
-        type="button"
-        onClick={() => void onBoardVisualModeChange("2d")}
-        aria-pressed={boardVisualMode === "2d"}
-        disabled={disabled}
-        title="Use 2D board"
-      >
-        2D
-      </button>
-      <button
-        className={boardVisualMode === "3d" ? "active" : ""}
-        type="button"
-        onClick={() => void onBoardVisualModeChange("3d")}
-        aria-pressed={boardVisualMode === "3d"}
-        disabled={disabled}
-        title="Use 3D board"
-      >
-        3D
-      </button>
-    </fieldset>
-  );
-}
-
 function MatchPicker({
   onNavigate,
   currentUser,
@@ -2055,17 +2000,13 @@ function MatchPage({
   onNavigate,
   currentUser,
   onSignOut,
-  onCurrentUserUpdated,
   visualPreferences,
 }: {
   matchId: string;
   onNavigate: (to: string) => void;
 } & AccountPreferenceProps) {
   const viewerSide: Side = "player";
-  const [boardVisualMode, setBoardVisualMode] = useBoardVisualModePreference(
-    currentUser,
-    onCurrentUserUpdated,
-  );
+  const boardVisualMode = visualPreferences.preferences.boardVisualMode;
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
@@ -2548,15 +2489,6 @@ function MatchPage({
     setFocusedUnitPieceId(unit.id);
   }
 
-  async function handleBoardVisualModeChange(mode: BoardVisualMode) {
-    try {
-      await setBoardVisualMode(mode);
-      setNotice(null);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Could not save board visual mode");
-    }
-  }
-
   function handleActivateUnitItem(unit: BoardUnit, itemId: string) {
     setUnitContextMenu(null);
     void runAction(() => activateItem(matchId, unit.id, itemId));
@@ -2573,11 +2505,6 @@ function MatchPage({
           </div>
           <div className="actions">
             <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
-            <BoardVisualModeQuickControl
-              boardVisualMode={boardVisualMode}
-              onBoardVisualModeChange={handleBoardVisualModeChange}
-              disabled={busy}
-            />
             <button
               className="icon-button"
               type="button"
@@ -2738,17 +2665,13 @@ function SharedMatchPage({
   onNavigate,
   currentUser,
   onSignOut,
-  onCurrentUserUpdated,
   visualPreferences,
 }: {
   matchId: string;
   seatToken: string;
   onNavigate: (to: string) => void;
 } & AccountPreferenceProps) {
-  const [boardVisualMode, setBoardVisualMode] = useBoardVisualModePreference(
-    currentUser,
-    onCurrentUserUpdated,
-  );
+  const boardVisualMode = visualPreferences.preferences.boardVisualMode;
   const [loadState, setLoadState] = useState<SharedLoadState>({ status: "loading" });
   const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
@@ -3291,15 +3214,6 @@ function SharedMatchPage({
     setFocusedUnitPieceId(unit.id);
   }
 
-  async function handleBoardVisualModeChange(mode: BoardVisualMode) {
-    try {
-      await setBoardVisualMode(mode);
-      setNotice(null);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Could not save board visual mode");
-    }
-  }
-
   function handleActivateUnitItem(unit: BoardUnit, itemId: string) {
     setUnitContextMenu(null);
     sendSharedAction({ type: "activateItem", unitId: unit.id, itemId });
@@ -3464,11 +3378,6 @@ function SharedMatchPage({
           </div>
           <div className="actions">
             <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
-            <BoardVisualModeQuickControl
-              boardVisualMode={boardVisualMode}
-              onBoardVisualModeChange={handleBoardVisualModeChange}
-              disabled={busy}
-            />
             <button
               className="icon-button"
               type="button"
@@ -3633,16 +3542,12 @@ function ReplayPage({
   onNavigate,
   currentUser,
   onSignOut,
-  onCurrentUserUpdated,
   visualPreferences,
 }: {
   matchId: string;
   onNavigate: (to: string) => void;
 } & AccountPreferenceProps) {
-  const [boardVisualMode, setBoardVisualMode] = useBoardVisualModePreference(
-    currentUser,
-    onCurrentUserUpdated,
-  );
+  const boardVisualMode = visualPreferences.preferences.boardVisualMode;
   const [loadState, setLoadState] = useState<ReplayLoadState>({ status: "loading" });
   const [frameIndex, setFrameIndex] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
@@ -3692,15 +3597,6 @@ function ReplayPage({
     reducedMotion,
   });
 
-  async function handleBoardVisualModeChange(mode: BoardVisualMode) {
-    try {
-      await setBoardVisualMode(mode);
-      setNotice(null);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Could not save board visual mode");
-    }
-  }
-
   return (
     <main className="app-shell replay-shell">
       <section className="table replay-table">
@@ -3712,10 +3608,6 @@ function ReplayPage({
           </div>
           <div className="actions">
             <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
-            <BoardVisualModeQuickControl
-              boardVisualMode={boardVisualMode}
-              onBoardVisualModeChange={handleBoardVisualModeChange}
-            />
             <button
               className="icon-button"
               type="button"
