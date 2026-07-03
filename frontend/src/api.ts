@@ -21,6 +21,7 @@ import type {
   WizardType,
   AccountProfile,
   GeneratedAvatar,
+  BoardVisualMode,
 } from "./types";
 import { clearAuthToken, getAuthToken } from "./session";
 
@@ -76,10 +77,11 @@ export function updateProfile(
   displayName: string,
   avatar: GeneratedAvatar,
   preferredWizardType: WizardType,
+  boardVisualMode: BoardVisualMode,
 ) {
   return request<AccountProfile>("/api/profile", {
     method: "PATCH",
-    body: JSON.stringify({ displayName, avatar, preferredWizardType }),
+    body: JSON.stringify({ displayName, avatar, preferredWizardType, boardVisualMode }),
   });
 }
 

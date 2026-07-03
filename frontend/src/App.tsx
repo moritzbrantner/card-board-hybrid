@@ -56,7 +56,12 @@ import {
   registerAccount,
   sharedMatchWebSocketUrl,
   updateDeck,
+  updateProfile,
 } from "./api";
+import {
+  effectiveBoardVisualMode,
+  saveLocalBoardVisualMode,
+} from "./boardVisualMode";
 import { ProfilePage } from "./profile";
 import { clearAuthToken, getAuthToken, saveAuthToken } from "./session";
 import { WIZARD_OPTIONS } from "./wizards";
@@ -100,6 +105,7 @@ import type {
   Wizard,
   WizardType,
   ActionTarget,
+  BoardVisualMode,
 } from "./types";
 import type {
   CSSProperties,
@@ -173,6 +179,48 @@ type AccountProps = {
   onSignOut: () => void;
   onNavigate: (to: string) => void;
 };
+
+type BoardVisualModeProps = {
+  boardVisualMode: BoardVisualMode;
+  onBoardVisualModeChange: (mode: BoardVisualMode) => Promise<void>;
+};
+
+type AccountPreferenceProps = AccountProps & {
+  onCurrentUserUpdated: (user: AuthUser) => void;
+};
+
+function useBoardVisualModePreference(
+  currentUser: AuthUser | null,
+  onCurrentUserUpdated: (user: AuthUser) => void,
+) {
+  const [boardVisualMode, setBoardVisualModeState] = useState<BoardVisualMode>(() =>
+    effectiveBoardVisualMode(currentUser),
+  );
+
+  useEffect(() => {
+    setBoardVisualModeState(effectiveBoardVisualMode(currentUser));
+  }, [currentUser?.id, currentUser?.boardVisualMode]);
+
+  async function setBoardVisualMode(mode: BoardVisualMode) {
+    setBoardVisualModeState(mode);
+
+    if (!currentUser) {
+      saveLocalBoardVisualMode(mode);
+      return;
+    }
+
+    const updated = await updateProfile(
+      currentUser.displayName,
+      currentUser.avatar,
+      currentUser.preferredWizardType,
+      mode,
+    );
+    onCurrentUserUpdated(updated);
+    setBoardVisualModeState(updated.boardVisualMode);
+  }
+
+  return [boardVisualMode, setBoardVisualMode] as const;
+}
 
 export function App() {
   const [path, setPath] = useState(() => window.location.pathname);
@@ -299,6 +347,7 @@ export function App() {
         onNavigate={navigate}
         currentUser={currentUser}
         onSignOut={handleSignOut}
+        onCurrentUserUpdated={(user) => setAuthState({ status: "signedIn", user })}
       />
     );
   }
@@ -313,6 +362,7 @@ export function App() {
         onNavigate={navigate}
         currentUser={currentUser}
         onSignOut={handleSignOut}
+        onCurrentUserUpdated={(user) => setAuthState({ status: "signedIn", user })}
       />
     );
   }
@@ -326,6 +376,7 @@ export function App() {
         onNavigate={navigate}
         currentUser={currentUser}
         onSignOut={handleSignOut}
+        onCurrentUserUpdated={(user) => setAuthState({ status: "signedIn", user })}
       />
     );
   }
@@ -1056,6 +1107,37 @@ function AccountActions({ currentUser, onSignOut, onNavigate }: AccountProps) {
   );
 }
 
+function BoardVisualModeQuickControl({
+  boardVisualMode,
+  onBoardVisualModeChange,
+  disabled = false,
+}: BoardVisualModeProps & { disabled?: boolean }) {
+  return (
+    <fieldset className="board-visual-mode-quick" aria-label="Board visual mode">
+      <button
+        className={boardVisualMode === "2d" ? "active" : ""}
+        type="button"
+        onClick={() => void onBoardVisualModeChange("2d")}
+        aria-pressed={boardVisualMode === "2d"}
+        disabled={disabled}
+        title="Use 2D board"
+      >
+        2D
+      </button>
+      <button
+        className={boardVisualMode === "3d" ? "active" : ""}
+        type="button"
+        onClick={() => void onBoardVisualModeChange("3d")}
+        aria-pressed={boardVisualMode === "3d"}
+        disabled={disabled}
+        title="Use 3D board"
+      >
+        3D
+      </button>
+    </fieldset>
+  );
+}
+
 function MatchPicker({
   onNavigate,
   currentUser,
@@ -1547,11 +1629,16 @@ function MatchPage({
   onNavigate,
   currentUser,
   onSignOut,
+  onCurrentUserUpdated,
 }: {
   matchId: string;
   onNavigate: (to: string) => void;
-} & AccountProps) {
+} & AccountPreferenceProps) {
   const viewerSide: Side = "player";
+  const [boardVisualMode, setBoardVisualMode] = useBoardVisualModePreference(
+    currentUser,
+    onCurrentUserUpdated,
+  );
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
@@ -1835,6 +1922,15 @@ function MatchPage({
     });
   }
 
+  async function handleBoardVisualModeChange(mode: BoardVisualMode) {
+    try {
+      await setBoardVisualMode(mode);
+      setNotice(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not save board visual mode");
+    }
+  }
+
   return (
     <main className="app-shell">
       <section className="table">
@@ -1846,6 +1942,11 @@ function MatchPage({
           </div>
           <div className="actions">
             <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+            <BoardVisualModeQuickControl
+              boardVisualMode={boardVisualMode}
+              onBoardVisualModeChange={handleBoardVisualModeChange}
+              disabled={busy}
+            />
             <button
               className="icon-button"
               type="button"
@@ -1901,6 +2002,7 @@ function MatchPage({
           </div>
           <Board
             match={match}
+            boardVisualMode={boardVisualMode}
             viewerSide="player"
             visualCatalog={visualCatalog}
             selectedCard={selectedCard}
@@ -1994,11 +2096,16 @@ function SharedMatchPage({
   onNavigate,
   currentUser,
   onSignOut,
+  onCurrentUserUpdated,
 }: {
   matchId: string;
   seatToken: string;
   onNavigate: (to: string) => void;
-} & AccountProps) {
+} & AccountPreferenceProps) {
+  const [boardVisualMode, setBoardVisualMode] = useBoardVisualModePreference(
+    currentUser,
+    onCurrentUserUpdated,
+  );
   const [loadState, setLoadState] = useState<SharedLoadState>({ status: "loading" });
   const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
@@ -2314,6 +2421,15 @@ function SharedMatchPage({
     });
   }
 
+  async function handleBoardVisualModeChange(mode: BoardVisualMode) {
+    try {
+      await setBoardVisualMode(mode);
+      setNotice(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not save board visual mode");
+    }
+  }
+
   if (loadState.status === "loading") {
     return <ShellMessage title={`Match ${matchId}`} message="Loading multiplayer match" />;
   }
@@ -2462,6 +2578,11 @@ function SharedMatchPage({
           </div>
           <div className="actions">
             <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+            <BoardVisualModeQuickControl
+              boardVisualMode={boardVisualMode}
+              onBoardVisualModeChange={handleBoardVisualModeChange}
+              disabled={busy}
+            />
             <button
               className="icon-button"
               type="button"
@@ -2517,6 +2638,7 @@ function SharedMatchPage({
           </div>
           <Board
             match={match}
+            boardVisualMode={boardVisualMode}
             viewerSide={viewerSide}
             visualCatalog={visualCatalog}
             selectedCard={selectedCard}
@@ -2613,12 +2735,18 @@ function ReplayPage({
   onNavigate,
   currentUser,
   onSignOut,
+  onCurrentUserUpdated,
 }: {
   matchId: string;
   onNavigate: (to: string) => void;
-} & AccountProps) {
+} & AccountPreferenceProps) {
+  const [boardVisualMode, setBoardVisualMode] = useBoardVisualModePreference(
+    currentUser,
+    onCurrentUserUpdated,
+  );
   const [loadState, setLoadState] = useState<ReplayLoadState>({ status: "loading" });
   const [frameIndex, setFrameIndex] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setLoadState({ status: "loading" });
@@ -2657,6 +2785,15 @@ function ReplayPage({
   const frame = replay.frames[clampedFrameIndex];
   const match = frame.matchState;
 
+  async function handleBoardVisualModeChange(mode: BoardVisualMode) {
+    try {
+      await setBoardVisualMode(mode);
+      setNotice(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not save board visual mode");
+    }
+  }
+
   return (
     <main className="app-shell replay-shell">
       <section className="table replay-table">
@@ -2668,6 +2805,10 @@ function ReplayPage({
           </div>
           <div className="actions">
             <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+            <BoardVisualModeQuickControl
+              boardVisualMode={boardVisualMode}
+              onBoardVisualModeChange={handleBoardVisualModeChange}
+            />
             <button
               className="icon-button"
               type="button"
@@ -2698,6 +2839,7 @@ function ReplayPage({
 
         <Board
           match={match}
+          boardVisualMode={boardVisualMode}
           viewerSide="player"
           selectedCard={null}
           selectedPiece={null}
@@ -2706,6 +2848,7 @@ function ReplayPage({
         />
 
         <section className="replay-inspector" aria-label="Replay timeline">
+          {notice ? <p className="notice">{notice}</p> : null}
           <div className="replay-controls">
             <button
               className="icon-button"
@@ -3017,6 +3160,7 @@ function OpponentHandDisplay({ count }: { count: number }) {
 
 function Board({
   match,
+  boardVisualMode,
   viewerSide,
   visualCatalog = EMPTY_MATCH_VISUAL_CATALOG,
   selectedCard,
@@ -3028,6 +3172,7 @@ function Board({
   onUnitContextMenu,
 }: {
   match: MatchState;
+  boardVisualMode: BoardVisualMode;
   viewerSide: Side;
   visualCatalog?: MatchVisualCatalog;
   selectedCard: Card | null;
@@ -3041,7 +3186,11 @@ function Board({
   const columns = groupTilesByColumn(match.board.tiles);
 
   return (
-    <section className={`board ${readOnly ? "read-only" : ""}`} aria-label="Hex board">
+    <section
+      className={`board board-visual-mode-${boardVisualMode} ${readOnly ? "read-only" : ""}`}
+      data-board-visual-mode={boardVisualMode}
+      aria-label="Hex board"
+    >
       <div className="hex-board">
         {columns.map((column) => (
           <div className="hex-column" key={column.q}>

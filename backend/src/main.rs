@@ -25,7 +25,8 @@ use deck_library::{
 use deck_recipe_legality::DeckLegalityPreviewRequest;
 use futures_util::StreamExt;
 use identity::{
-    AccountProfile, CreatedAuthSession, GeneratedAvatar, IdentityError, IdentityModule,
+    AccountProfile, BoardVisualMode, CreatedAuthSession, GeneratedAvatar, IdentityError,
+    IdentityModule,
 };
 use match_access::{Actor, MatchAccess};
 use match_session::{
@@ -90,6 +91,7 @@ struct AuthUserResponse {
     display_name: String,
     avatar: GeneratedAvatarResponse,
     preferred_wizard_type: WizardType,
+    board_visual_mode: BoardVisualMode,
 }
 
 #[derive(Serialize)]
@@ -119,6 +121,8 @@ struct UpdateProfileRequest {
     avatar: GeneratedAvatarRequest,
     #[serde(default)]
     preferred_wizard_type: Option<WizardType>,
+    #[serde(default)]
+    board_visual_mode: Option<BoardVisualMode>,
 }
 
 #[derive(Deserialize)]
@@ -651,6 +655,9 @@ async fn update_profile(
             request
                 .preferred_wizard_type
                 .unwrap_or(profile.preferred_wizard_type),
+            request
+                .board_visual_mode
+                .unwrap_or(profile.board_visual_mode),
         ) {
             Ok(Some(profile)) => profile,
             Ok(None) => return unauthorized_response(),
@@ -1607,6 +1614,7 @@ impl From<AccountProfile> for AuthUserResponse {
                 color: profile.avatar.color,
             },
             preferred_wizard_type: profile.preferred_wizard_type,
+            board_visual_mode: profile.board_visual_mode,
         }
     }
 }
@@ -1862,6 +1870,7 @@ mod tests {
         assert!(current_user["avatar"]["symbol"].as_str().is_some());
         assert!(current_user["avatar"]["color"].as_str().is_some());
         assert_eq!(current_user["preferredWizardType"], "runekeeper");
+        assert_eq!(current_user["boardVisualMode"], "3d");
         assert!(current_user["id"].as_i64().unwrap() > 0);
 
         let _ = fs::remove_file(path);
@@ -2166,7 +2175,7 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"displayName":"Rune Pilot","avatar":{"symbol":"shield","color":"indigo"},"preferredWizardType":"chronomancer"}"#,
+                    r#"{"displayName":"Rune Pilot","avatar":{"symbol":"shield","color":"indigo"},"preferredWizardType":"chronomancer","boardVisualMode":"2d"}"#,
                 ))
                 .expect("request should build"),
         )
@@ -2177,6 +2186,7 @@ mod tests {
         assert_eq!(updated["avatar"]["symbol"], "shield");
         assert_eq!(updated["avatar"]["color"], "indigo");
         assert_eq!(updated["preferredWizardType"], "chronomancer");
+        assert_eq!(updated["boardVisualMode"], "2d");
 
         let (status, loaded) = json_request(
             app,
@@ -2193,6 +2203,64 @@ mod tests {
         assert_eq!(loaded["avatar"]["symbol"], "shield");
         assert_eq!(loaded["avatar"]["color"], "indigo");
         assert_eq!(loaded["preferredWizardType"], "chronomancer");
+        assert_eq!(loaded["boardVisualMode"], "2d");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn existing_profiles_migrate_to_default_board_visual_mode() {
+        let path = test_db_path("profile-board-mode-migration");
+        {
+            let connection = rusqlite::Connection::open(&path).expect("db should open");
+            connection
+                .execute_batch(
+                    "
+                    CREATE TABLE users (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        email TEXT NOT NULL,
+                        email_normalized TEXT NOT NULL UNIQUE,
+                        password_hash TEXT NOT NULL,
+                        display_name TEXT NOT NULL DEFAULT '',
+                        avatar_symbol TEXT NOT NULL DEFAULT 'sparkles',
+                        avatar_color TEXT NOT NULL DEFAULT 'emerald',
+                        preferred_wizard_type TEXT NOT NULL DEFAULT 'runekeeper',
+                        created_at INTEGER NOT NULL DEFAULT (unixepoch())
+                    );
+                    INSERT INTO users (
+                        email,
+                        email_normalized,
+                        password_hash,
+                        display_name,
+                        avatar_symbol,
+                        avatar_color,
+                        preferred_wizard_type
+                    )
+                    VALUES (
+                        'migrated@example.com',
+                        'migrated@example.com',
+                        'unused',
+                        'Migrated',
+                        'rune',
+                        'sky',
+                        'warden'
+                    );
+                    ",
+                )
+                .expect("old users table should seed");
+        }
+
+        let _store = SqliteMatchStore::new(&path).expect("store should migrate");
+        let connection = rusqlite::Connection::open(&path).expect("db should reopen");
+        let board_visual_mode: String = connection
+            .query_row(
+                "SELECT board_visual_mode FROM users WHERE email_normalized = 'migrated@example.com'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("migrated user should load");
+
+        assert_eq!(board_visual_mode, "3d");
 
         let _ = fs::remove_file(path);
     }
@@ -2238,6 +2306,31 @@ mod tests {
                 .header("content-type", "application/json")
                 .body(Body::from(
                     r#"{"displayName":"Avatar","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"stormcaller"}"#,
+                ))
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn profile_rejects_unknown_board_visual_mode() {
+        let path = test_db_path("profile-board-mode-invalid");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "board-invalid@example.com").await;
+
+        let (status, _body) = json_request(
+            app,
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/profile")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"displayName":"Avatar","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"runekeeper","boardVisualMode":"cinematic"}"#,
                 ))
                 .expect("request should build"),
         )

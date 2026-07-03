@@ -641,6 +641,39 @@ h1 {
   cursor: default;
 }
 
+.board-visual-mode-quick {
+  display: inline-flex;
+  gap: 0;
+  align-items: center;
+  min-height: 38px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 3px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.board-visual-mode-quick button {
+  min-width: 42px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-weight: 950;
+}
+
+.board-visual-mode-quick button.active {
+  color: #1a160d;
+  background: var(--gold);
+}
+
+.board-visual-mode-quick button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .hex-board {
   display: flex;
   align-items: center;
@@ -1245,7 +1278,8 @@ h1 {
 
 .profile-fields label,
 .avatar-controls legend,
-.preferred-wizard-control span {
+.preferred-wizard-control span,
+.board-visual-mode-control legend {
   color: var(--muted);
   font-size: 0.76rem;
   font-weight: 900;
@@ -1288,6 +1322,21 @@ h1 {
   gap: 8px;
 }
 
+.board-visual-mode-control {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 8px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.board-visual-mode-control > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .avatar-controls fieldset {
   display: grid;
   gap: 8px;
@@ -1315,7 +1364,19 @@ h1 {
   font-weight: 900;
 }
 
-.avatar-controls button.active {
+.board-visual-mode-control button {
+  min-width: 68px;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #fffaf0;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  font-weight: 950;
+}
+
+.avatar-controls button.active,
+.board-visual-mode-control button.active {
   border-color: var(--gold);
   box-shadow: 0 0 0 2px rgba(217, 184, 79, 0.22);
 }
@@ -1410,6 +1471,11 @@ h1 {
   grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
   gap: 12px;
   align-items: stretch;
+}
+
+.replay-inspector > .notice {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 
 .replay-controls,
