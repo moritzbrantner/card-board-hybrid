@@ -70,6 +70,99 @@ test("settings load, save, apply, and persist visual preferences", async ({ page
   await expect(page.getByLabel("Board scale")).toHaveValue("large");
 });
 
+test("settings record, validate, reset, and persist hotkeys", async ({ page }) => {
+  let preferences = defaultPreferences();
+  const savedPayloads = [];
+  await page.addInitScript(
+    ({ key }) => localStorage.setItem(key, "existing-token"),
+    { key: AUTH_TOKEN_STORAGE_KEY },
+  );
+  await mockSettingsApi(page, {
+    loadPreferences: () => preferences,
+    savePreferences: (payload) => {
+      savedPayloads.push(payload);
+      preferences = { ...payload, updatedAt: 101 };
+      return preferences;
+    },
+  });
+
+  await page.goto("/settings");
+
+  await expect(page.getByRole("button", { name: "End Turn hotkey" })).toContainText("T");
+
+  await page.getByRole("button", { name: "End Turn hotkey" }).click();
+  await page.keyboard.press("Y");
+  await expect(page.getByRole("button", { name: "End Turn hotkey" })).toContainText("Y");
+
+  await page.getByRole("button", { name: "Pass Priority hotkey" }).click();
+  await page.keyboard.press("Y");
+  await expect(page.getByText("Already used by End Turn.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save Settings" })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Pass Priority hotkey" }).click();
+  await page.keyboard.press("R");
+  await expect(page.getByText("Already used by End Turn.")).toBeHidden();
+
+  await page.getByRole("button", { name: "Open Catalog hotkey" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByText("Escape is reserved for Cancel.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save Settings" })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Open Catalog hotkey" }).click();
+  await page.keyboard.press("G");
+  await page.getByRole("button", { name: "Save Settings" }).click();
+
+  await expect(page.getByText("Settings saved.")).toBeVisible();
+  expect(savedPayloads).toHaveLength(1);
+  expect(savedPayloads[0].hotkeys).toEqual(
+    expect.arrayContaining([
+      { commandId: "endTurn", binding: "Y" },
+      { commandId: "passPriority", binding: "R" },
+      { commandId: "openCatalog", binding: "G" },
+    ]),
+  );
+
+  await page.reload();
+
+  await expect(page.getByRole("button", { name: "End Turn hotkey" })).toContainText("Y");
+  await expect(page.getByRole("button", { name: "Pass Priority hotkey" })).toContainText("R");
+  await expect(page.getByRole("button", { name: "Open Catalog hotkey" })).toContainText("G");
+
+  await page.getByRole("button", { name: "Reset Defaults" }).click();
+  await expect(page.getByRole("button", { name: "End Turn hotkey" })).toContainText("T");
+  await page.getByRole("button", { name: "Save Settings" }).click();
+
+  await expect(page.getByText("Settings saved.")).toBeVisible();
+  expect(savedPayloads.at(-1).hotkeys).toEqual(defaultPreferences().hotkeys);
+});
+
+test("settings normalize malformed stored hotkeys through defaults", async ({ page }) => {
+  await page.addInitScript(
+    ({ key }) => localStorage.setItem(key, "existing-token"),
+    { key: AUTH_TOKEN_STORAGE_KEY },
+  );
+  await mockSettingsApi(page, {
+    loadPreferences: () => ({
+      ...defaultPreferences(),
+      hotkeys: [
+        { commandId: "endTurn", binding: "Y" },
+        { commandId: "passPriority", binding: "Y" },
+        { commandId: "openCatalog", binding: "Escape" },
+        { commandId: "openDecks", binding: "Shift+K" },
+        { commandId: "openMatchArchive", binding: "v" },
+      ],
+    }),
+  });
+
+  await page.goto("/settings");
+
+  await expect(page.getByRole("button", { name: "End Turn hotkey" })).toContainText("Y");
+  await expect(page.getByRole("button", { name: "Pass Priority hotkey" })).toContainText("P");
+  await expect(page.getByRole("button", { name: "Open Catalog hotkey" })).toContainText("C");
+  await expect(page.getByRole("button", { name: "Open Decks hotkey" })).toContainText("K");
+  await expect(page.getByRole("button", { name: "Open Match Archive hotkey" })).toContainText("V");
+});
+
 async function mockSettingsApi(page, handlers = {}) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();

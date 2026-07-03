@@ -7,29 +7,12 @@ import type {
   PreferenceTheme,
   UpdatePreferencesRequest,
 } from "./types";
+import { DEFAULT_HOTKEYS, normalizeHotkeysWithDefaults } from "./hotkeys";
 
 type UnknownPreferences = Partial<Record<keyof AccountPreferences, unknown>>;
 
 export type EffectiveTheme = "dark" | "light" | "highContrast";
 export type EffectiveMotion = "reduced" | "full";
-
-export const DEFAULT_HOTKEYS: HotkeyBinding[] = [
-  { commandId: "cursorNorthwest", binding: "Q" },
-  { commandId: "cursorNortheast", binding: "W" },
-  { commandId: "cursorEast", binding: "E" },
-  { commandId: "cursorWest", binding: "A" },
-  { commandId: "cursorSouthwest", binding: "S" },
-  { commandId: "cursorSoutheast", binding: "D" },
-  { commandId: "confirm", binding: "Enter" },
-  { commandId: "cancel", binding: "Escape" },
-  { commandId: "endTurn", binding: "T" },
-  { commandId: "passPriority", binding: "P" },
-  { commandId: "openCardInfo", binding: "I" },
-  { commandId: "openSettings", binding: "," },
-  { commandId: "openCatalog", binding: "C" },
-  { commandId: "openDecks", binding: "K" },
-  { commandId: "openMatchArchive", binding: "M" },
-];
 
 export const DEFAULT_ACCOUNT_PREFERENCES: AccountPreferences = {
   theme: "system",
@@ -56,7 +39,7 @@ export function normalizeAccountPreferences(value: unknown): AccountPreferences 
       DEFAULT_ACCOUNT_PREFERENCES.animationSpeed,
     ),
     boardScale: enumValue(payload.boardScale, BOARD_SCALES, DEFAULT_ACCOUNT_PREFERENCES.boardScale),
-    hotkeys: mergeHotkeysWithDefaults(payload.hotkeys),
+    hotkeys: normalizeHotkeysWithDefaults(payload.hotkeys),
     updatedAt: typeof payload.updatedAt === "number" ? payload.updatedAt : null,
   };
 }
@@ -64,10 +47,11 @@ export function normalizeAccountPreferences(value: unknown): AccountPreferences 
 export function accountPreferencesSavePayload(
   current: AccountPreferences,
   nextVisuals: Pick<AccountPreferences, "theme" | "motion" | "animationSpeed" | "boardScale">,
+  nextHotkeys: HotkeyBinding[] = current.hotkeys,
 ): UpdatePreferencesRequest {
   return {
     ...nextVisuals,
-    hotkeys: mergeHotkeysWithDefaults(current.hotkeys),
+    hotkeys: normalizeHotkeysWithDefaults(nextHotkeys),
   };
 }
 
@@ -119,25 +103,6 @@ export function visualPreferencesLiveAiDelayMs(
     case "normal":
       return 1000;
   }
-}
-
-function mergeHotkeysWithDefaults(value: unknown): HotkeyBinding[] {
-  const incoming = Array.isArray(value) ? value.filter(isHotkeyBinding) : [];
-  const incomingByCommand = new Map(incoming.map((hotkey) => [hotkey.commandId, hotkey.binding]));
-  return DEFAULT_HOTKEYS.map((hotkey) => ({
-    commandId: hotkey.commandId,
-    binding: incomingByCommand.get(hotkey.commandId) ?? hotkey.binding,
-  }));
-}
-
-function isHotkeyBinding(value: unknown): value is HotkeyBinding {
-  return (
-    isRecord(value) &&
-    typeof value.commandId === "string" &&
-    typeof value.binding === "string" &&
-    value.commandId.length > 0 &&
-    value.binding.length > 0
-  );
 }
 
 function enumValue<T extends string>(
