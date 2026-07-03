@@ -641,6 +641,47 @@ h1 {
   cursor: default;
 }
 
+.board-renderer-notice {
+  justify-self: stretch;
+  width: min(720px, 100%);
+  margin: 0 0 14px;
+  border: 1px solid rgba(217, 184, 79, 0.42);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #fffaf0;
+  background: rgba(10, 13, 13, 0.72);
+  font-size: 0.88rem;
+  font-weight: 850;
+}
+
+.board-3d-shell {
+  width: min(100%, 980px);
+  min-width: min(100%, 720px);
+  height: clamp(520px, 62vh, 760px);
+  border: 1px solid rgba(247, 243, 234, 0.18);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% 48%, rgba(88, 183, 161, 0.16), transparent 44%),
+    #101312;
+  overflow: hidden;
+}
+
+.board-3d-shell canvas {
+  display: block;
+}
+
+.board-3d-fallback {
+  display: grid;
+  place-items: center;
+  width: min(100%, 980px);
+  min-height: 520px;
+  border: 1px solid rgba(217, 184, 79, 0.42);
+  border-radius: 8px;
+  color: #fffaf0;
+  background: rgba(10, 13, 13, 0.78);
+  font-weight: 900;
+}
+
 .board-visual-mode-quick {
   display: inline-flex;
   gap: 0;
@@ -2106,6 +2147,12 @@ h1 {
     padding: 152px 18px 138px;
   }
 
+  .board-3d-shell,
+  .board-3d-fallback {
+    min-width: 680px;
+    height: 540px;
+  }
+
   .battlefield-hud-player {
     bottom: 310px;
     left: 14px;
@@ -2205,6 +2252,12 @@ h1 {
 @media (max-width: 520px) {
   .board {
     padding-top: 214px;
+  }
+
+  .board-3d-shell,
+  .board-3d-fallback {
+    min-width: 620px;
+    height: 520px;
   }
 
   .battlefield-hud-opponent {
