@@ -243,6 +243,11 @@ type AppliedVisualPreferences = {
   liveAiDelayMs: number;
 };
 
+type AccountPreferencesState = {
+  state: SettingsState;
+  loadedUserId: number | null;
+};
+
 function currentRoutePath() {
   return `${window.location.pathname}${window.location.search}`;
 }
@@ -352,26 +357,42 @@ function usePrefersDarkTheme() {
 }
 
 function useAccountPreferences(currentUser: AuthUser | null) {
-  const [state, setState] = useState<SettingsState>({
-    status: "ready",
-    preferences: DEFAULT_ACCOUNT_PREFERENCES,
+  const [accountPreferences, setAccountPreferences] = useState<AccountPreferencesState>({
+    state: {
+      status: "ready",
+      preferences: DEFAULT_ACCOUNT_PREFERENCES,
+    },
+    loadedUserId: null,
   });
+  const currentUserId = currentUser?.id ?? null;
 
   const refresh = useCallback(async () => {
     if (!currentUser) {
-      setState({ status: "ready", preferences: DEFAULT_ACCOUNT_PREFERENCES });
+      setAccountPreferences({
+        state: { status: "ready", preferences: DEFAULT_ACCOUNT_PREFERENCES },
+        loadedUserId: null,
+      });
       return;
     }
 
-    setState((current) => ({ status: "loading", preferences: current.preferences }));
+    setAccountPreferences((current) => ({
+      ...current,
+      state: { status: "loading", preferences: current.state.preferences },
+    }));
     try {
       const loaded = normalizeAccountPreferences(await loadPreferences());
-      setState({ status: "ready", preferences: loaded });
+      setAccountPreferences({
+        state: { status: "ready", preferences: loaded },
+        loadedUserId: currentUser.id,
+      });
     } catch (error) {
-      setState((current) => ({
-        status: "error",
-        preferences: current.preferences,
-        message: error instanceof Error ? error.message : "Could not load settings",
+      setAccountPreferences((current) => ({
+        ...current,
+        state: {
+          status: "error",
+          preferences: current.state.preferences,
+          message: error instanceof Error ? error.message : "Could not load settings",
+        },
       }));
     }
   }, [currentUser?.id]);
@@ -380,10 +401,21 @@ function useAccountPreferences(currentUser: AuthUser | null) {
     void refresh();
   }, [refresh]);
 
-  const save = useCallback(async (preferences: Parameters<typeof updatePreferences>[0]) => {
-    const updated = normalizeAccountPreferences(await updatePreferences(preferences));
-    setState({ status: "ready", preferences: updated });
-  }, []);
+  const save = useCallback(
+    async (preferences: Parameters<typeof updatePreferences>[0]) => {
+      const updated = normalizeAccountPreferences(await updatePreferences(preferences));
+      setAccountPreferences({
+        state: { status: "ready", preferences: updated },
+        loadedUserId: currentUserId,
+      });
+    },
+    [currentUserId],
+  );
+
+  const state =
+    currentUserId !== null && accountPreferences.loadedUserId !== currentUserId
+      ? { status: "loading" as const, preferences: DEFAULT_ACCOUNT_PREFERENCES }
+      : accountPreferences.state;
 
   return { state, refresh, save };
 }
