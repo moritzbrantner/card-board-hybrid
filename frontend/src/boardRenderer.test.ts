@@ -29,6 +29,18 @@ describe("board renderer boundary", () => {
     expect(canCreateWebGLContext(undefined)).toBe(false);
   });
 
+  it("treats WebGL context creation exceptions as unavailable", () => {
+    const documentRef = {
+      createElement: () => ({
+        getContext: () => {
+          throw new Error("webgl disabled");
+        },
+      }),
+    } as unknown as Document;
+
+    expect(canCreateWebGLContext(documentRef)).toBe(false);
+  });
+
   it("keeps read-only boards non-interactive while active 3D boards can be played", () => {
     expect(
       isBoardRendererInteractive({ renderer: "3d", readOnly: false, disabled: false }),

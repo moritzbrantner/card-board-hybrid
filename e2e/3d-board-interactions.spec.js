@@ -3,14 +3,8 @@ import { expect, test } from "@playwright/test";
 const MATCH_ID = "e2e-3d-board";
 const BOARD_VISUAL_MODE_STORAGE_KEY = "rune-lanes-board-visual-mode";
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(
-    ({ key }) => localStorage.setItem(key, "3d"),
-    { key: BOARD_VISUAL_MODE_STORAGE_KEY },
-  );
-});
-
 test("moves and attacks through the 3D board", async ({ page }) => {
+  await useStoredBoardVisualMode(page, "3d");
   let match = playableMatch({
     playerWizard: { q: 0, r: 1 },
     opponentWizard: { q: 1, r: 1 },
@@ -77,6 +71,7 @@ test("moves and attacks through the 3D board", async ({ page }) => {
 });
 
 test("plays unit and spell card targets through the 3D board", async ({ page }) => {
+  await useStoredBoardVisualMode(page, "3d");
   let match = playableMatch({
     playerWizard: { q: 0, r: 1 },
     opponentWizard: { q: 1, r: 1 },
@@ -132,6 +127,7 @@ test("plays unit and spell card targets through the 3D board", async ({ page }) 
 test("respects disabled state, context menus, visible counts, and replay read-only in 3D mode", async ({
   page,
 }) => {
+  await useStoredBoardVisualMode(page, "3d");
   let match = playableMatch({
     phase: "matchOver",
     playerWizard: { q: 0, r: 1 },
@@ -168,8 +164,129 @@ test("respects disabled state, context menus, visible counts, and replay read-on
   expect(actions).toEqual([]);
 });
 
+test("persists Board visual mode switches locally", async ({ page }) => {
+  await useStoredBoardVisualMode(page, "3d");
+  const match = playableMatch({
+    playerWizard: { q: 0, r: 1 },
+    opponentWizard: { q: 1, r: 1 },
+  });
+
+  await mockMatchApi(page, async () => matchResponse(match), () => match);
+
+  await page.goto(`/match/${MATCH_ID}`);
+  await page.getByRole("button", { name: "2D" }).click();
+  await expect(page.locator('section[data-board-renderer="2d"]')).toBeVisible();
+  await expect
+    .poll(() => page.evaluate((key) => localStorage.getItem(key), BOARD_VISUAL_MODE_STORAGE_KEY))
+    .toBe("2d");
+
+  await page.reload();
+  await expect(page.locator('section[data-board-renderer="2d"]')).toBeVisible();
+});
+
+test("falls back to playable 2D when WebGL cannot start", async ({ page }) => {
+  await useStoredBoardVisualMode(page, "3d");
+  await page.addInitScript(() => {
+    const originalGetContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function patchedGetContext(type, ...args) {
+      if (String(type).includes("webgl")) {
+        return null;
+      }
+
+      return originalGetContext.call(this, type, ...args);
+    };
+  });
+
+  let match = playableMatch({
+    playerWizard: { q: 0, r: 1 },
+    opponentWizard: { q: 1, r: 1 },
+  });
+  const actions = [];
+
+  await mockMatchApi(page, async (action) => {
+    actions.push(action);
+    if (action.type === "movePiece") {
+      match = playableMatch({
+        playerWizard: action.to,
+        opponentWizard: { q: 1, r: 1 },
+      });
+    }
+
+    return matchResponse(match);
+  }, () => match);
+
+  await page.goto(`/match/${MATCH_ID}`);
+  await expect(page.locator('section[data-board-renderer="2d"]')).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "3D board unavailable, using 2D." })).toBeVisible();
+
+  await tile(page, "q 0, r 1, occupied by your wizard").click();
+  await expect(tile(page, "q 0, r 0, empty hex")).toHaveClass(/legal/);
+  await tile(page, "q 0, r 0, empty hex").click();
+  await expect.poll(() => actions).toEqual(
+    expect.arrayContaining([
+      {
+        type: "movePiece",
+        pieceId: "player-wizard",
+        to: { q: 0, r: 0 },
+      },
+    ]),
+  );
+});
+
+test("keeps reduced-motion first-time visitors on the 2D board", async ({ page }) => {
+  await page.addInitScript(({ key }) => {
+    localStorage.removeItem(key);
+    window.matchMedia = (query) => ({
+      matches: query === "(prefers-reduced-motion: reduce)",
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    });
+  }, { key: BOARD_VISUAL_MODE_STORAGE_KEY });
+  const match = playableMatch({
+    playerWizard: { q: 0, r: 1 },
+    opponentWizard: { q: 1, r: 1 },
+  });
+
+  await mockMatchApi(page, async () => matchResponse(match), () => match);
+
+  await page.goto(`/match/${MATCH_ID}`);
+  await expect(page.locator('section[data-board-renderer="2d"]')).toBeVisible();
+  await expect(page.locator(".piece-token[class*='piece-anim-']")).toHaveCount(0);
+});
+
+test("shows marker fallback notice when configured 3D models fail to load", async ({ page }) => {
+  await useStoredBoardVisualMode(page, "3d");
+  const match = playableMatch({
+    playerWizard: { q: 0, r: 1 },
+    opponentWizard: { q: 1, r: 1 },
+  });
+
+  await mockMatchApi(page, async () => matchResponse(match), () => match);
+
+  await page.goto(`/match/${MATCH_ID}`);
+  await expect(page.locator('section[data-board-renderer="3d"]')).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "fallback markers are shown" })).toBeVisible();
+  await expect(tile(page, "q 0, r 1, occupied by your wizard")).toBeVisible();
+});
+
 function tile(page, name) {
   return page.getByRole("button", { name });
+}
+
+async function useStoredBoardVisualMode(page, mode) {
+  await page.addInitScript(
+    ({ key, mode }) => {
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, mode);
+      }
+    },
+    { key: BOARD_VISUAL_MODE_STORAGE_KEY, mode },
+  );
 }
 
 async function mockMatchApi(page, handleAction, currentMatch) {

@@ -88,6 +88,10 @@ _Avoid_: avatar upload
 The player-facing presentation that makes a Card, Unit, or Wizard recognizable across match surfaces, including art, labels, colors, rarity treatment, token portrait, and unknown fallback.
 _Avoid_: skin, cosmetic data, asset lookup
 
+**Board visual mode**:
+A player presentation preference that chooses between the complete 2D board and the enhanced 3D board. It is stored on the account profile or locally for anonymous and seat-link play, and never changes match state, replay data, legality, or shared-match protocol semantics.
+_Avoid_: board state, match mode, rules mode
+
 **Seat**:
 One side-specific player slot in a shared match, either Player or Opponent.
 _Avoid_: account, user

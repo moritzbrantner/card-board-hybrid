@@ -1,6 +1,7 @@
 import type { BoardVisualMode, HexCoord } from "./types";
 
 export type BoardRendererKind = "2d" | "3d";
+export type BoardRendererFallbackReason = "webgl-unavailable" | "render-failed" | "low-capability";
 
 export type BoardRendererSelection = {
   requestedMode: BoardVisualMode;
@@ -25,6 +26,17 @@ export function selectBoardRenderer({
   return "2d";
 }
 
+export function boardRendererFallbackMessage(reason: BoardRendererFallbackReason) {
+  switch (reason) {
+    case "low-capability":
+      return "3D board is off on this device, using 2D.";
+    case "render-failed":
+      return "3D board failed to start, using 2D.";
+    case "webgl-unavailable":
+      return "3D board unavailable, using 2D.";
+  }
+}
+
 export function isBoardRendererInteractive({
   renderer,
   readOnly,
@@ -38,13 +50,21 @@ export function canCreateWebGLContext(documentRef: Document | undefined = global
     return false;
   }
 
-  const canvas = documentRef.createElement("canvas");
-  const context =
-    canvas.getContext("webgl2") ??
-    canvas.getContext("webgl") ??
-    canvas.getContext("experimental-webgl");
+  try {
+    const canvas = documentRef.createElement("canvas");
+    const context =
+      canvas.getContext("webgl2") ??
+      canvas.getContext("webgl") ??
+      canvas.getContext("experimental-webgl");
 
-  return Boolean(context);
+    if (context && "getExtension" in context) {
+      context.getExtension("WEBGL_lose_context")?.loseContext();
+    }
+
+    return Boolean(context);
+  } catch {
+    return false;
+  }
 }
 
 export function axialToBoardPosition(coord: HexCoord, tileRadius = 1): [number, number, number] {
