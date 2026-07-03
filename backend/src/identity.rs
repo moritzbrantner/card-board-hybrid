@@ -9,6 +9,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::match_session::WizardType;
+use crate::preferences;
 
 pub const EXPERIENCED_LOCAL_EMAIL: &str = "experienced@local.dev";
 pub const EXPERIENCED_LOCAL_PASSWORD: &str = "experienced";
@@ -431,6 +432,10 @@ pub fn migrate(connection: &Connection) -> Result<(), IdentityError> {
         ",
         [],
     )?;
+    preferences::migrate(connection).map_err(|error| match error {
+        preferences::PreferencesError::Sqlite(error) => IdentityError::Sqlite(error),
+        other => IdentityError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(other))),
+    })?;
     Ok(())
 }
 

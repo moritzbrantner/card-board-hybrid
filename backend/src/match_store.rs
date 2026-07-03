@@ -176,6 +176,7 @@ impl SqliteMatchStore {
         }
 
         let connection = Connection::open(path)?;
+        connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS matches (
