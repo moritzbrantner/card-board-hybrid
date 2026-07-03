@@ -9,6 +9,9 @@ use serde_json::json;
 
 #[path = "card_interactions.rs"]
 mod card_interactions;
+mod solo_ai_policy;
+
+use solo_ai_policy::{SoloAiActionIntent, SoloAiDecision, SoloAiPolicy, SoloAiView};
 
 const BOARD_RADIUS: i32 = 3;
 const STARTING_MANA: u8 = 2;
@@ -512,7 +515,7 @@ pub enum MatchActionRequest {
     AdvanceAi,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -2024,7 +2027,9 @@ impl MatchState {
             return Err(MatchError::AiUnavailable);
         }
 
-        if self.try_opponent_action(frames, action_index) {
+        let policy = SoloAiPolicy::default();
+        let decision = policy.decide(&self.solo_ai_view());
+        if self.apply_solo_ai_decision(decision, frames, action_index) {
             self.check_winner(frames, action_index);
         } else {
             self.finish_opponent_turn(frames, action_index);
@@ -2034,13 +2039,17 @@ impl MatchState {
         Ok(())
     }
 
-    fn try_opponent_action(
+    fn apply_solo_ai_decision(
         &mut self,
+        decision: SoloAiDecision,
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) -> bool {
-        if let Some((attacker_id, target_id)) = self.best_opponent_attack() {
-            return self
+        match decision {
+            SoloAiDecision::TakeAction(SoloAiActionIntent::Attack {
+                attacker_id,
+                target_id,
+            }) => self
                 .attack_for_side(
                     Side::Opponent,
                     &attacker_id,
@@ -2048,15 +2057,15 @@ impl MatchState {
                     frames,
                     action_index,
                 )
-                .is_ok();
+                .is_ok(),
+            SoloAiDecision::TakeAction(SoloAiActionIntent::PlayCard { card_id, target }) => self
+                .play_card_for_side(Side::Opponent, card_id, target, frames, action_index)
+                .is_ok(),
+            SoloAiDecision::TakeAction(SoloAiActionIntent::MovePiece { piece_id, to }) => self
+                .move_piece_for_side(Side::Opponent, &piece_id, to, frames, action_index)
+                .is_ok(),
+            SoloAiDecision::FinishTurn => false,
         }
-        if self.try_opponent_spell(frames, action_index) {
-            return true;
-        }
-        if self.try_opponent_summon(frames, action_index) {
-            return true;
-        }
-        self.try_opponent_move(frames, action_index)
     }
 
     fn finish_opponent_turn(
@@ -2086,216 +2095,6 @@ impl MatchState {
                 ReplayEvent::RoundStarted { round: self.round },
             );
         }
-    }
-
-    fn best_opponent_attack(&self) -> Option<(String, String)> {
-        let mut attackers = self.pieces_for_side(Side::Opponent);
-        attackers.sort_by_key(|piece| if self.is_wizard_id(&piece.id) { 1 } else { 0 });
-
-        for attacker in attackers {
-            if attacker.ap_remaining == 0 || attacker.has_attacked {
-                continue;
-            }
-            if attacker.position.is_adjacent(self.player.wizard.position) {
-                return Some((attacker.id, self.player.wizard.id.clone()));
-            }
-            if let Some(target) = self
-                .board
-                .units
-                .iter()
-                .filter(|unit| unit.side == Side::Player)
-                .find(|unit| attacker.position.is_adjacent(unit.position))
-            {
-                return Some((attacker.id, target.id.clone()));
-            }
-        }
-
-        None
-    }
-
-    fn try_opponent_spell(
-        &mut self,
-        frames: &mut Vec<RecordedReplayFrame>,
-        action_index: Option<u32>,
-    ) -> bool {
-        let Some((card, target)) = self.pick_opponent_spell() else {
-            return false;
-        };
-
-        self.play_card_for_side(
-            Side::Opponent,
-            card.id,
-            ActionTarget::Piece {
-                piece_id: target.id,
-            },
-            frames,
-            action_index,
-        )
-        .is_ok()
-    }
-
-    fn pick_opponent_spell(&self) -> Option<(Card, PieceView)> {
-        let opponent = &self.opponent;
-        if opponent.wizard.ap_remaining == 0 {
-            return None;
-        }
-
-        for card in opponent
-            .hand
-            .iter()
-            .filter(|card| card.cost <= opponent.mana)
-        {
-            let CardKind::Spell { range, effect, .. } = &card.kind else {
-                continue;
-            };
-
-            let in_range = |piece: &PieceView| {
-                opponent.wizard.position.distance(piece.position) <= i32::from(*range)
-            };
-            let caster_position = opponent.wizard.position;
-            let caster_wizard_id = opponent.wizard.id.as_str();
-            let is_legal_spell_target = |piece: &PieceView| {
-                in_range(piece)
-                    && card_interactions::validate_spell_target(
-                        Side::Opponent,
-                        effect,
-                        caster_position,
-                        caster_wizard_id,
-                        piece,
-                    )
-                    .is_ok()
-            };
-
-            match effect {
-                SpellEffect::Damage { .. } => {
-                    let target = self
-                        .pieces_for_side(Side::Player)
-                        .into_iter()
-                        .filter(is_legal_spell_target)
-                        .find(|piece| self.is_wizard_id(&piece.id))
-                        .or_else(|| {
-                            self.pieces_for_side(Side::Player)
-                                .into_iter()
-                                .find(is_legal_spell_target)
-                        });
-                    if let Some(target) = target {
-                        return Some((card.clone(), target));
-                    }
-                }
-                SpellEffect::AreaDamage { .. } | SpellEffect::LineDamage { .. } => {
-                    let target = self
-                        .pieces_for_side(Side::Player)
-                        .into_iter()
-                        .find(is_legal_spell_target);
-                    if let Some(target) = target {
-                        return Some((card.clone(), target));
-                    }
-                }
-                SpellEffect::Heal { .. } => {
-                    let target = self
-                        .pieces_for_side(Side::Opponent)
-                        .into_iter()
-                        .filter(is_legal_spell_target)
-                        .find(|piece| self.piece_is_damaged(&piece.id));
-                    if let Some(target) = target {
-                        return Some((card.clone(), target));
-                    }
-                }
-                SpellEffect::Buff { .. } => {
-                    let target = self
-                        .board
-                        .units
-                        .iter()
-                        .filter(|unit| unit.side == Side::Opponent)
-                        .map(PieceView::from)
-                        .filter(is_legal_spell_target)
-                        .max_by_key(|piece| piece.attack);
-                    if let Some(target) = target {
-                        return Some((card.clone(), target));
-                    }
-                }
-                SpellEffect::Draw { .. } => {
-                    let target = PieceView::from(&opponent.wizard);
-                    if opponent.deck_count + opponent.discard_count > 0
-                        && is_legal_spell_target(&target)
-                    {
-                        return Some((card.clone(), PieceView::from(&opponent.wizard)));
-                    }
-                }
-            }
-        }
-
-        None
-    }
-
-    fn try_opponent_summon(
-        &mut self,
-        frames: &mut Vec<RecordedReplayFrame>,
-        action_index: Option<u32>,
-    ) -> bool {
-        let opponent = &self.opponent;
-        if opponent.wizard.ap_remaining == 0 {
-            return false;
-        }
-
-        let Some(card) = opponent
-            .hand
-            .iter()
-            .filter(|card| card.cost <= opponent.mana)
-            .filter(|card| matches!(card.kind, CardKind::Unit { .. }))
-            .max_by_key(|card| card.cost)
-            .cloned()
-        else {
-            return false;
-        };
-
-        let Some(coord) = self.best_summon_hex(Side::Opponent) else {
-            return false;
-        };
-
-        self.play_card_for_side(
-            Side::Opponent,
-            card.id,
-            ActionTarget::Hex { coord },
-            frames,
-            action_index,
-        )
-        .is_ok()
-    }
-
-    fn try_opponent_move(
-        &mut self,
-        frames: &mut Vec<RecordedReplayFrame>,
-        action_index: Option<u32>,
-    ) -> bool {
-        let player_wizard = self.player.wizard.position;
-        let Some((piece, destination)) = self
-            .pieces_for_side(Side::Opponent)
-            .into_iter()
-            .filter(|piece| piece.ap_remaining > 0)
-            .filter_map(|piece| {
-                self.empty_neighbors(piece.position)
-                    .into_iter()
-                    .min_by_key(|coord| coord.distance(player_wizard))
-                    .filter(|coord| {
-                        coord.distance(player_wizard) < piece.position.distance(player_wizard)
-                    })
-                    .map(|coord| (piece, coord))
-            })
-            .next()
-        else {
-            return false;
-        };
-
-        self.move_piece_for_side(Side::Opponent, &piece.id, destination, frames, action_index)
-            .is_ok()
-    }
-
-    fn best_summon_hex(&self, side: Side) -> Option<HexCoord> {
-        let enemy_wizard = self.player_ref(side.opponent()).wizard.position;
-        self.empty_neighbors(self.player_ref(side).wizard.position)
-            .into_iter()
-            .min_by_key(|coord| coord.distance(enemy_wizard))
     }
 
     fn start_turn(
@@ -2357,6 +2156,57 @@ impl MatchState {
         match side {
             Side::Player => &mut self.player,
             Side::Opponent => &mut self.opponent,
+        }
+    }
+
+    fn solo_ai_view(&self) -> SoloAiView {
+        let opponent_wizard = PieceView::from(&self.opponent.wizard);
+        let player_wizard = PieceView::from(&self.player.wizard);
+        let opponent_units: Vec<_> = self
+            .board
+            .units
+            .iter()
+            .filter(|unit| unit.side == Side::Opponent)
+            .map(PieceView::from)
+            .collect();
+        let player_units: Vec<_> = self
+            .board
+            .units
+            .iter()
+            .filter(|unit| unit.side == Side::Player)
+            .map(PieceView::from)
+            .collect();
+        let mut opponent_pieces = vec![opponent_wizard.clone()];
+        opponent_pieces.extend(opponent_units.clone());
+        let mut player_pieces = vec![player_wizard.clone()];
+        player_pieces.extend(player_units.clone());
+        let occupied_hexes = opponent_pieces
+            .iter()
+            .chain(player_pieces.iter())
+            .map(|piece| piece.position)
+            .collect();
+        let valid_hexes = self.board.tiles.iter().map(|tile| tile.coord).collect();
+        let mut damaged_piece_ids = HashSet::new();
+        for piece in opponent_pieces.iter().chain(player_pieces.iter()) {
+            if self.piece_is_damaged(&piece.id) {
+                damaged_piece_ids.insert(piece.id.clone());
+            }
+        }
+
+        SoloAiView {
+            opponent_wizard,
+            player_wizard,
+            opponent_pieces,
+            player_pieces,
+            opponent_units,
+            player_units,
+            opponent_hand: self.opponent.hand.clone(),
+            opponent_mana: self.opponent.mana,
+            opponent_deck_count: self.opponent.deck_count,
+            opponent_discard_count: self.opponent.discard_count,
+            valid_hexes,
+            occupied_hexes,
+            damaged_piece_ids,
         }
     }
 
@@ -2601,19 +2451,6 @@ impl MatchState {
         self.player.wizard.position == coord
             || self.opponent.wizard.position == coord
             || self.board.units.iter().any(|unit| unit.position == coord)
-    }
-
-    fn empty_neighbors(&self, coord: HexCoord) -> Vec<HexCoord> {
-        coord
-            .neighbors()
-            .into_iter()
-            .filter(|neighbor| self.board.is_valid(*neighbor))
-            .filter(|neighbor| !self.is_occupied(*neighbor))
-            .collect()
-    }
-
-    fn is_wizard_id(&self, piece_id: &str) -> bool {
-        self.player.wizard.id == piece_id || self.opponent.wizard.id == piece_id
     }
 
     fn next_unit_id(&mut self, side: Side) -> String {

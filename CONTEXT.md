@@ -80,6 +80,10 @@ _Avoid_: build, preset
 A match where one human controls Player and the backend AI controls Opponent.
 _Avoid_: offline match
 
+**Solo AI policy**:
+The backend-owned decision policy that chooses the Opponent's next intent during a Solo match.
+_Avoid_: bot logic, enemy AI, opponent automation
+
 **Shared match**:
 A human-vs-human match reached through two private seat links.
 _Avoid_: online match, lobby match
