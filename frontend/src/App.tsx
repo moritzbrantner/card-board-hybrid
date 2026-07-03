@@ -228,6 +228,10 @@ function authRouteLink(mode: "register" | "login", nextPath: string) {
   return nextPath === "/profile" ? path : `${path}?next=${encodeURIComponent(nextPath)}`;
 }
 
+function protectedLoginRoute(nextPath: string) {
+  return `/login?next=${encodeURIComponent(nextPath)}`;
+}
+
 function useBoardVisualModePreference(
   currentUser: AuthUser | null,
   onCurrentUserUpdated: (user: AuthUser) => void,
@@ -303,6 +307,11 @@ export function App() {
     setPath(currentRoutePath());
   }
 
+  function replaceRoute(to: string) {
+    window.history.replaceState(null, "", to);
+    setPath(currentRoutePath());
+  }
+
   function handleAuthenticated(session: AuthSessionResponse, nextPath: string) {
     saveAuthToken(session.token);
     setAuthState({ status: "signedIn", user: session.user });
@@ -332,7 +341,7 @@ export function App() {
 
   if (normalizedPath === "/login" || normalizedPath === "/register") {
     if (currentUser) {
-      return <RouteRedirect to={authNextPath} onNavigate={navigate} />;
+      return <RouteRedirect to={authNextPath} onNavigate={replaceRoute} />;
     }
 
     return (
@@ -351,7 +360,7 @@ export function App() {
 
   if (normalizedPath === "/profile") {
     if (!currentUser) {
-      return <RouteRedirect to={authRouteLink("login", "/profile")} onNavigate={navigate} />;
+      return <RouteRedirect to={protectedLoginRoute("/profile")} onNavigate={replaceRoute} />;
     }
 
     return (
@@ -366,7 +375,7 @@ export function App() {
 
   if (normalizedPath === "/decks") {
     if (!currentUser) {
-      return <RouteRedirect to={authRouteLink("login", "/decks")} onNavigate={navigate} />;
+      return <RouteRedirect to={protectedLoginRoute("/decks")} onNavigate={replaceRoute} />;
     }
 
     return (
@@ -384,7 +393,7 @@ export function App() {
 
   if (normalizedPath === "/matches") {
     if (!currentUser) {
-      return <RouteRedirect to={authRouteLink("login", "/matches")} onNavigate={navigate} />;
+      return <RouteRedirect to={protectedLoginRoute("/matches")} onNavigate={replaceRoute} />;
     }
 
     return (
