@@ -47,14 +47,16 @@ test("signed-in shared seat links apply saved settings to cursor play", async ({
   ]);
 });
 
-test("signed-out settings redirect while shared seat links use default cursor settings", async ({
+test("signed-out settings save local board mode for shared seat links", async ({
   page,
 }) => {
   await installSharedWebSocket(page);
   await page.addInitScript(
     ({ authKey, boardKey }) => {
       localStorage.removeItem(authKey);
-      localStorage.setItem(boardKey, "2d");
+      if (localStorage.getItem(boardKey) === null) {
+        localStorage.setItem(boardKey, "3d");
+      }
     },
     { authKey: AUTH_TOKEN_STORAGE_KEY, boardKey: BOARD_VISUAL_MODE_STORAGE_KEY },
   );
@@ -62,11 +64,17 @@ test("signed-out settings redirect while shared seat links use default cursor se
   await mockSharedApi(page, { signedIn: false, apiRequests });
 
   await page.goto("/settings");
-  await expect(page).toHaveURL(/\/login\?/);
-  expect(new URL(page.url()).searchParams.get("next")).toBe("/settings");
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.getByLabel("Board visual mode")).toHaveValue("3d");
+
+  await page.getByLabel("Board visual mode").selectOption("2d");
+  await page.getByRole("button", { name: "Save Settings" }).click();
+  await expect(page.getByText("Settings saved.")).toBeVisible();
 
   await page.goto(`/match/${MATCH_ID}/${PLAYER_SEAT_TOKEN}`);
   await expect(page.getByRole("heading", { name: "Round 1" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Board visual mode" })).toHaveCount(0);
+  await expect(page.locator("[data-board-visual-mode='2d']")).toBeVisible();
   await blurActiveElement(page);
 
   await page.keyboard.press("Enter");
@@ -287,6 +295,7 @@ function savedPreferences() {
   return {
     ...defaultPreferences(),
     boardScale: "large",
+    boardVisualMode: "2d",
     hotkeys: defaultPreferences().hotkeys.map((hotkey) =>
       hotkey.commandId === "cursorNorthwest" ? { ...hotkey, binding: "U" } : hotkey,
     ),

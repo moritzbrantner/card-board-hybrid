@@ -14,6 +14,7 @@ import type {
   AccountPreferences,
   AnimationSpeed,
   BoardScale,
+  BoardVisualMode,
   HotkeyCommandId,
   MotionPreference,
   PreferenceTheme,
@@ -27,6 +28,7 @@ type SettingsState =
 
 type SettingsPageProps = {
   preferencesState: SettingsState;
+  isSignedIn: boolean;
   onNavigate: (to: string) => void;
   onSave: (preferences: ReturnType<typeof accountPreferencesSavePayload>) => Promise<void>;
   onRefresh: () => Promise<void>;
@@ -58,8 +60,14 @@ const SCALE_OPTIONS: Array<[BoardScale, string]> = [
   ["large", "Large"],
 ];
 
+const BOARD_VISUAL_MODE_OPTIONS: Array<[BoardVisualMode, string]> = [
+  ["2d", "2D"],
+  ["3d", "3D"],
+];
+
 export function SettingsPage({
   preferencesState,
+  isSignedIn,
   onNavigate,
   onSave,
   onRefresh,
@@ -72,6 +80,9 @@ export function SettingsPage({
     preferences.animationSpeed,
   );
   const [boardScale, setBoardScale] = useState<BoardScale>(preferences.boardScale);
+  const [boardVisualMode, setBoardVisualMode] = useState<BoardVisualMode>(
+    preferences.boardVisualMode,
+  );
   const [hotkeys, setHotkeys] = useState(() => hotkeyBindingsToMap(preferences.hotkeys));
   const [recordingCommandId, setRecordingCommandId] = useState<HotkeyCommandId | null>(null);
   const [busy, setBusy] = useState(false);
@@ -88,6 +99,7 @@ export function SettingsPage({
     setMotion(preferences.motion);
     setAnimationSpeed(preferences.animationSpeed);
     setBoardScale(preferences.boardScale);
+    setBoardVisualMode(preferences.boardVisualMode);
     setHotkeys(hotkeyBindingsToMap(preferences.hotkeys));
     setRecordingCommandId(null);
   }, [preferences]);
@@ -107,6 +119,7 @@ export function SettingsPage({
           motion,
           animationSpeed,
           boardScale,
+          boardVisualMode,
         },
         normalizedHotkeySaveBindings(hotkeys),
       ),
@@ -163,16 +176,18 @@ export function SettingsPage({
       <section className="settings-layout" aria-label="Settings">
         <header className="top-bar">
           <div>
-            <p className="eyebrow">Account preferences</p>
+            <p className="eyebrow">{isSignedIn ? "Account preferences" : "Local preferences"}</p>
             <h1>Settings</h1>
           </div>
           <div className="actions">
             <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Match picker">
               <House size={18} />
             </button>
-            <button className="icon-button" type="button" onClick={onSignOut} title="Sign out">
-              <LogOut size={18} />
-            </button>
+            {isSignedIn ? (
+              <button className="icon-button" type="button" onClick={onSignOut} title="Sign out">
+                <LogOut size={18} />
+              </button>
+            ) : null}
           </div>
         </header>
 
@@ -186,41 +201,54 @@ export function SettingsPage({
           {preferencesState.status === "error" ? (
             <p className="notice">{preferencesState.message}</p>
           ) : null}
+          {isSignedIn ? (
+            <>
+              <PreferenceSelect
+                id="settings-theme"
+                label="Theme"
+                value={theme}
+                options={THEME_OPTIONS}
+                onChange={(value) => setTheme(value as PreferenceTheme)}
+                disabled={controlsDisabled}
+              />
+              <PreferenceSelect
+                id="settings-motion"
+                label="Motion"
+                value={motion}
+                options={MOTION_OPTIONS}
+                onChange={(value) => setMotion(value as MotionPreference)}
+                disabled={controlsDisabled}
+              />
+              <PreferenceSelect
+                id="settings-animation-speed"
+                label="Animation speed"
+                value={animationSpeed}
+                options={SPEED_OPTIONS}
+                onChange={(value) => setAnimationSpeed(value as AnimationSpeed)}
+                disabled={controlsDisabled}
+              />
+              <PreferenceSelect
+                id="settings-board-scale"
+                label="Board scale"
+                value={boardScale}
+                options={SCALE_OPTIONS}
+                onChange={(value) => setBoardScale(value as BoardScale)}
+                disabled={controlsDisabled}
+              />
+            </>
+          ) : null}
           <PreferenceSelect
-            id="settings-theme"
-            label="Theme"
-            value={theme}
-            options={THEME_OPTIONS}
-            onChange={(value) => setTheme(value as PreferenceTheme)}
-            disabled={controlsDisabled}
-          />
-          <PreferenceSelect
-            id="settings-motion"
-            label="Motion"
-            value={motion}
-            options={MOTION_OPTIONS}
-            onChange={(value) => setMotion(value as MotionPreference)}
-            disabled={controlsDisabled}
-          />
-          <PreferenceSelect
-            id="settings-animation-speed"
-            label="Animation speed"
-            value={animationSpeed}
-            options={SPEED_OPTIONS}
-            onChange={(value) => setAnimationSpeed(value as AnimationSpeed)}
-            disabled={controlsDisabled}
-          />
-          <PreferenceSelect
-            id="settings-board-scale"
-            label="Board scale"
-            value={boardScale}
-            options={SCALE_OPTIONS}
-            onChange={(value) => setBoardScale(value as BoardScale)}
+            id="settings-board-visual-mode"
+            label="Board visual mode"
+            value={boardVisualMode}
+            options={BOARD_VISUAL_MODE_OPTIONS}
+            onChange={(value) => setBoardVisualMode(value as BoardVisualMode)}
             disabled={controlsDisabled}
           />
         </section>
 
-        <section className="settings-panel" aria-label="Hotkey preferences">
+        {isSignedIn ? (
+          <section className="settings-panel" aria-label="Hotkey preferences">
           <div className="section-heading">
             <h2>Hotkeys</h2>
             <button
@@ -288,7 +316,23 @@ export function SettingsPage({
             </button>
           </div>
           {notice ? <p className="notice">{notice}</p> : null}
-        </section>
+          </section>
+        ) : (
+          <section className="settings-panel" aria-label="Local preference actions">
+            <div className="settings-actions">
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={controlsDisabled}
+              >
+                <Save size={18} />
+                Save Settings
+              </button>
+            </div>
+            {notice ? <p className="notice">{notice}</p> : null}
+          </section>
+        )}
       </section>
     </main>
   );

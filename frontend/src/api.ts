@@ -22,7 +22,6 @@ import type {
   WizardType,
   AccountProfile,
   GeneratedAvatar,
-  BoardVisualMode,
   AccountPreferences,
   UpdatePreferencesRequest,
 } from "./types";
@@ -80,11 +79,10 @@ export function updateProfile(
   displayName: string,
   avatar: GeneratedAvatar,
   preferredWizardType: WizardType,
-  boardVisualMode: BoardVisualMode,
 ) {
   return request<AccountProfile>("/api/profile", {
     method: "PATCH",
-    body: JSON.stringify({ displayName, avatar, preferredWizardType, boardVisualMode }),
+    body: JSON.stringify({ displayName, avatar, preferredWizardType }),
   });
 }
 
