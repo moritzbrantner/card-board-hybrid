@@ -1,13 +1,24 @@
-import { House, LogOut, RefreshCcw, Save } from "lucide-react";
-import { useEffect, useState } from "react";
+import { House, Keyboard, LogOut, RefreshCcw, RotateCcw, Save } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  defaultHotkeyMap,
+  HOTKEY_COMMANDS,
+  hotkeyBindingsToMap,
+  hotkeyValidationIssuesByCommand,
+  keyEventToHotkeyBinding,
+  normalizedHotkeySaveBindings,
+  validateHotkeyMap,
+} from "./hotkeys";
 import { accountPreferencesSavePayload } from "./preferences";
 import type {
   AccountPreferences,
   AnimationSpeed,
   BoardScale,
+  HotkeyCommandId,
   MotionPreference,
   PreferenceTheme,
 } from "./types";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 type SettingsState =
   | { status: "loading"; preferences: AccountPreferences }
@@ -61,17 +72,31 @@ export function SettingsPage({
     preferences.animationSpeed,
   );
   const [boardScale, setBoardScale] = useState<BoardScale>(preferences.boardScale);
+  const [hotkeys, setHotkeys] = useState(() => hotkeyBindingsToMap(preferences.hotkeys));
+  const [recordingCommandId, setRecordingCommandId] = useState<HotkeyCommandId | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const hotkeyIssues = useMemo(() => validateHotkeyMap(hotkeys), [hotkeys]);
+  const hotkeyErrors = useMemo(
+    () => hotkeyValidationIssuesByCommand(hotkeyIssues),
+    [hotkeyIssues],
+  );
 
   useEffect(() => {
     setTheme(preferences.theme);
     setMotion(preferences.motion);
     setAnimationSpeed(preferences.animationSpeed);
     setBoardScale(preferences.boardScale);
+    setHotkeys(hotkeyBindingsToMap(preferences.hotkeys));
+    setRecordingCommandId(null);
   }, [preferences]);
 
   async function handleSave() {
+    if (hotkeyIssues.length > 0) {
+      setNotice("Resolve hotkey conflicts before saving.");
+      return;
+    }
+
     setBusy(true);
     setNotice(null);
     try {
@@ -81,7 +106,9 @@ export function SettingsPage({
           motion,
           animationSpeed,
           boardScale,
-        }),
+        },
+        normalizedHotkeySaveBindings(hotkeys),
+      ),
       );
       setNotice("Settings saved.");
     } catch (error) {
@@ -89,6 +116,32 @@ export function SettingsPage({
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleHotkeyKeyDown(commandId: HotkeyCommandId, event: ReactKeyboardEvent) {
+    if (recordingCommandId !== commandId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const binding = keyEventToHotkeyBinding(event.nativeEvent);
+    if (!binding) {
+      setHotkeys((current) => ({ ...current, [commandId]: "" }));
+      setRecordingCommandId(null);
+      return;
+    }
+
+    setHotkeys((current) => ({ ...current, [commandId]: binding }));
+    setRecordingCommandId(null);
+    setNotice(null);
+  }
+
+  function resetHotkeysToDefaults() {
+    setHotkeys(defaultHotkeyMap());
+    setRecordingCommandId(null);
+    setNotice(null);
   }
 
   async function handleRefresh() {
@@ -164,12 +217,66 @@ export function SettingsPage({
             onChange={(value) => setBoardScale(value as BoardScale)}
             disabled={busy}
           />
+        </section>
+
+        <section className="settings-panel" aria-label="Hotkey preferences">
+          <div className="section-heading">
+            <h2>Hotkeys</h2>
+            <button
+              className="secondary-link"
+              type="button"
+              onClick={resetHotkeysToDefaults}
+              disabled={busy}
+            >
+              <RotateCcw size={18} />
+              Reset Defaults
+            </button>
+          </div>
+          <div className="hotkey-list">
+            {HOTKEY_COMMANDS.map((command) => {
+              const error = hotkeyErrors[command.id];
+              const isRecording = recordingCommandId === command.id;
+
+              return (
+                <div
+                  className={`hotkey-row${error ? " hotkey-row-error" : ""}`}
+                  key={command.id}
+                >
+                  <div className="hotkey-label">
+                    <span>{command.label}</span>
+                    <small>Default {formatBinding(command.defaultBinding)}</small>
+                  </div>
+                  <button
+                    className="hotkey-recorder"
+                    type="button"
+                    aria-label={`${command.label} hotkey`}
+                    aria-invalid={error ? "true" : undefined}
+                    aria-describedby={error ? `${command.id}-hotkey-error` : undefined}
+                    onClick={() => {
+                      setRecordingCommandId(command.id);
+                      setNotice(null);
+                    }}
+                    onKeyDown={(event) => handleHotkeyKeyDown(command.id, event)}
+                    disabled={busy}
+                  >
+                    <Keyboard size={18} />
+                    {isRecording ? "Press key" : formatBinding(hotkeys[command.id])}
+                  </button>
+                  {error ? (
+                    <p className="hotkey-error" id={`${command.id}-hotkey-error`}>
+                      {error}
+                    </p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
           <div className="settings-actions">
             <button
               className="primary-button"
               type="button"
               onClick={() => void handleSave()}
-              disabled={busy || preferencesState.status === "loading"}
+              disabled={busy || preferencesState.status === "loading" || hotkeyIssues.length > 0}
             >
               <Save size={18} />
               Save Settings
@@ -184,6 +291,16 @@ export function SettingsPage({
       </section>
     </main>
   );
+}
+
+function formatBinding(binding: string) {
+  if (binding === " ") {
+    return "Space";
+  }
+  if (!binding) {
+    return "Unassigned";
+  }
+  return binding;
 }
 
 function PreferenceSelect({

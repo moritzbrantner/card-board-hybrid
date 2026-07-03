@@ -195,8 +195,25 @@ export type AnimationSpeed = "slow" | "normal" | "fast";
 
 export type BoardScale = "compact" | "normal" | "large";
 
+export type HotkeyCommandId =
+  | "cursorNorthwest"
+  | "cursorNortheast"
+  | "cursorEast"
+  | "cursorWest"
+  | "cursorSouthwest"
+  | "cursorSoutheast"
+  | "confirm"
+  | "cancel"
+  | "endTurn"
+  | "passPriority"
+  | "openCardInfo"
+  | "openSettings"
+  | "openCatalog"
+  | "openDecks"
+  | "openMatchArchive";
+
 export type HotkeyBinding = {
-  commandId: string;
+  commandId: HotkeyCommandId;
   binding: string;
 };
 
