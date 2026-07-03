@@ -2,6 +2,40 @@ import { expect, test } from "@playwright/test";
 
 const AUTH_TOKEN_STORAGE_KEY = "rune-lanes-auth-token";
 const MATCH_ID = "solo-account-deck";
+const SHARED_MATCH_ID = "shared-home-match";
+
+test("AI deck selection remains visible with system and legal account deck recipes", async ({
+  page,
+}) => {
+  const matchRequests = [];
+  await page.addInitScript(
+    ({ key }) => localStorage.setItem(key, "existing-token"),
+    { key: AUTH_TOKEN_STORAGE_KEY },
+  );
+  await mockHomeApi(page, matchRequests);
+
+  await page.goto("/");
+
+  const aiDeckSelector = page.getByLabel("AI Deck");
+  await expect(aiDeckSelector).toBeVisible();
+  await expect(aiDeckSelector).toContainText("Balanced Starter");
+  await expect(aiDeckSelector).toContainText("Tournament Legal");
+  await expect(aiDeckSelector).toContainText("Default Legal");
+  await expect(aiDeckSelector).not.toContainText("Needs More Basics");
+
+  await aiDeckSelector.selectOption("account:101");
+  await page.getByLabel("AI Wizard").selectOption("chronomancer");
+  await page.getByRole("button", { name: "New Solo Match" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/match/${MATCH_ID}$`));
+  expect(matchRequests).toEqual([
+    {
+      wizardType: "runekeeper",
+      playerDeckId: 102,
+      aiOpponent: { source: "account", deckId: 101, wizardType: "chronomancer" },
+    },
+  ]);
+});
 
 test("signed-in players choose account deck recipes for solo match creation", async ({
   page,
@@ -103,8 +137,35 @@ test("anonymous players create solo matches without account deck controls or vis
   ]);
 });
 
+test("home screen creates a shared match from the multiplayer action", async ({ page }) => {
+  const matchRequests = [];
+  const sharedMatchRequests = [];
+  await page.addInitScript(
+    ({ key }) => localStorage.setItem(key, "existing-token"),
+    { key: AUTH_TOKEN_STORAGE_KEY },
+  );
+  await mockHomeApi(page, matchRequests, { sharedMatchRequests });
+
+  await page.goto("/");
+
+  await page.getByLabel("Wizard type").getByRole("button", { name: /Chronomancer/ }).click();
+  await page.getByRole("button", { name: /Spark Stone/ }).click();
+  await page.getByRole("button", { name: "New Multiplayer Match" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/match/${SHARED_MATCH_ID}/player-seat$`));
+  expect(sharedMatchRequests).toEqual([{ wizardType: "chronomancer" }]);
+  expect(matchRequests).toEqual([]);
+  expect(
+    await page.evaluate((matchId) => sessionStorage.getItem(`rune-lanes-wizard:${matchId}`), SHARED_MATCH_ID),
+  ).toBe("chronomancer");
+  expect(
+    await page.evaluate((matchId) => sessionStorage.getItem(`rune-lanes-runes:${matchId}`), SHARED_MATCH_ID),
+  ).toBe(JSON.stringify(["spark-stone"]));
+});
+
 async function mockHomeApi(page, matchRequests, options = {}) {
   const signedIn = options.signedIn ?? true;
+  const sharedMatchRequests = options.sharedMatchRequests ?? [];
   const decks =
     "decks" in options
       ? options.decks
@@ -165,6 +226,21 @@ async function mockHomeApi(page, matchRequests, options = {}) {
     if (url.pathname === "/api/matches" && request.method() === "POST") {
       matchRequests.push(JSON.parse(request.postData() ?? "{}"));
       await route.fulfill({ json: matchResponse(playableMatch()) });
+      return;
+    }
+
+    if (url.pathname === "/api/shared-matches" && request.method() === "POST") {
+      sharedMatchRequests.push(JSON.parse(request.postData() ?? "{}"));
+      await route.fulfill({
+        json: {
+          matchId: SHARED_MATCH_ID,
+          mode: "shared",
+          status: "setup",
+          viewerSide: "player",
+          playerSeatUrl: `/match/${SHARED_MATCH_ID}/player-seat`,
+          inviteSeatUrl: `/match/${SHARED_MATCH_ID}/opponent-seat`,
+        },
+      });
       return;
     }
 
