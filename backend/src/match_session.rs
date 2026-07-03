@@ -3191,6 +3191,24 @@ mod tests {
             .map(|unit| unit.armor)
     }
 
+    fn card_play_event_names(frames: &[RecordedReplayFrame]) -> Vec<&'static str> {
+        frames
+            .iter()
+            .filter_map(|frame| match frame.event {
+                ReplayEvent::CardPlayed { .. } => Some("cardPlayed"),
+                ReplayEvent::ActionQueued { .. } => Some("actionQueued"),
+                ReplayEvent::UnitSummoned { .. } => Some("unitSummoned"),
+                ReplayEvent::PieceHealed { .. } => Some("pieceHealed"),
+                ReplayEvent::PieceBuffed { .. } => Some("pieceBuffed"),
+                ReplayEvent::PieceDamaged { .. } => Some("pieceDamaged"),
+                ReplayEvent::CardDrawn { .. } => Some("cardDrawn"),
+                ReplayEvent::ItemEquipped { .. } => Some("itemEquipped"),
+                ReplayEvent::ItemActivated { .. } => Some("itemActivated"),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[test]
     fn radius_three_board_has_thirty_seven_tiles() {
         let game = MatchState::new_with_seed(7);
@@ -3449,11 +3467,15 @@ mod tests {
         let card = player_unit_card(&game, "ember-squire");
         let card_id = put_card_in_hand(&mut game, card);
 
-        game.apply_action(MatchActionRequest::PlayCard {
-            card_id,
-            target: ActionTarget::Hex { coord: hex(0, 2) },
-        })
-        .expect("unit should be playable next to wizard");
+        let frames = game
+            .apply_action_recording(
+                MatchActionRequest::PlayCard {
+                    card_id,
+                    target: ActionTarget::Hex { coord: hex(0, 2) },
+                },
+                3,
+            )
+            .expect("unit should be playable next to wizard");
 
         let unit = game.board.units.first().expect("unit should be on board");
         assert_eq!(game.player.mana, 3);
@@ -3462,6 +3484,10 @@ mod tests {
         assert_eq!(unit.template_id.as_deref(), Some("ember-squire"));
         assert_eq!(unit.ap_remaining, 1);
         assert_eq!(unit.max_ap, 2);
+        assert_eq!(
+            card_play_event_names(&frames),
+            vec!["cardPlayed", "actionQueued", "unitSummoned"]
+        );
     }
 
     #[test]
@@ -3600,13 +3626,17 @@ mod tests {
             .find(|card| card.template_id == "mending-rune")
             .expect("heal exists");
         let heal_id = put_card_in_hand(&mut game, heal);
-        game.apply_action(MatchActionRequest::PlayCard {
-            card_id: heal_id,
-            target: ActionTarget::Piece {
-                piece_id: "ally".to_string(),
-            },
-        })
-        .expect("heal should work");
+        let heal_frames = game
+            .apply_action_recording(
+                MatchActionRequest::PlayCard {
+                    card_id: heal_id,
+                    target: ActionTarget::Piece {
+                        piece_id: "ally".to_string(),
+                    },
+                },
+                10,
+            )
+            .expect("heal should work");
         assert_eq!(
             game.board
                 .units
@@ -3615,19 +3645,27 @@ mod tests {
                 .map(|unit| unit.armor),
             Some(4)
         );
+        assert_eq!(
+            card_play_event_names(&heal_frames),
+            vec!["cardPlayed", "actionQueued", "pieceHealed"]
+        );
 
         let buff = starter_card_templates()
             .into_iter()
             .find(|card| card.template_id == "war-chant")
             .expect("buff exists");
         let buff_id = put_card_in_hand(&mut game, buff);
-        game.apply_action(MatchActionRequest::PlayCard {
-            card_id: buff_id,
-            target: ActionTarget::Piece {
-                piece_id: "ally".to_string(),
-            },
-        })
-        .expect("buff should work");
+        let buff_frames = game
+            .apply_action_recording(
+                MatchActionRequest::PlayCard {
+                    card_id: buff_id,
+                    target: ActionTarget::Piece {
+                        piece_id: "ally".to_string(),
+                    },
+                },
+                11,
+            )
+            .expect("buff should work");
         let ally = game
             .board
             .units
@@ -3637,6 +3675,10 @@ mod tests {
         assert_eq!(ally.attack, 2);
         assert_eq!(ally.armor, 5);
         assert_eq!(ally.max_armor, 5);
+        assert_eq!(
+            card_play_event_names(&buff_frames),
+            vec!["cardPlayed", "actionQueued", "pieceBuffed"]
+        );
 
         let bolt = starter_card_templates()
             .into_iter()
@@ -3645,14 +3687,22 @@ mod tests {
         let bolt_id = put_card_in_hand(&mut game, bolt);
         game.player.mana = 5;
         game.player.wizard.ap_remaining = 1;
-        game.apply_action(MatchActionRequest::PlayCard {
-            card_id: bolt_id,
-            target: ActionTarget::Piece {
-                piece_id: "enemy".to_string(),
-            },
-        })
-        .expect("bolt should work");
+        let damage_frames = game
+            .apply_action_recording(
+                MatchActionRequest::PlayCard {
+                    card_id: bolt_id,
+                    target: ActionTarget::Piece {
+                        piece_id: "enemy".to_string(),
+                    },
+                },
+                12,
+            )
+            .expect("bolt should work");
         assert!(!game.board.units.iter().any(|unit| unit.id == "enemy"));
+        assert_eq!(
+            card_play_event_names(&damage_frames),
+            vec!["cardPlayed", "actionQueued", "pieceDamaged"]
+        );
     }
 
     #[test]
@@ -3680,13 +3730,17 @@ mod tests {
             .expect("item exists");
         let flask_id = put_card_in_hand(&mut game, flask);
 
-        game.apply_action(MatchActionRequest::PlayCard {
-            card_id: flask_id,
-            target: ActionTarget::Piece {
-                piece_id: "ally".to_string(),
-            },
-        })
-        .expect("item should equip to an allied unit");
+        let equip_frames = game
+            .apply_action_recording(
+                MatchActionRequest::PlayCard {
+                    card_id: flask_id,
+                    target: ActionTarget::Piece {
+                        piece_id: "ally".to_string(),
+                    },
+                },
+                20,
+            )
+            .expect("item should equip to an allied unit");
 
         let item_id = {
             let ally = game
@@ -3699,12 +3753,20 @@ mod tests {
             assert_eq!(ally.items.len(), 1);
             ally.items[0].id.clone()
         };
+        assert_eq!(
+            card_play_event_names(&equip_frames),
+            vec!["cardPlayed", "actionQueued", "itemEquipped"]
+        );
 
-        game.apply_action(MatchActionRequest::ActivateItem {
-            unit_id: "ally".to_string(),
-            item_id: item_id.clone(),
-        })
-        .expect("active item should be usable by its carrier");
+        let activation_frames = game
+            .apply_action_recording(
+                MatchActionRequest::ActivateItem {
+                    unit_id: "ally".to_string(),
+                    item_id: item_id.clone(),
+                },
+                21,
+            )
+            .expect("active item should be usable by its carrier");
 
         let ally = game
             .board
@@ -3715,6 +3777,10 @@ mod tests {
         assert_eq!(ally.armor, 3);
         assert_eq!(ally.ap_remaining, 1);
         assert!(ally.items[0].active_used_this_turn);
+        assert_eq!(
+            card_play_event_names(&activation_frames),
+            vec!["actionQueued", "pieceHealed", "itemActivated"]
+        );
 
         let result = game.apply_action(MatchActionRequest::ActivateItem {
             unit_id: "ally".to_string(),
@@ -3844,17 +3910,78 @@ mod tests {
             .expect("draw spell exists");
         let insight_id = put_card_in_hand(&mut game, insight);
 
-        game.apply_action(MatchActionRequest::PlayCard {
-            card_id: insight_id,
-            target: ActionTarget::Piece {
-                piece_id: game.player.wizard.id.clone(),
-            },
-        })
-        .expect("draw spell should target the caster");
+        let frames = game
+            .apply_action_recording(
+                MatchActionRequest::PlayCard {
+                    card_id: insight_id,
+                    target: ActionTarget::Piece {
+                        piece_id: game.player.wizard.id.clone(),
+                    },
+                },
+                30,
+            )
+            .expect("draw spell should target the caster");
 
         assert_eq!(game.player.hand.len(), initial_hand + 1);
         assert_eq!(game.player.deck_count, initial_deck - 1);
         assert_eq!(game.player.discard_count, 1);
+        assert_eq!(
+            card_play_event_names(&frames),
+            vec!["cardPlayed", "actionQueued", "cardDrawn"]
+        );
+        assert!(frames.iter().any(|frame| matches!(
+            &frame.event,
+            ReplayEvent::CardDrawn {
+                side: Side::Player,
+                card: Some(_),
+                hidden: false,
+            }
+        )));
+    }
+
+    #[test]
+    fn public_replay_redacts_hidden_opponent_draws() {
+        let mut game = MatchState::new_with_seed(7);
+        game.apply_action_recording(MatchActionRequest::EndTurn, 40)
+            .expect("ending turn should start the opponent turn");
+        advance_solo_ai_until_player_turn(&mut game);
+        let initial_hand = game.opponent.hand.len();
+        let initial_deck = game.opponent.deck_count;
+
+        let frames = game
+            .apply_action_recording(MatchActionRequest::EndTurn, 41)
+            .expect("ending turn should start the opponent turn again");
+
+        let draw_frame = frames
+            .iter()
+            .find(|frame| matches!(frame.event, ReplayEvent::CardDrawn { .. }))
+            .expect("opponent turn start should draw a card");
+        assert!(matches!(
+            &draw_frame.event,
+            ReplayEvent::CardDrawn {
+                side: Side::Opponent,
+                card: Some(_),
+                hidden: true,
+            }
+        ));
+        assert!(matches!(
+            draw_frame.event.for_visibility(ReplayVisibility::Public),
+            ReplayEvent::CardDrawn {
+                side: Side::Opponent,
+                card: None,
+                hidden: true,
+            }
+        ));
+
+        let replay_state = MatchState::from_snapshot_json(&draw_frame.snapshot_json)
+            .expect("replay snapshot should deserialize");
+        let public_value = replay_state.replay_value(ReplayVisibility::Public);
+        assert!(public_value["opponent"].get("hand").is_none());
+        assert_eq!(public_value["opponent"]["handCount"], initial_hand + 1);
+        assert_eq!(public_value["opponent"]["deckCount"], initial_deck - 1);
+
+        let revealed_value = replay_state.replay_value(ReplayVisibility::Revealed);
+        assert!(revealed_value["opponent"].get("hand").is_some());
     }
 
     #[test]
@@ -3910,17 +4037,25 @@ mod tests {
             .expect("area spell exists");
         let cinder_id = put_card_in_hand(&mut game, cinder);
 
-        game.apply_action(MatchActionRequest::PlayCard {
-            card_id: cinder_id,
-            target: ActionTarget::Piece {
-                piece_id: "enemy-center".to_string(),
-            },
-        })
-        .expect("area damage should be playable on an enemy");
+        let frames = game
+            .apply_action_recording(
+                MatchActionRequest::PlayCard {
+                    card_id: cinder_id,
+                    target: ActionTarget::Piece {
+                        piece_id: "enemy-center".to_string(),
+                    },
+                },
+                50,
+            )
+            .expect("area damage should be playable on an enemy");
 
         assert_eq!(unit_armor(&game, "enemy-center"), Some(3));
         assert_eq!(unit_armor(&game, "enemy-neighbor"), Some(2));
         assert_eq!(unit_armor(&game, "ally-neighbor"), Some(2));
+        assert_eq!(
+            card_play_event_names(&frames),
+            vec!["cardPlayed", "actionQueued", "pieceDamaged", "pieceDamaged",]
+        );
     }
 
     #[test]
@@ -3976,17 +4111,25 @@ mod tests {
             .expect("line spell exists");
         let ray_id = put_card_in_hand(&mut game, ray);
 
-        game.apply_action(MatchActionRequest::PlayCard {
-            card_id: ray_id,
-            target: ActionTarget::Piece {
-                piece_id: "enemy-front".to_string(),
-            },
-        })
-        .expect("line damage should be playable on a straight-line enemy");
+        let frames = game
+            .apply_action_recording(
+                MatchActionRequest::PlayCard {
+                    card_id: ray_id,
+                    target: ActionTarget::Piece {
+                        piece_id: "enemy-front".to_string(),
+                    },
+                },
+                60,
+            )
+            .expect("line damage should be playable on a straight-line enemy");
 
         assert_eq!(unit_armor(&game, "enemy-front"), Some(2));
         assert_eq!(unit_armor(&game, "enemy-back"), Some(1));
         assert_eq!(unit_armor(&game, "enemy-offline"), Some(3));
+        assert_eq!(
+            card_play_event_names(&frames),
+            vec!["cardPlayed", "actionQueued", "pieceDamaged", "pieceDamaged",]
+        );
     }
 
     #[test]
