@@ -22,6 +22,9 @@ test("saved navigation hotkeys use account preferences and ignore editable focus
   );
   await page.goto("/");
   await preferencesLoaded;
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.getAttribute("data-animation-speed")))
+    .toBe("fast");
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
@@ -206,7 +209,7 @@ function preferences() {
   return {
     theme: "system",
     motion: "system",
-    animationSpeed: "normal",
+    animationSpeed: "fast",
     boardScale: "normal",
     boardVisualMode: "2d",
     hotkeys: [
