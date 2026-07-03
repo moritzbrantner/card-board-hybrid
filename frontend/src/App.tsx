@@ -1444,7 +1444,7 @@ function MatchPicker({
   const [progressionLoadState, setProgressionLoadState] = useState<ProgressionLoadState | null>(
     currentUser ? { status: "loading" } : null,
   );
-  const [selectedPlayerDeckId, setSelectedPlayerDeckId] = useState<string>("starter");
+  const [selectedPlayerDeckId, setSelectedPlayerDeckId] = useState<string>("");
   const [selectedAiDeck, setSelectedAiDeck] = useState<string>("system:balanced-starter");
   const [selectedAiWizardType, setSelectedAiWizardType] = useState<WizardType>("runekeeper");
   const [selectedRuneIds, setSelectedRuneIds] = useState<string[]>([]);
@@ -1471,7 +1471,7 @@ function MatchPicker({
     if (!currentUser) {
       setDeckLoadState(null);
       setProgressionLoadState(null);
-      setSelectedPlayerDeckId("starter");
+      setSelectedPlayerDeckId("");
       setSelectedRuneIds([]);
       return;
     }
@@ -1480,9 +1480,12 @@ function MatchPicker({
       .then((response) => {
         setDeckLoadState({ status: "ready", response });
         const defaultDeck = response.decks.find((deck) => deck.isDefault && deck.legality.legal);
-        if (defaultDeck) {
-          setSelectedPlayerDeckId(String(defaultDeck.id));
-        }
+        const selectedDeck = response.decks.find(
+          (deck) => deck.legality.legal && String(deck.id) === selectedPlayerDeckId,
+        );
+        const fallbackDeck =
+          defaultDeck ?? selectedDeck ?? response.decks.find((deck) => deck.legality.legal) ?? null;
+        setSelectedPlayerDeckId(fallbackDeck ? String(fallbackDeck.id) : "");
       })
       .catch((error: unknown) =>
         setDeckLoadState({
@@ -1515,11 +1518,10 @@ function MatchPicker({
     setNotice(null);
     try {
       const aiOpponent = aiSelectionFromValue(selectedAiDeck, selectedAiWizardType);
+      const playerDeckId = selectedPlayerDeckId ? Number(selectedPlayerDeckId) : null;
       const created = await createMatch({
         wizardType: selectedWizardType,
-        ...(selectedPlayerDeckId !== "starter"
-          ? { playerDeckId: Number(selectedPlayerDeckId) }
-          : {}),
+        ...(playerDeckId !== null ? { playerDeckId } : {}),
         ...(aiOpponent ? { aiOpponent } : {}),
         ...(selectedRuneIds.length > 0 ? { runeIds: selectedRuneIds } : {}),
       });
@@ -1560,13 +1562,13 @@ function MatchPicker({
     onNavigate(`/match/${encodeURIComponent(normalized)}`);
   }
 
-  const legalAccountDecks =
-    deckLoadState?.status === "ready"
-      ? deckLoadState.response.decks.filter((deck) => deck.legality.legal)
-      : [];
+  const accountDecks = deckLoadState?.status === "ready" ? deckLoadState.response.decks : [];
+  const legalAccountDecks = accountDecks.filter((deck) => deck.legality.legal);
   const systemDecks =
     systemDeckLoadState.status === "ready" ? systemDeckLoadState.response.decks : [];
   const selectedAiDeckIsAccount = selectedAiDeck.startsWith("account:");
+  const cannotCreateSoloMatch =
+    busy || (currentUser !== null && (deckLoadState?.status === "loading" || !selectedPlayerDeckId));
 
   return (
     <main className="app-shell picker-shell">
@@ -1618,16 +1620,21 @@ function MatchPicker({
         </fieldset>
         <section className="setup-deck-selectors" aria-label="Deck selection">
           <label>
-            Your Deck
+            Your Deck Recipe
             <select
               value={selectedPlayerDeckId}
               onChange={(event) => setSelectedPlayerDeckId(event.target.value)}
               disabled={busy || !currentUser || deckLoadState?.status === "loading"}
             >
-              <option value="starter">Starter</option>
-              {legalAccountDecks.map((deck) => (
-                <option key={deck.id} value={deck.id}>
-                  {deck.name}
+              {!currentUser ? <option value="">Sign in to use your deck recipes</option> : null}
+              {accountDecks.length === 0 && currentUser ? (
+                <option value="">No account deck recipes</option>
+              ) : null}
+              {accountDecks.map((deck) => (
+                <option key={deck.id} value={deck.id} disabled={!deck.legality.legal}>
+                  {deck.legality.legal
+                    ? deck.name
+                    : `${deck.name} - Draft - cannot start a match`}
                 </option>
               ))}
             </select>
@@ -1688,7 +1695,7 @@ function MatchPicker({
             className="primary-button"
             type="button"
             onClick={() => void handleCreateMatch()}
-            disabled={busy}
+            disabled={cannotCreateSoloMatch}
           >
             <Plus size={18} />
             New Solo Match
