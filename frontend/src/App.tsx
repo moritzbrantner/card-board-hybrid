@@ -62,6 +62,12 @@ import {
   effectiveBoardVisualMode,
   saveLocalBoardVisualMode,
 } from "./boardVisualMode";
+import {
+  createBoardAnimationCue,
+  type AnimatedPieceSnapshot,
+  type BoardAnimationCue,
+  type PieceAnimation,
+} from "./boardAnimations";
 import { Board3DRenderer, type Board3DTileInteraction } from "./Board3D";
 import {
   canCreateWebGLContext,
@@ -98,6 +104,7 @@ import type {
   MatchParticipantState,
   MatchState,
   Rarity,
+  ReplayFrame,
   ReplayEvent,
   SoloAiOpponentSelection,
   SharedClientMessage,
@@ -269,6 +276,22 @@ function useBoardVisualModePreference(
   }
 
   return [boardVisualMode, setBoardVisualMode] as const;
+}
+
+function usePrefersReducedMotion() {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() =>
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const handleChange = () => setPrefersReducedMotion(query.matches);
+    handleChange();
+    query.addEventListener("change", handleChange);
+    return () => query.removeEventListener("change", handleChange);
+  }, []);
+
+  return prefersReducedMotion;
 }
 
 export function App() {
@@ -1733,18 +1756,24 @@ function MatchPage({
   const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
+  const [playedCardId, setPlayedCardId] = useState<string | null>(null);
   const [unitModalPieceId, setUnitModalPieceId] = useState<string | null>(null);
   const [unitContextMenu, setUnitContextMenu] = useState<UnitContextMenu>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [boardAnimation, setBoardAnimation] = useState<BoardAnimationCue | null>(null);
+  const animationSequenceRef = useRef(0);
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
     setLoadState({ status: "loading" });
     setSelection(null);
     setDraggedCardId(null);
+    setPlayedCardId(null);
     setUnitContextMenu(null);
     setUnitModalPieceId(null);
     setNotice(null);
+    setBoardAnimation(null);
     loadMatch(matchId)
       .then((response) => setLoadState({ status: "ready", match: response.matchState }))
       .catch((error: unknown) =>
@@ -1817,11 +1846,13 @@ function MatchPage({
     try {
       setSelection(null);
       setDraggedCardId(null);
+      setPlayedCardId(null);
       setUnitModalPieceId(null);
       setUnitContextMenu(null);
       const response = await action();
       await playLiveActionResponse(response);
     } catch (error) {
+      setPlayedCardId(null);
       setNotice(error instanceof Error ? error.message : "Action failed");
     } finally {
       setBusy(false);
@@ -1830,15 +1861,30 @@ function MatchPage({
 
   async function playLiveActionResponse(response: MatchResponse) {
     const playbackFrames = liveAiPlaybackFrames(response.replayFrames ?? []);
+    let previousMatch = loadState.status === "ready" ? loadState.match : null;
+
+    function acceptMatch(nextMatch: MatchState, event?: ReplayEvent | null) {
+      setLoadState({ status: "ready", match: nextMatch });
+      setBoardAnimation(
+        createBoardAnimationCue({
+          previous: previousMatch,
+          next: nextMatch,
+          event,
+          sequence: ++animationSequenceRef.current,
+          reducedMotion: prefersReducedMotion,
+        }),
+      );
+      previousMatch = nextMatch;
+    }
 
     if (playbackFrames.length === 0) {
-      setLoadState({ status: "ready", match: response.matchState });
+      acceptMatch(response.matchState, latestReplayEvent(response.replayFrames));
       return;
     }
 
     for (const frame of playbackFrames) {
       await delay(LIVE_AI_FRAME_DELAY_MS);
-      setLoadState({ status: "ready", match: frame.matchState });
+      acceptMatch(frame.matchState, frame.event);
     }
 
     setLoadState({ status: "ready", match: response.matchState });
@@ -1939,6 +1985,7 @@ function MatchPage({
     if (selectedCard) {
       const target = cardTargetForTile(match, viewerSide, selectedCard, tile);
       if (target) {
+        setPlayedCardId(selectedCard.id);
         void runAction(() => playCard(matchId, selectedCard.id, target));
       } else {
         setNotice("That card cannot target this hex.");
@@ -1997,6 +2044,7 @@ function MatchPage({
     }
 
     setDraggedCardId(null);
+    setPlayedCardId(card.id);
     void runAction(() => playCard(matchId, card.id, target));
   }
 
@@ -2092,6 +2140,7 @@ function MatchPage({
           </div>
           <Board
             match={match}
+            animation={boardAnimation}
             boardVisualMode={boardVisualMode}
             viewerSide="player"
             visualCatalog={visualCatalog}
@@ -2111,6 +2160,7 @@ function MatchPage({
                   visualIdentity={visualCatalog.card(card)}
                   selected={selection?.type === "card" && card.id === selection.cardId}
                   dragging={draggedCardId === card.id}
+                  played={playedCardId === card.id}
                   style={cardFanStyle(index, viewerHand.length)}
                   disabled={busy || !isPlayableCard(match, viewerSide, card)}
                   onClick={() => {
@@ -2200,6 +2250,7 @@ function SharedMatchPage({
   const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
+  const [playedCardId, setPlayedCardId] = useState<string | null>(null);
   const [unitModalPieceId, setUnitModalPieceId] = useState<string | null>(null);
   const [unitContextMenu, setUnitContextMenu] = useState<UnitContextMenu>(null);
   const [selectedWizardType, setSelectedWizardType] = useState<WizardType>(() => {
@@ -2213,15 +2264,25 @@ function SharedMatchPage({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  const [boardAnimation, setBoardAnimation] = useState<BoardAnimationCue | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const latestSharedMatchRef = useRef<MatchState | null>(null);
+  const animationSequenceRef = useRef(0);
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
     setLoadState({ status: "loading" });
     setSelection(null);
     setDraggedCardId(null);
+    setPlayedCardId(null);
     setNotice(null);
+    setBoardAnimation(null);
+    latestSharedMatchRef.current = null;
     loadSharedMatch(matchId, seatToken)
-      .then((shared) => setLoadState({ status: "ready", shared }))
+      .then((shared) => {
+        latestSharedMatchRef.current = shared.matchState;
+        setLoadState({ status: "ready", shared });
+      })
       .catch((error: unknown) =>
         setLoadState({
           status: "error",
@@ -2280,18 +2341,32 @@ function SharedMatchPage({
         message.type === "presenceChanged" ||
         message.type === "actionAccepted"
       ) {
+        if (message.type === "actionAccepted" && message.payload.matchState) {
+          setBoardAnimation(
+            createBoardAnimationCue({
+              previous: latestSharedMatchRef.current,
+              next: message.payload.matchState,
+              sequence: ++animationSequenceRef.current,
+              reducedMotion: prefersReducedMotion,
+            }),
+          );
+        }
+        latestSharedMatchRef.current = message.payload.matchState;
         setLoadState({ status: "ready", shared: message.payload });
         setBusy(false);
         if (message.type === "actionAccepted") {
           setSelection(null);
           setDraggedCardId(null);
+          setPlayedCardId(null);
           setUnitModalPieceId(null);
           setUnitContextMenu(null);
         }
       } else if (message.type === "actionRejected") {
+        setPlayedCardId(null);
         setNotice(message.message);
         setBusy(false);
       } else if (message.type === "error") {
+        setPlayedCardId(null);
         setNotice(message.message);
         setBusy(false);
       }
@@ -2315,7 +2390,7 @@ function SharedMatchPage({
       socketRef.current = null;
       socket.close();
     };
-  }, [matchId, seatToken]);
+  }, [matchId, seatToken, prefersReducedMotion]);
 
   const shared = loadState.status === "ready" ? loadState.shared : null;
   const match = shared?.matchState ?? null;
@@ -2438,6 +2513,7 @@ function SharedMatchPage({
     if (selectedCard) {
       const target = cardTargetForTile(match, viewerSide, selectedCard, tile);
       if (target) {
+        setPlayedCardId(selectedCard.id);
         sendSharedAction({ type: "playCard", cardId: selectedCard.id, target });
       } else {
         setNotice("That card cannot target this hex.");
@@ -2496,6 +2572,7 @@ function SharedMatchPage({
     }
 
     setDraggedCardId(null);
+    setPlayedCardId(card.id);
     sendSharedAction({ type: "playCard", cardId: card.id, target });
   }
 
@@ -2728,6 +2805,7 @@ function SharedMatchPage({
           </div>
           <Board
             match={match}
+            animation={boardAnimation}
             boardVisualMode={boardVisualMode}
             viewerSide={viewerSide}
             visualCatalog={visualCatalog}
@@ -2747,6 +2825,7 @@ function SharedMatchPage({
                   visualIdentity={visualCatalog.card(card)}
                   selected={selection?.type === "card" && card.id === selection.cardId}
                   dragging={draggedCardId === card.id}
+                  played={playedCardId === card.id}
                   style={cardFanStyle(index, viewerHand.length)}
                   disabled={busy || !canAct || !isPlayableCard(match, viewerSide, card)}
                   onClick={() => {
@@ -2837,6 +2916,7 @@ function ReplayPage({
   const [loadState, setLoadState] = useState<ReplayLoadState>({ status: "loading" });
   const [frameIndex, setFrameIndex] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
     setLoadState({ status: "loading" });
@@ -2874,6 +2954,13 @@ function ReplayPage({
   const clampedFrameIndex = Math.min(frameIndex, Math.max(frameCount - 1, 0));
   const frame = replay.frames[clampedFrameIndex];
   const match = frame.matchState;
+  const boardAnimation = createBoardAnimationCue({
+    previous: replay.frames[clampedFrameIndex - 1]?.matchState ?? null,
+    next: match,
+    event: frame.event,
+    sequence: clampedFrameIndex,
+    reducedMotion: prefersReducedMotion,
+  });
 
   async function handleBoardVisualModeChange(mode: BoardVisualMode) {
     try {
@@ -2929,6 +3016,7 @@ function ReplayPage({
 
         <Board
           match={match}
+          animation={boardAnimation}
           boardVisualMode={boardVisualMode}
           viewerSide="player"
           selectedCard={null}
@@ -3250,6 +3338,7 @@ function OpponentHandDisplay({ count }: { count: number }) {
 
 function Board({
   match,
+  animation,
   boardVisualMode,
   viewerSide,
   visualCatalog = EMPTY_MATCH_VISUAL_CATALOG,
@@ -3262,6 +3351,7 @@ function Board({
   onUnitContextMenu,
 }: {
   match: MatchState;
+  animation?: BoardAnimationCue | null;
   boardVisualMode: BoardVisualMode;
   viewerSide: Side;
   visualCatalog?: MatchVisualCatalog;
@@ -3285,7 +3375,16 @@ function Board({
   });
   const isInteractive = isBoardRendererInteractive({ renderer, readOnly, disabled });
   const columns = groupTilesByColumn(match.board.tiles);
-  const pieces = piecesInMatch(match);
+  const [visibleAnimation, setVisibleAnimation] = useState<BoardAnimationCue | null>(animation ?? null);
+  const pieces = piecesForAnimation(piecesInMatch(match), visibleAnimation);
+  const displayPieceByCoord = useMemo(
+    () => new Map(pieces.map((piece) => [coordKey(piece.position), piece])),
+    [pieces],
+  );
+  const animationByPieceId = useMemo(
+    () => new Map((visibleAnimation?.pieces ?? []).map((pieceAnimation) => [pieceAnimation.pieceId, pieceAnimation])),
+    [visibleAnimation],
+  );
   const tileInteractions = match.board.tiles.map((tile): Board3DTileInteraction => {
     const piece = pieceAt(match, tile.coord);
     const isLegal =
@@ -3322,6 +3421,20 @@ function Board({
     }
   }, [boardVisualMode]);
 
+  useEffect(() => {
+    setVisibleAnimation(animation ?? null);
+    if (!animation) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(
+      () => setVisibleAnimation((current) => (current?.sequence === animation.sequence ? null : current)),
+      animation.durationMs,
+    );
+
+    return () => window.clearTimeout(timeoutId);
+  }, [animation]);
+
   if (renderer === "3d") {
     return (
       <section
@@ -3338,6 +3451,7 @@ function Board({
         <Board3DRenderer
           tiles={match.board.tiles}
           pieces={pieces}
+          animation={visibleAnimation}
           visualCatalog={visualCatalog}
           readOnly={readOnly}
           disabled={disabled}
@@ -3376,12 +3490,13 @@ function Board({
           <div className="hex-column" key={column.q}>
             {column.tiles.map((tile) => {
               const piece = pieceAt(match, tile.coord);
+              const displayPiece = displayPieceByCoord.get(coordKey(tile.coord)) ?? piece;
               const interaction = tileInteractions.find(
                 (candidate) => coordKey(candidate.coord) === coordKey(tile.coord),
               );
               const isLegal = interaction?.isLegal ?? false;
               const isSelected = piece?.id === selectedPiece?.id;
-              const occupantClass = piece ? `occupied occupied-${piece.side}` : "";
+              const occupantClass = displayPiece ? `occupied occupied-${displayPiece.side}` : "";
               const title = tileTitle(tile, piece, viewerSide);
 
               return (
@@ -3422,16 +3537,18 @@ function Board({
                   title={title}
                   aria-label={title}
                 >
-                  {piece ? (
+                  {displayPiece ? (
                     <>
                       <span
-                        className={`hex-occupant-marker ${piece.side}`}
+                        className={`hex-occupant-marker ${displayPiece.side}`}
                         aria-hidden="true"
                       >
-                        {viewerSideShortLabel(piece.side, viewerSide)}
+                        {viewerSideShortLabel(displayPiece.side, viewerSide)}
                       </span>
                       <PieceToken
-                        piece={piece}
+                        key={`${displayPiece.id}-${visibleAnimation?.sequence ?? 0}`}
+                        piece={displayPiece}
+                        animation={animationByPieceId.get(displayPiece.id)}
                         viewerSide={viewerSide}
                         visualCatalog={visualCatalog}
                       />
@@ -3449,10 +3566,12 @@ function Board({
 
 function PieceToken({
   piece,
+  animation,
   viewerSide,
   visualCatalog,
 }: {
   piece: BoardPiece;
+  animation?: PieceAnimation;
   viewerSide: Side;
   visualCatalog: MatchVisualCatalog;
 }) {
@@ -3468,10 +3587,13 @@ function PieceToken({
     accentClass = unitVisualIdentity.rarity;
   }
   const unknownClass = visualIdentity.status === "unknown" ? "unknown" : "";
+  const animationClass = animation ? `piece-anim-${animation.kind}` : "";
+  const feedbackLabel = pieceAnimationFeedback(animation);
 
   return (
     <span
-      className={`piece-token portrait ${piece.side} ${piece.pieceType} ${accentClass} ${unknownClass}`}
+      className={`piece-token portrait ${piece.side} ${piece.pieceType} ${accentClass} ${unknownClass} ${animationClass}`}
+      style={pieceAnimationStyle(animation)}
       title={visualIdentity.name}
     >
       <span className={`piece-side-badge ${piece.side}`}>
@@ -3506,6 +3628,7 @@ function PieceToken({
         {piece.apRemaining}
       </span>
       </span>
+      {feedbackLabel ? <span className="piece-feedback">{feedbackLabel}</span> : null}
     </span>
   );
 }
@@ -3515,6 +3638,7 @@ function CardButton({
   visualIdentity,
   selected,
   dragging = false,
+  played = false,
   style,
   disabled,
   onClick,
@@ -3525,6 +3649,7 @@ function CardButton({
   visualIdentity: CardVisualIdentity;
   selected: boolean;
   dragging?: boolean;
+  played?: boolean;
   style?: CSSProperties;
   disabled: boolean;
   onClick: () => void;
@@ -3533,7 +3658,7 @@ function CardButton({
 }) {
   return (
     <button
-      className={`card-button ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${card.rarity}`}
+      className={`card-button ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${played ? "played" : ""} ${card.rarity}`}
       type="button"
       disabled={disabled}
       draggable={!disabled}
@@ -3568,6 +3693,66 @@ function groupTilesByColumn(tiles: HexTile[]) {
       q,
       tiles: columnTiles.sort((a, b) => a.coord.r - b.coord.r),
     }));
+}
+
+function piecesForAnimation(pieces: BoardPiece[], animation: BoardAnimationCue | null): BoardPiece[] {
+  if (!animation) {
+    return pieces;
+  }
+
+  const pieceIds = new Set(pieces.map((piece) => piece.id));
+  const exitingPieces = animation.exitingPieces
+    .filter((piece) => !pieceIds.has(piece.id))
+    .map(animatedSnapshotToBoardPiece);
+
+  return [...pieces, ...exitingPieces];
+}
+
+function animatedSnapshotToBoardPiece(piece: AnimatedPieceSnapshot): BoardPiece {
+  return piece.pieceType === "wizard"
+    ? {
+        ...piece,
+        name: wizardTypeLabel(piece.wizardType),
+      }
+    : piece;
+}
+
+function pieceAnimationStyle(animation?: PieceAnimation): CSSProperties | undefined {
+  if (!animation?.from || !animation.to) {
+    return undefined;
+  }
+
+  const deltaQ = animation.from.q - animation.to.q;
+  const deltaR = animation.from.r - animation.to.r;
+
+  return {
+    "--piece-move-x": `calc(${deltaQ} * var(--hex-width) * 0.75)`,
+    "--piece-move-y": `calc(${deltaR} * (var(--hex-height) + var(--hex-vertical-overlap)))`,
+  } as CSSProperties;
+}
+
+function pieceAnimationFeedback(animation?: PieceAnimation) {
+  if (!animation) {
+    return null;
+  }
+
+  switch (animation.kind) {
+    case "damage":
+      return animation.amount ? `-${animation.amount}` : "Hit";
+    case "heal":
+      return animation.amount ? `+${animation.amount}` : "Heal";
+    case "buff": {
+      const labels = [
+        animation.attackDelta ? `+${animation.attackDelta} ATK` : null,
+        animation.armorDelta ? `+${animation.armorDelta} ARM` : null,
+      ].filter(Boolean);
+      return labels.length > 0 ? labels.join(" ") : "Buff";
+    }
+    case "attack":
+      return "Strike";
+    default:
+      return null;
+  }
 }
 
 function pieceAt(match: MatchState, coord: HexCoord): BoardPiece | null {
@@ -3806,6 +3991,10 @@ function sameCoord(a: HexCoord, b: HexCoord) {
 
 function delay(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function latestReplayEvent(frames: ReplayFrame[] | undefined) {
+  return frames?.at(-1)?.event ?? null;
 }
 
 function coordKey(coord: HexCoord) {

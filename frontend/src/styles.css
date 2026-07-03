@@ -931,6 +931,55 @@ h1 {
     box-shadow 160ms ease;
 }
 
+.piece-token.piece-anim-move {
+  animation: piece-move-in 520ms cubic-bezier(0.2, 0.82, 0.18, 1);
+}
+
+.piece-token.piece-anim-summon {
+  animation: piece-summon 520ms cubic-bezier(0.2, 0.82, 0.18, 1);
+}
+
+.piece-token.piece-anim-destroy {
+  animation: piece-destroy 520ms ease-in forwards;
+}
+
+.piece-token.piece-anim-attack {
+  animation: piece-attack 420ms ease-out;
+}
+
+.piece-token.piece-anim-damage {
+  animation: piece-damage 420ms ease-out;
+}
+
+.piece-token.piece-anim-heal,
+.piece-token.piece-anim-buff {
+  animation: piece-positive-feedback 520ms ease-out;
+}
+
+.piece-feedback {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  z-index: 5;
+  display: inline-grid;
+  place-items: center;
+  max-width: calc(var(--token-size) * 1.25);
+  min-height: 22px;
+  border: 1px solid rgba(255, 250, 240, 0.32);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: #fffaf0;
+  background: rgba(10, 13, 13, 0.88);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.3);
+  font-size: 0.66rem;
+  font-weight: 950;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 6px);
+  animation: piece-feedback-rise 520ms ease-out;
+}
+
 .piece-side-badge {
   position: absolute;
   top: 5px;
@@ -1248,7 +1297,8 @@ h1 {
   transition:
     transform 160ms ease,
     filter 160ms ease,
-    box-shadow 160ms ease;
+    box-shadow 160ms ease,
+    opacity 160ms ease;
 }
 
 .card-button:first-child {
@@ -1267,6 +1317,11 @@ h1 {
     translateY(calc(var(--card-fan-rise, 0px) - 14px)) rotate(var(--card-fan-rotation, 0));
 }
 
+.card-button:disabled {
+  filter: saturate(0.72) brightness(0.78);
+  cursor: not-allowed;
+}
+
 .card-button.advanced {
   border-color: rgba(122, 167, 217, 0.42);
 }
@@ -1277,7 +1332,16 @@ h1 {
 
 .card-button.selected {
   border-color: var(--gold);
-  box-shadow: 0 0 0 2px rgba(217, 184, 79, 0.22);
+  box-shadow:
+    0 0 0 2px rgba(217, 184, 79, 0.22),
+    0 18px 36px rgba(0, 0, 0, 0.28);
+  transform: translateX(var(--card-fan-shift, 0))
+    translateY(calc(var(--card-fan-rise, 0px) - 8px)) rotate(var(--card-fan-rotation, 0));
+}
+
+.card-button.played {
+  pointer-events: none;
+  animation: card-played-exit 420ms ease-in forwards;
 }
 
 .card-button-art {
@@ -2417,15 +2481,134 @@ h1 {
   }
 }
 
+@keyframes piece-move-in {
+  from {
+    transform: translate(var(--piece-move-x, 0), var(--piece-move-y, 0)) scale(0.98);
+  }
+
+  to {
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+@keyframes piece-summon {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.72);
+  }
+
+  72% {
+    opacity: 1;
+    transform: translateY(-3px) scale(1.04);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes piece-destroy {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-16px) scale(0.72);
+  }
+}
+
+@keyframes piece-attack {
+  0%,
+  100% {
+    transform: translateX(0) scale(1);
+  }
+
+  48% {
+    transform: translateX(8px) scale(1.06);
+  }
+}
+
+@keyframes piece-damage {
+  0%,
+  100% {
+    filter: brightness(1);
+    transform: translateX(0) scale(1);
+  }
+
+  22% {
+    filter: brightness(1.55);
+    transform: translateX(-4px) scale(0.98);
+  }
+
+  44% {
+    transform: translateX(4px) scale(0.98);
+  }
+}
+
+@keyframes piece-positive-feedback {
+  0%,
+  100% {
+    filter: brightness(1);
+    transform: translateY(0) scale(1);
+  }
+
+  46% {
+    filter: brightness(1.22);
+    transform: translateY(-6px) scale(1.05);
+  }
+}
+
+@keyframes piece-feedback-rise {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+
+  20%,
+  76% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -20px);
+  }
+}
+
+@keyframes card-played-exit {
+  0% {
+    opacity: 1;
+    transform: translateX(var(--card-fan-shift, 0)) translateY(var(--card-fan-rise, 0))
+      rotate(var(--card-fan-rotation, 0)) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(var(--card-fan-shift, 0))
+      translateY(calc(var(--card-fan-rise, 0px) - 46px)) rotate(var(--card-fan-rotation, 0))
+      scale(0.92);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .card-button,
   .piece-token {
     transition: none;
+    animation: none;
   }
 
   .card-button:not(:disabled):hover,
   .hex-tile:not(:disabled):hover .piece-token,
-  .card-button.dragging {
+  .card-button.dragging,
+  .card-button.selected,
+  .card-button.played {
     transform: none;
+  }
+
+  .piece-feedback {
+    display: none;
   }
 }
