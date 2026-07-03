@@ -42,13 +42,88 @@ test("signed-in players choose account deck recipes for solo match creation", as
   ]);
 });
 
-async function mockHomeApi(page, matchRequests) {
+test("signed-in players without legal deck recipes create solo matches through the hidden starter fallback", async ({
+  page,
+}) => {
+  const matchRequests = [];
+  await page.addInitScript(
+    ({ key }) => localStorage.setItem(key, "existing-token"),
+    { key: AUTH_TOKEN_STORAGE_KEY },
+  );
+  await mockHomeApi(page, matchRequests, {
+    decks: [deckRecipe(103, "Needs More Basics", false, false)],
+  });
+
+  await page.goto("/");
+
+  const deckSelector = page.getByLabel("Your Deck Recipe");
+  await expect(deckSelector).toContainText("Needs More Basics");
+  await expect(deckSelector).not.toContainText("Starter");
+  await expect(deckSelector).not.toContainText("Balanced Starter");
+  await expect(page.getByText("Create or repair a deck recipe before choosing a custom player deck.")).toBeVisible();
+  await expect(
+    page.getByLabel("Deck selection").getByRole("button", { name: "Decks" }),
+  ).toBeVisible();
+
+  await page.getByLabel("Wizard type").getByRole("button", { name: /Pyromancer/ }).click();
+  await page.getByRole("button", { name: /Spark Stone/ }).click();
+  await page.getByRole("button", { name: "New Solo Match" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/match/${MATCH_ID}$`));
+  expect(matchRequests).toEqual([
+    {
+      wizardType: "pyromancer",
+      aiOpponent: { source: "system", systemDeckId: "balanced-starter" },
+      runeIds: ["spark-stone"],
+    },
+  ]);
+});
+
+test("anonymous players create solo matches without account deck controls or visible starter fallback", async ({
+  page,
+}) => {
+  const matchRequests = [];
+  await mockHomeApi(page, matchRequests, { signedIn: false });
+
+  await page.goto("/");
+
+  await expect(page.getByLabel("Your Deck Recipe")).toHaveCount(0);
+  await expect(page.getByText("Sign in to use your deck recipes")).toHaveCount(0);
+  await expect(page.getByText("No account deck recipes")).toHaveCount(0);
+
+  await page.getByLabel("Wizard type").getByRole("button", { name: /Chronomancer/ }).click();
+  await page.getByRole("button", { name: "New Solo Match" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/match/${MATCH_ID}$`));
+  expect(matchRequests).toEqual([
+    {
+      wizardType: "chronomancer",
+      aiOpponent: { source: "system", systemDeckId: "balanced-starter" },
+    },
+  ]);
+});
+
+async function mockHomeApi(page, matchRequests, options = {}) {
+  const signedIn = options.signedIn ?? true;
+  const decks =
+    "decks" in options
+      ? options.decks
+      : [
+          deckRecipe(101, "Tournament Legal", false, true),
+          deckRecipe(102, "Default Legal", true, true),
+          deckRecipe(103, "Needs More Basics", false, false),
+        ];
+
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
 
     if (url.pathname === "/api/auth/me") {
-      await route.fulfill({ json: authUser() });
+      if (signedIn) {
+        await route.fulfill({ json: authUser() });
+      } else {
+        await route.fulfill({ status: 401, json: { message: "Not authenticated" } });
+      }
       return;
     }
 
@@ -58,14 +133,14 @@ async function mockHomeApi(page, matchRequests) {
     }
 
     if (url.pathname === "/api/decks") {
+      if (!signedIn) {
+        await route.fulfill({ status: 401, json: { message: "Not authenticated" } });
+        return;
+      }
       await route.fulfill({
         json: {
           rules: deckRules(),
-          decks: [
-            deckRecipe(101, "Tournament Legal", false, true),
-            deckRecipe(102, "Default Legal", true, true),
-            deckRecipe(103, "Needs More Basics", false, false),
-          ],
+          decks,
         },
       });
       return;
@@ -79,6 +154,10 @@ async function mockHomeApi(page, matchRequests) {
     }
 
     if (url.pathname === "/api/progression") {
+      if (!signedIn) {
+        await route.fulfill({ status: 401, json: { message: "Not authenticated" } });
+        return;
+      }
       await route.fulfill({ json: progression() });
       return;
     }

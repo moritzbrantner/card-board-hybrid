@@ -1564,11 +1564,13 @@ function MatchPicker({
 
   const accountDecks = deckLoadState?.status === "ready" ? deckLoadState.response.decks : [];
   const legalAccountDecks = accountDecks.filter((deck) => deck.legality.legal);
+  const signedInDecksReady = currentUser !== null && deckLoadState?.status === "ready";
+  const hasNoLegalAccountDecks = signedInDecksReady && legalAccountDecks.length === 0;
   const systemDecks =
     systemDeckLoadState.status === "ready" ? systemDeckLoadState.response.decks : [];
   const selectedAiDeckIsAccount = selectedAiDeck.startsWith("account:");
   const cannotCreateSoloMatch =
-    busy || (currentUser !== null && (deckLoadState?.status === "loading" || !selectedPlayerDeckId));
+    busy || (currentUser !== null && deckLoadState?.status === "loading");
 
   return (
     <main className="app-shell picker-shell">
@@ -1619,26 +1621,28 @@ function MatchPicker({
           </div>
         </fieldset>
         <section className="setup-deck-selectors" aria-label="Deck selection">
-          <label>
-            Your Deck Recipe
-            <select
-              value={selectedPlayerDeckId}
-              onChange={(event) => setSelectedPlayerDeckId(event.target.value)}
-              disabled={busy || !currentUser || deckLoadState?.status === "loading"}
-            >
-              {!currentUser ? <option value="">Sign in to use your deck recipes</option> : null}
-              {accountDecks.length === 0 && currentUser ? (
-                <option value="">No account deck recipes</option>
-              ) : null}
-              {accountDecks.map((deck) => (
-                <option key={deck.id} value={deck.id} disabled={!deck.legality.legal}>
-                  {deck.legality.legal
-                    ? deck.name
-                    : `${deck.name} - Draft - cannot start a match`}
-                </option>
-              ))}
-            </select>
-          </label>
+          {currentUser ? (
+            <label>
+              Your Deck Recipe
+              <select
+                value={selectedPlayerDeckId}
+                onChange={(event) => setSelectedPlayerDeckId(event.target.value)}
+                disabled={busy || deckLoadState?.status === "loading"}
+              >
+                {hasNoLegalAccountDecks ? <option value="">No legal deck recipes</option> : null}
+                {accountDecks.length === 0 && !hasNoLegalAccountDecks ? (
+                  <option value="">No account deck recipes</option>
+                ) : null}
+                {accountDecks.map((deck) => (
+                  <option key={deck.id} value={deck.id} disabled={!deck.legality.legal}>
+                    {deck.legality.legal
+                      ? deck.name
+                      : `${deck.name} - Draft - cannot start a match`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label>
             AI Deck
             <select
@@ -1677,6 +1681,15 @@ function MatchPicker({
           {deckLoadState?.status === "error" ? <p className="notice">{deckLoadState.message}</p> : null}
           {systemDeckLoadState.status === "error" ? (
             <p className="notice">{systemDeckLoadState.message}</p>
+          ) : null}
+          {hasNoLegalAccountDecks ? (
+            <div className="deck-empty-guidance">
+              <p>Create or repair a deck recipe before choosing a custom player deck.</p>
+              <button className="secondary-link" type="button" onClick={() => onNavigate("/decks")}>
+                <Layers size={18} />
+                Decks
+              </button>
+            </div>
           ) : null}
         </section>
         {progressionLoadState?.status === "ready" ? (
