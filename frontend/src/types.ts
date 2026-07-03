@@ -138,6 +138,7 @@ export type AuthUser = {
   displayName: string;
   avatar: GeneratedAvatar;
   preferredWizardType: WizardType;
+  boardVisualMode: BoardVisualMode;
 };
 
 export type AuthSessionResponse = {
@@ -151,6 +152,8 @@ export type GeneratedAvatar = {
 };
 
 export type AccountProfile = AuthUser;
+
+export type BoardVisualMode = "2d" | "3d";
 
 export type Wizard = {
   id: string;

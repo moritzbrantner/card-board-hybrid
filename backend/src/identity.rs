@@ -6,6 +6,7 @@ use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, Salt
 use rand::RngCore;
 use rand::rngs::OsRng;
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 
 use crate::match_session::WizardType;
 
@@ -16,12 +17,21 @@ pub struct AccountProfile {
     pub display_name: String,
     pub avatar: GeneratedAvatar,
     pub preferred_wizard_type: WizardType,
+    pub board_visual_mode: BoardVisualMode,
 }
 
 #[derive(Clone, Debug)]
 pub struct GeneratedAvatar {
     pub symbol: String,
     pub color: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub enum BoardVisualMode {
+    #[serde(rename = "2d")]
+    TwoD,
+    #[serde(rename = "3d")]
+    ThreeD,
 }
 
 #[derive(Clone, Debug)]
@@ -33,6 +43,8 @@ pub struct CreatedAuthSession {
 pub struct IdentityModule<'a> {
     connection: &'a mut Connection,
 }
+
+type LoginProfileRow = (i64, String, String, String, String, String, String, String);
 
 #[derive(Debug)]
 pub enum IdentityError {
@@ -88,9 +100,10 @@ impl<'a> IdentityModule<'a> {
                 avatar_symbol,
                 avatar_color,
                 preferred_wizard_type,
+                board_visual_mode,
                 created_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, unixepoch())
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, unixepoch())
             ",
             params![
                 email,
@@ -99,7 +112,8 @@ impl<'a> IdentityModule<'a> {
                 default_display_name(email),
                 avatar.symbol,
                 avatar.color,
-                wizard_type_to_db(WizardType::default())
+                wizard_type_to_db(WizardType::default()),
+                board_visual_mode_to_db(BoardVisualMode::ThreeD)
             ],
         )?;
 
@@ -118,11 +132,11 @@ impl<'a> IdentityModule<'a> {
         normalized_email: &str,
         password: &str,
     ) -> Result<Option<CreatedAuthSession>, IdentityError> {
-        let row: Option<(i64, String, String, String, String, String, String)> = self
+        let row: Option<LoginProfileRow> = self
             .connection
             .query_row(
                 "
-                SELECT id, email, password_hash, display_name, avatar_symbol, avatar_color, preferred_wizard_type
+                SELECT id, email, password_hash, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode
                 FROM users
                 WHERE email_normalized = ?1
                 ",
@@ -136,6 +150,7 @@ impl<'a> IdentityModule<'a> {
                         row.get(4)?,
                         row.get(5)?,
                         row.get(6)?,
+                        row.get(7)?,
                     ))
                 },
             )
@@ -149,6 +164,7 @@ impl<'a> IdentityModule<'a> {
             avatar_symbol,
             avatar_color,
             preferred_wizard_type,
+            board_visual_mode,
         )) = row
         else {
             return Ok(None);
@@ -167,6 +183,7 @@ impl<'a> IdentityModule<'a> {
                 color: avatar_color,
             },
             preferred_wizard_type: wizard_type_from_db(&preferred_wizard_type),
+            board_visual_mode: board_visual_mode_from_db(&board_visual_mode),
         })
         .map(Some)
     }
@@ -178,7 +195,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT users.id, users.email, users.display_name, users.avatar_symbol, users.avatar_color, users.preferred_wizard_type
+                SELECT users.id, users.email, users.display_name, users.avatar_symbol, users.avatar_color, users.preferred_wizard_type, users.board_visual_mode
                 FROM auth_sessions
                 JOIN users ON users.id = auth_sessions.user_id
                 WHERE auth_sessions.token = ?1
@@ -195,6 +212,7 @@ impl<'a> IdentityModule<'a> {
                             color: row.get(4)?,
                         },
                         preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(5)?),
+                        board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(6)?),
                     })
                 },
             )
@@ -208,6 +226,7 @@ impl<'a> IdentityModule<'a> {
         display_name: &str,
         avatar: GeneratedAvatar,
         preferred_wizard_type: WizardType,
+        board_visual_mode: BoardVisualMode,
     ) -> Result<Option<AccountProfile>, IdentityError> {
         self.connection.execute(
             "
@@ -215,7 +234,8 @@ impl<'a> IdentityModule<'a> {
             SET display_name = ?2,
                 avatar_symbol = ?3,
                 avatar_color = ?4,
-                preferred_wizard_type = ?5
+                preferred_wizard_type = ?5,
+                board_visual_mode = ?6
             WHERE id = ?1
             ",
             params![
@@ -223,7 +243,8 @@ impl<'a> IdentityModule<'a> {
                 display_name,
                 avatar.symbol,
                 avatar.color,
-                wizard_type_to_db(preferred_wizard_type)
+                wizard_type_to_db(preferred_wizard_type),
+                board_visual_mode_to_db(board_visual_mode)
             ],
         )?;
         self.load_profile_by_id(user_id)
@@ -265,7 +286,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT id, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type
+                SELECT id, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode
                 FROM users
                 WHERE email_normalized = ?1
                 ",
@@ -280,6 +301,7 @@ impl<'a> IdentityModule<'a> {
                             color: row.get(4)?,
                         },
                         preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(5)?),
+                        board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(6)?),
                     })
                 },
             )
@@ -291,7 +313,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT id, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type
+                SELECT id, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode
                 FROM users
                 WHERE id = ?1
                 ",
@@ -306,6 +328,7 @@ impl<'a> IdentityModule<'a> {
                             color: row.get(4)?,
                         },
                         preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(5)?),
+                        board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(6)?),
                     })
                 },
             )
@@ -326,6 +349,7 @@ pub fn migrate(connection: &Connection) -> Result<(), IdentityError> {
             avatar_symbol TEXT NOT NULL DEFAULT 'sparkles',
             avatar_color TEXT NOT NULL DEFAULT 'emerald',
             preferred_wizard_type TEXT NOT NULL DEFAULT 'runekeeper',
+            board_visual_mode TEXT NOT NULL DEFAULT '3d',
             created_at INTEGER NOT NULL DEFAULT (unixepoch())
         );
         CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -362,6 +386,12 @@ pub fn migrate(connection: &Connection) -> Result<(), IdentityError> {
         "users",
         "preferred_wizard_type",
         "TEXT NOT NULL DEFAULT 'runekeeper'",
+    )?;
+    add_column_if_missing(
+        connection,
+        "users",
+        "board_visual_mode",
+        "TEXT NOT NULL DEFAULT '3d'",
     )?;
     connection.execute(
         "
@@ -422,6 +452,20 @@ fn wizard_type_from_db(value: &str) -> WizardType {
         "warden" => WizardType::Warden,
         "battlemage" => WizardType::Battlemage,
         _ => WizardType::Runekeeper,
+    }
+}
+
+fn board_visual_mode_to_db(mode: BoardVisualMode) -> &'static str {
+    match mode {
+        BoardVisualMode::TwoD => "2d",
+        BoardVisualMode::ThreeD => "3d",
+    }
+}
+
+fn board_visual_mode_from_db(value: &str) -> BoardVisualMode {
+    match value {
+        "2d" => BoardVisualMode::TwoD,
+        _ => BoardVisualMode::ThreeD,
     }
 }
 

@@ -1,7 +1,13 @@
 import { History, House, LogOut, Play, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { loadProfileMatches, updateProfile } from "./api";
-import type { AccountProfile, GeneratedAvatar, MatchSummary, WizardType } from "./types";
+import type {
+  AccountProfile,
+  BoardVisualMode,
+  GeneratedAvatar,
+  MatchSummary,
+  WizardType,
+} from "./types";
 import { WIZARD_OPTIONS } from "./wizards";
 
 type ProfilePageProps = {
@@ -29,6 +35,9 @@ export function ProfilePage({
   const [avatar, setAvatar] = useState<GeneratedAvatar>(currentUser.avatar);
   const [preferredWizardType, setPreferredWizardType] = useState<WizardType>(
     currentUser.preferredWizardType,
+  );
+  const [boardVisualMode, setBoardVisualMode] = useState<BoardVisualMode>(
+    currentUser.boardVisualMode,
   );
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -59,11 +68,12 @@ export function ProfilePage({
     setBusy(true);
     setNotice(null);
     try {
-      const updated = await updateProfile(displayName, avatar, preferredWizardType);
+      const updated = await updateProfile(displayName, avatar, preferredWizardType, boardVisualMode);
       onProfileUpdated(updated);
       setDisplayName(updated.displayName);
       setAvatar(updated.avatar);
       setPreferredWizardType(updated.preferredWizardType);
+      setBoardVisualMode(updated.boardVisualMode);
       setNotice("Profile saved.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not save profile");
@@ -149,6 +159,27 @@ export function ProfilePage({
               ))}
             </select>
           </label>
+          <fieldset className="board-visual-mode-control">
+            <legend>Board visual mode</legend>
+            <div>
+              <button
+                className={boardVisualMode === "2d" ? "active" : ""}
+                type="button"
+                onClick={() => setBoardVisualMode("2d")}
+                aria-pressed={boardVisualMode === "2d"}
+              >
+                2D
+              </button>
+              <button
+                className={boardVisualMode === "3d" ? "active" : ""}
+                type="button"
+                onClick={() => setBoardVisualMode("3d")}
+                aria-pressed={boardVisualMode === "3d"}
+              >
+                3D
+              </button>
+            </div>
+          </fieldset>
           <button className="primary-button" type="button" onClick={() => void handleSave()} disabled={busy}>
             <Save size={18} />
             Save Profile
