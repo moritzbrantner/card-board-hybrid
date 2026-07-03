@@ -189,6 +189,45 @@ type AccountPreferenceProps = AccountProps & {
   onCurrentUserUpdated: (user: AuthUser) => void;
 };
 
+function currentRoutePath() {
+  return `${window.location.pathname}${window.location.search}`;
+}
+
+function routeFromPath(path: string) {
+  const url = new URL(path, window.location.origin);
+  return {
+    pathname: url.pathname,
+    searchParams: url.searchParams,
+  };
+}
+
+export function safeAuthNextPath(value: string | null) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+    return "/profile";
+  }
+
+  try {
+    const nextUrl = new URL(value, window.location.origin);
+    if (nextUrl.origin !== window.location.origin) {
+      return "/profile";
+    }
+
+    const normalizedNextPath = nextUrl.pathname.replace(/\/+$/, "");
+    if (normalizedNextPath === "/login" || normalizedNextPath === "/register") {
+      return "/profile";
+    }
+
+    return `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+  } catch {
+    return "/profile";
+  }
+}
+
+function authRouteLink(mode: "register" | "login", nextPath: string) {
+  const path = mode === "register" ? "/register" : "/login";
+  return nextPath === "/profile" ? path : `${path}?next=${encodeURIComponent(nextPath)}`;
+}
+
 function useBoardVisualModePreference(
   currentUser: AuthUser | null,
   onCurrentUserUpdated: (user: AuthUser) => void,
@@ -223,13 +262,13 @@ function useBoardVisualModePreference(
 }
 
 export function App() {
-  const [path, setPath] = useState(() => window.location.pathname);
+  const [path, setPath] = useState(() => currentRoutePath());
   const [authState, setAuthState] = useState<AuthState>(() =>
     getAuthToken() ? { status: "loading" } : { status: "signedOut" },
   );
 
   useEffect(() => {
-    const handlePopState = () => setPath(window.location.pathname);
+    const handlePopState = () => setPath(currentRoutePath());
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
@@ -261,12 +300,13 @@ export function App() {
 
   function navigate(to: string) {
     window.history.pushState(null, "", to);
-    setPath(window.location.pathname);
+    setPath(currentRoutePath());
   }
 
-  function handleAuthenticated(session: AuthSessionResponse) {
+  function handleAuthenticated(session: AuthSessionResponse, nextPath: string) {
     saveAuthToken(session.token);
     setAuthState({ status: "signedIn", user: session.user });
+    navigate(nextPath);
   }
 
   async function handleSignOut() {
@@ -280,10 +320,9 @@ export function App() {
     navigate("/");
   }
 
-  const normalizedPath = path.replace(/\/+$/, "");
-  if (normalizedPath === "/catalog") {
-    return <CatalogPage onNavigate={navigate} />;
-  }
+  const { pathname, searchParams } = routeFromPath(path);
+  const normalizedPath = pathname.replace(/\/+$/, "");
+  const authNextPath = safeAuthNextPath(searchParams.get("next"));
 
   if (authState.status === "loading") {
     return <ShellMessage title="Rune Lanes" message="Checking account" />;
@@ -291,9 +330,28 @@ export function App() {
 
   const currentUser = authState.status === "signedIn" ? authState.user : null;
 
+  if (normalizedPath === "/login" || normalizedPath === "/register") {
+    if (currentUser) {
+      return <RouteRedirect to={authNextPath} onNavigate={navigate} />;
+    }
+
+    return (
+      <AuthPage
+        mode={normalizedPath === "/register" ? "register" : "login"}
+        nextPath={authNextPath}
+        onNavigate={navigate}
+        onAuthenticated={handleAuthenticated}
+      />
+    );
+  }
+
+  if (normalizedPath === "/catalog") {
+    return <CatalogPage onNavigate={navigate} />;
+  }
+
   if (normalizedPath === "/profile") {
     if (!currentUser) {
-      return <AuthPage onAuthenticated={handleAuthenticated} />;
+      return <RouteRedirect to={authRouteLink("login", "/profile")} onNavigate={navigate} />;
     }
 
     return (
@@ -308,7 +366,7 @@ export function App() {
 
   if (normalizedPath === "/decks") {
     if (!currentUser) {
-      return <AuthPage onAuthenticated={handleAuthenticated} />;
+      return <RouteRedirect to={authRouteLink("login", "/decks")} onNavigate={navigate} />;
     }
 
     return (
@@ -326,7 +384,7 @@ export function App() {
 
   if (normalizedPath === "/matches") {
     if (!currentUser) {
-      return <AuthPage onAuthenticated={handleAuthenticated} />;
+      return <RouteRedirect to={authRouteLink("login", "/matches")} onNavigate={navigate} />;
     }
 
     return (
@@ -1000,11 +1058,16 @@ function DetailStat({ label, value }: { label: string; value: string | number })
 }
 
 function AuthPage({
+  mode,
+  nextPath,
+  onNavigate,
   onAuthenticated,
 }: {
-  onAuthenticated: (session: AuthSessionResponse) => void;
+  mode: "register" | "login";
+  nextPath: string;
+  onNavigate: (to: string) => void;
+  onAuthenticated: (session: AuthSessionResponse, nextPath: string) => void;
 }) {
-  const [mode, setMode] = useState<"register" | "login">("register");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1019,7 +1082,7 @@ function AuthPage({
         mode === "register"
           ? await registerAccount(email, password)
           : await loginAccount(email, password);
-      onAuthenticated(session);
+      onAuthenticated(session, nextPath);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not authenticate");
     } finally {
@@ -1063,28 +1126,40 @@ function AuthPage({
             {mode === "register" ? "Create Account" : "Sign In"}
           </button>
         </form>
-        <button
+        <a
           className="secondary-link"
-          type="button"
-          onClick={() => {
-            setMode(mode === "register" ? "login" : "register");
+          href={authRouteLink(mode === "register" ? "login" : "register", nextPath)}
+          onClick={(event) => {
+            event.preventDefault();
+            if (busy) {
+              return;
+            }
             setNotice(null);
+            onNavigate(authRouteLink(mode === "register" ? "login" : "register", nextPath));
           }}
-          disabled={busy}
+          aria-disabled={busy}
         >
           {mode === "register" ? "I already have an account" : "Create a new account"}
-        </button>
+        </a>
         {notice ? <p className="notice">{notice}</p> : null}
       </section>
     </main>
   );
 }
 
+function RouteRedirect({ to, onNavigate }: { to: string; onNavigate: (to: string) => void }) {
+  useEffect(() => {
+    onNavigate(to);
+  }, [onNavigate, to]);
+
+  return <ShellMessage title="Rune Lanes" message="Opening account" />;
+}
+
 function AccountActions({ currentUser, onSignOut, onNavigate }: AccountProps) {
   if (!currentUser) {
     return (
       <div className="account-actions">
-        <button className="secondary-link" type="button" onClick={() => onNavigate("/profile")}>
+        <button className="secondary-link" type="button" onClick={() => onNavigate("/login")}>
           <LogIn size={18} />
           Sign In
         </button>
