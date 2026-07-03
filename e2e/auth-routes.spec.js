@@ -32,7 +32,47 @@ test("login submits credentials to the existing login API and opens a safe next 
   expect(authRequests).toEqual(["/api/auth/login"]);
 });
 
-test("register submits credentials to the existing registration API", async ({ page }) => {
+for (const protectedPath of ["/profile", "/decks", "/matches"]) {
+  test(`signed-out players visiting ${protectedPath} are redirected to login with next`, async ({
+    page,
+  }) => {
+    await mockAuthApi(page);
+
+    await page.goto(protectedPath);
+
+    await expect(page).toHaveURL(/\/login\?/);
+    expect(new URL(page.url()).searchParams.get("next")).toBe(protectedPath);
+    await expect(page.getByRole("heading", { name: "Sign In" })).toBeVisible();
+  });
+}
+
+for (const nextPath of ["/profile", "/decks", "/matches"]) {
+  test(`successful login from ${nextPath} lands on the requested protected route`, async ({
+    page,
+  }) => {
+    await mockAuthApi(page);
+
+    await page.goto(`/login?next=${encodeURIComponent(nextPath)}`);
+    await page.getByLabel("Email").fill("player@local.dev");
+    await page.getByLabel("Password").fill("pw");
+    await page.getByRole("button", { name: "Sign In" }).click();
+
+    await expect(page).toHaveURL(new RegExp(`${nextPath}$`));
+  });
+}
+
+test("successful login with no safe next lands on profile", async ({ page }) => {
+  await mockAuthApi(page);
+
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("player@local.dev");
+  await page.getByLabel("Password").fill("pw");
+  await page.getByRole("button", { name: "Sign In" }).click();
+
+  await expect(page).toHaveURL(/\/profile$/);
+});
+
+test("register submits credentials to the existing registration API and opens profile by default", async ({ page }) => {
   const authRequests = [];
   await mockAuthApi(page, authRequests);
 
@@ -45,6 +85,19 @@ test("register submits credentials to the existing registration API", async ({ p
   await page.getByRole("button", { name: "Create Account" }).click();
 
   await expect(page).toHaveURL(/\/profile$/);
+  expect(authRequests).toEqual(["/api/auth/register"]);
+});
+
+test("successful registration creates a session and opens a safe next path", async ({ page }) => {
+  const authRequests = [];
+  await mockAuthApi(page, authRequests);
+
+  await page.goto("/register?next=%2Fmatches");
+  await page.getByLabel("Email").fill("new-player@local.dev");
+  await page.getByLabel("Password").fill("pw");
+  await page.getByRole("button", { name: "Create Account" }).click();
+
+  await expect(page).toHaveURL(/\/matches$/);
   expect(authRequests).toEqual(["/api/auth/register"]);
 });
 
@@ -103,6 +156,70 @@ test("signed-in visits to auth routes redirect to profile or a safe next path", 
   await expect(page).toHaveURL(/\/profile$/);
 });
 
+test("protected route redirects replace the protected URL in browser history", async ({ page }) => {
+  await mockAuthApi(page);
+
+  for (const protectedPath of ["/profile", "/decks", "/matches"]) {
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Choose Your Wizard" })).toBeVisible();
+
+    await page.goto(protectedPath);
+
+    await expect(page).toHaveURL(/\/login\?/);
+    expect(new URL(page.url()).searchParams.get("next")).toBe(protectedPath);
+
+    await page.goBack();
+
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { name: "Choose Your Wizard" })).toBeVisible();
+  }
+});
+
+for (const { path, heading } of [
+  { path: "/", heading: "Choose Your Wizard" },
+  { path: "/catalog", heading: "Card Catalog" },
+]) {
+  test(`signed-out players can open public route ${path}`, async ({ page }) => {
+    await mockAuthApi(page);
+
+    await page.goto(path);
+
+    await expect(page).toHaveURL(new RegExp(`${path === "/" ? "/" : path}$`));
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+  });
+}
+
+for (const { path, message } of [
+  { path: "/match/public-solo", message: "Missing test match" },
+  { path: "/match/public-shared/seat-token", message: "Missing shared match" },
+  { path: "/matches/public-replay/replay", message: "Missing test replay" },
+]) {
+  test(`signed-out players can open public route ${path} without auth redirect`, async ({
+    page,
+  }) => {
+    if (path.includes("public-shared")) {
+      await page.addInitScript(() => {
+        class FakeWebSocket extends EventTarget {
+          readyState = 3;
+
+          close() {}
+
+          send() {}
+        }
+
+        window.WebSocket = FakeWebSocket;
+      });
+    }
+
+    await mockAuthApi(page);
+
+    await page.goto(path);
+
+    await expect(page).toHaveURL(new RegExp(`${path}$`));
+    await expect(page.getByRole("heading", { name: message })).toBeVisible();
+  });
+}
+
 async function mockAuthApi(page, authRequests = []) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -130,18 +247,63 @@ async function mockAuthApi(page, authRequests = []) {
       return;
     }
 
+    if (url.pathname === "/api/matches" && request.method() === "GET") {
+      await route.fulfill({ json: { matches: [] } });
+      return;
+    }
+
+    if (url.pathname === "/api/matches/public-solo" && request.method() === "GET") {
+      await route.fulfill({ status: 404, json: { message: "Missing test match" } });
+      return;
+    }
+
+    if (
+      url.pathname === "/api/shared-matches/public-shared/seats/seat-token" &&
+      request.method() === "GET"
+    ) {
+      await route.fulfill({ status: 404, json: { message: "Missing shared match" } });
+      return;
+    }
+
+    if (url.pathname === "/api/matches/public-replay/replay" && request.method() === "GET") {
+      await route.fulfill({ status: 404, json: { message: "Missing test replay" } });
+      return;
+    }
+
+    if (url.pathname === "/api/catalog/cards") {
+      await route.fulfill({ json: { cards: [] } });
+      return;
+    }
+
     if (url.pathname === "/api/decks") {
       await route.fulfill({ json: { rules: deckRules(), decks: [] } });
       return;
     }
 
     if (url.pathname === "/api/system-decks") {
-      await route.fulfill({ json: { rules: deckRules(), decks: [] } });
+      await route.fulfill({ json: { rules: deckRules(), decks: [systemDeck()] } });
       return;
     }
 
     await route.fulfill({ status: 404, json: { message: "Not found" } });
   });
+}
+
+function systemDeck() {
+  return {
+    id: "balanced-starter",
+    name: "Balanced Starter",
+    wizardType: "runekeeper",
+    cards: [],
+    legality: {
+      legal: true,
+      totalCards: 30,
+      basicCards: 30,
+      advancedCards: 0,
+      rareCards: 0,
+      messages: [],
+    },
+  };
 }
 
 function authSession(email) {
