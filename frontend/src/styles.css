@@ -2615,15 +2615,118 @@ h1 {
 
 .deck-layout {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: minmax(250px, 310px) minmax(360px, 1fr) minmax(290px, 360px);
   gap: 18px;
   align-items: start;
-  width: min(1380px, 100%);
+  width: min(1520px, 100%);
   margin: 0 auto;
 }
 
 .deck-layout > .top-bar {
   grid-column: 1 / -1;
+}
+
+.deck-recipe-strip {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.new-deck-card,
+.deck-recipe-card {
+  min-height: 76px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: #fffaf0;
+  cursor: pointer;
+}
+
+.new-deck-card {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 900;
+}
+
+.deck-recipe-scroll {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(178px, 230px);
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.deck-recipe-card {
+  display: grid;
+  gap: 5px;
+  align-content: center;
+  padding: 11px;
+  text-align: left;
+}
+
+.deck-recipe-card.selected {
+  border-color: var(--gold);
+  box-shadow: inset 0 0 0 1px var(--gold);
+}
+
+.deck-recipe-card span,
+.deck-recipe-card small {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.deck-recipe-card small {
+  color: var(--gold);
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.deck-catalog-sidebar,
+.deck-details-panel,
+.deck-stats-panel,
+.selected-card-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.deck-catalog-sidebar,
+.deck-details-panel {
+  position: sticky;
+  top: 14px;
+}
+
+.deck-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.deck-panel-heading h2 {
+  margin: 0;
+  font-size: 1.08rem;
+  line-height: 1.1;
+}
+
+.deck-panel-heading > span {
+  min-width: 42px;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #fffaf0;
+  background: var(--panel-strong);
+  font-size: 0.84rem;
+  font-weight: 900;
 }
 
 .deck-config-panel {
@@ -2712,38 +2815,6 @@ h1 {
   color: #fffaf0;
 }
 
-.deck-list {
-  display: grid;
-  gap: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  padding: 12px;
-}
-
-.deck-list-item {
-  display: grid;
-  gap: 5px;
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-strong);
-  color: #fffaf0;
-  padding: 10px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.deck-list-item.selected {
-  border-color: var(--gold);
-  box-shadow: inset 0 0 0 1px var(--gold);
-}
-
-.deck-list-item span {
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
 .deck-editor {
   display: grid;
   gap: 14px;
@@ -2809,37 +2880,130 @@ h1 {
 }
 
 .deck-search {
-  max-width: 420px;
+  max-width: none;
 }
 
-.deck-builder-grid {
+.deck-filter-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
 }
 
-.deck-card-row {
+.deck-filter-grid label {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 10px;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.deck-filter-grid select,
+.preferred-wizard-control select {
+  min-width: 0;
+  min-height: 36px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
-  padding: 10px;
+  color: #fffaf0;
+  padding: 0 9px;
+  font: inherit;
 }
 
-.deck-card-row > div:first-child {
+.deck-catalog-list,
+.picked-card-list {
+  display: grid;
+  gap: 10px;
+}
+
+.deck-catalog-row,
+.picked-card-row,
+.deck-stats-panel,
+.selected-card-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 12px;
+}
+
+.deck-catalog-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  gap: 8px;
+  align-items: center;
+}
+
+.picked-card-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 10px;
+}
+
+.picked-card-row.selected,
+.deck-catalog-row:focus-within,
+.selected-card-details.basic,
+.picked-card-row.basic {
+  border-color: rgba(88, 183, 161, 0.42);
+}
+
+.selected-card-details.advanced,
+.picked-card-row.advanced {
+  border-color: rgba(122, 167, 217, 0.44);
+}
+
+.selected-card-details.rare,
+.picked-card-row.rare {
+  border-color: rgba(217, 184, 79, 0.52);
+}
+
+.deck-row-select {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.deck-row-select > span {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
-.deck-card-row span,
-.deck-card-row p {
+.deck-row-select small,
+.picked-card-row p,
+.selected-card-details p,
+.deck-empty-state span,
+.deck-message-list li {
   color: var(--muted);
   font-size: 0.84rem;
 }
 
-.deck-card-row p {
+.deck-catalog-row em {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  min-width: 26px;
+  height: 24px;
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  color: var(--gold);
+  font-size: 0.78rem;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.deck-add-button {
+  width: 38px;
+  height: 38px;
+}
+
+.picked-card-row p {
   grid-column: 1 / -1;
   margin: 0;
 }
@@ -2864,6 +3028,77 @@ h1 {
 .deck-count-controls button:disabled {
   cursor: not-allowed;
   opacity: 0.48;
+}
+
+.deck-empty-state {
+  display: grid;
+  place-items: center;
+  gap: 7px;
+  min-height: 180px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  text-align: center;
+  padding: 18px;
+}
+
+.deck-empty-state.compact {
+  min-height: 120px;
+}
+
+.deck-stat-grid,
+.selected-card-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.detail-stat {
+  display: grid;
+  gap: 3px;
+  min-height: 54px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+  padding: 8px;
+}
+
+.detail-stat small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.detail-stat strong {
+  color: #fffaf0;
+  font-size: 0.96rem;
+}
+
+.deck-stats-panel.legal {
+  border-color: var(--green);
+}
+
+.deck-stats-panel.draft {
+  border-color: var(--gold);
+}
+
+.deck-message-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.selected-card-details {
+  display: grid;
+  gap: 10px;
+}
+
+.selected-card-kind {
+  margin-top: -2px;
+  color: #fffaf0;
+  font-weight: 800;
 }
 
 .deck-count-controls strong {
@@ -3179,6 +3414,23 @@ h1 {
   }
 
   .deck-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .deck-recipe-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .deck-recipe-scroll {
+    grid-auto-columns: minmax(168px, 78vw);
+  }
+
+  .deck-catalog-sidebar,
+  .deck-details-panel {
+    position: static;
+  }
+
+  .deck-filter-grid {
     grid-template-columns: 1fr;
   }
 

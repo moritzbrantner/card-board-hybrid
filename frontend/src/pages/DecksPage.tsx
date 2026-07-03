@@ -1,4 +1,13 @@
-import { Copy, House, Plus, Search, X } from "lucide-react";
+import {
+  Copy,
+  House,
+  Minus,
+  Plus,
+  Save,
+  Search,
+  Trash2,
+  WandSparkles,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createDeck,
@@ -13,16 +22,31 @@ import {
 import type { AccountProps, CatalogLoadState, DeckLoadState, ProgressionLoadState } from "../appTypes";
 import { AccountActions, ShellMessage } from "../components/common";
 import { RuneSelector } from "../components/loadoutControls";
-import {
-  cardsFromCounts,
-  copyLimitForRarity,
-  countsFromCards,
-  rarityLabel,
-  skillNamesForWizard,
-} from "../deckHelpers";
+import { cardsFromCounts, countsFromCards, rarityLabel } from "../deckHelpers";
 import { defaultRuneIdsForWizard } from "../labels";
-import type { AuthUser, CatalogCard, DeckLegality, DeckRecipeSummary, Rarity, WizardType } from "../types";
+import type {
+  AuthUser,
+  CatalogCard,
+  DeckLegality,
+  DeckRecipeSummary,
+  ProgressionResponse,
+  WizardType,
+} from "../types";
 import { WIZARD_OPTIONS } from "../wizards";
+import {
+  cardCopyState,
+  cardKindDetail,
+  cardKindLabel,
+  catalogFilterOptions,
+  deckStats,
+  defaultDeckCatalogFilters,
+  filterCatalogCards,
+  manaCostFilterLabel,
+  selectedCatalogCard,
+  selectedDeckCardRows,
+  type DeckCatalogFilters,
+  type ManaCostFilter,
+} from "./decks/deckDesignerModel";
 
 export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps & { currentUser: AuthUser }) {
   const [deckLoadState, setDeckLoadState] = useState<DeckLoadState>({ status: "loading" });
@@ -39,7 +63,8 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
   const [progressionLoadState, setProgressionLoadState] = useState<ProgressionLoadState>({
     status: "loading",
   });
-  const [query, setQuery] = useState("");
+  const [catalogFilters, setCatalogFilters] = useState<DeckCatalogFilters>(defaultDeckCatalogFilters);
+  const [selectedCardTemplateId, setSelectedCardTemplateId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const legalityPreviewRequestRef = useRef(0);
@@ -91,21 +116,32 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
     setPreviewLegality(deck?.legality ?? null);
     setSelectedWizardType(deck?.wizardType ?? currentUser.preferredWizardType);
     setSelectedRuneIds(deck?.runeIds ?? []);
+    setSelectedCardTemplateId(null);
     setNotice(null);
   }
 
   const decks = deckLoadState.status === "ready" ? deckLoadState.response.decks : [];
   const rules = deckLoadState.status === "ready" ? deckLoadState.response.rules : null;
   const catalogCards = catalogLoadState.status === "ready" ? catalogLoadState.cards : [];
+  const progression = progressionLoadState.status === "ready" ? progressionLoadState.progression : null;
   const localCards = useMemo(() => cardsFromCounts(cardCounts), [cardCounts]);
-  const filteredCards = catalogCards.filter((card) => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    return (
-      normalizedQuery.length === 0 ||
-      card.name.toLocaleLowerCase().includes(normalizedQuery) ||
-      card.text.toLocaleLowerCase().includes(normalizedQuery)
-    );
-  });
+  const catalogOptions = useMemo(() => catalogFilterOptions(catalogCards), [catalogCards]);
+  const filteredCards = useMemo(
+    () => filterCatalogCards(catalogCards, catalogFilters),
+    [catalogCards, catalogFilters],
+  );
+  const deckCardRows = useMemo(
+    () => selectedDeckCardRows(catalogCards, cardCounts, rules),
+    [catalogCards, cardCounts, rules],
+  );
+  const selectedCard = useMemo(
+    () => selectedCatalogCard(catalogCards, selectedCardTemplateId),
+    [catalogCards, selectedCardTemplateId],
+  );
+  const stats = useMemo(
+    () => deckStats(previewLegality, rules, selectedWizardType, selectedRuneIds, progression),
+    [previewLegality, rules, selectedWizardType, selectedRuneIds, progression],
+  );
 
   useEffect(() => {
     if (!selectedDeckId) {
@@ -130,13 +166,18 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
     return () => window.clearTimeout(timeout);
   }, [localCards, selectedDeckId]);
 
+  function updateCatalogFilters(patch: Partial<DeckCatalogFilters>) {
+    setCatalogFilters((current) => ({ ...current, ...patch }));
+  }
+
   function adjustCount(card: CatalogCard, delta: number) {
+    const currentCount = cardCounts[card.templateId] ?? 0;
+    const nextCount =
+      delta > 0
+        ? Math.min(currentCount + delta, cardCopyState(card, cardCounts, rules).copyLimit)
+        : Math.max(0, currentCount + delta);
+
     setCardCounts((current) => {
-      const currentCount = current[card.templateId] ?? 0;
-      const nextCount =
-        delta > 0
-          ? Math.min(currentCount + delta, copyLimitForRarity(card.rarity, rules))
-          : Math.max(0, currentCount + delta);
       const next = { ...current };
       if (nextCount === 0) {
         delete next[card.templateId];
@@ -145,6 +186,15 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
       }
       return next;
     });
+
+    if (nextCount === 0 && selectedCardTemplateId === card.templateId) {
+      setSelectedCardTemplateId(null);
+    }
+  }
+
+  function addCard(card: CatalogCard) {
+    adjustCount(card, 1);
+    setSelectedCardTemplateId(card.templateId);
   }
 
   async function handleSave() {
@@ -239,7 +289,7 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
   return (
     <main className="app-shell deck-shell">
       <section className="deck-layout" aria-label="Deck library">
-        <header className="top-bar catalog-header">
+        <header className="top-bar catalog-header deck-page-header">
           <div>
             <p className="eyebrow">Rune Lanes</p>
             <h1>Decks</h1>
@@ -252,23 +302,130 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
           </div>
         </header>
 
-        <aside className="deck-list" aria-label="Deck recipes">
-          <button className="primary-button" type="button" onClick={() => void handleCreate()} disabled={busy}>
+        <section className="deck-recipe-strip" aria-label="Deck recipes">
+          <button className="new-deck-card" type="button" onClick={() => void handleCreate()} disabled={busy}>
             <Plus size={18} />
             New Deck
           </button>
-          {decks.map((deck) => (
-            <button
-              key={deck.id}
-              className={`deck-list-item ${selectedDeckId === deck.id ? "selected" : ""}`}
-              type="button"
-              onClick={() => selectDeck(deck)}
-            >
-              <strong>{deck.name}</strong>
-              <span>{deck.legality.legal ? "Legal" : "Draft"} · {deck.legality.totalCards} cards</span>
-              {deck.isDefault ? <span>Default</span> : null}
-            </button>
-          ))}
+          <div className="deck-recipe-scroll">
+            {decks.map((deck) => (
+              <button
+                key={deck.id}
+                className={`deck-recipe-card ${selectedDeckId === deck.id ? "selected" : ""}`}
+                type="button"
+                aria-pressed={selectedDeckId === deck.id}
+                onClick={() => selectDeck(deck)}
+              >
+                <strong>{deck.name}</strong>
+                <span>{deck.legality.legal ? "Legal" : "Draft"} · {deck.legality.totalCards} cards</span>
+                {deck.isDefault ? <small>Default</small> : null}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <aside className="deck-catalog-sidebar" aria-label="Card catalog">
+          <div className="deck-panel-heading">
+            <div>
+              <p className="eyebrow">Catalog</p>
+              <h2>Available Cards</h2>
+            </div>
+            <span>{filteredCards.length}</span>
+          </div>
+
+          <label className="catalog-search deck-search" htmlFor="deck-card-search">
+            <Search size={17} />
+            <input
+              id="deck-card-search"
+              value={catalogFilters.query}
+              onChange={(event) => updateCatalogFilters({ query: event.target.value })}
+              placeholder="Search cards"
+              autoComplete="off"
+            />
+          </label>
+
+          <div className="deck-filter-grid" aria-label="Catalog filters">
+            <label>
+              Kind
+              <select
+                value={catalogFilters.kind}
+                onChange={(event) =>
+                  updateCatalogFilters({ kind: event.target.value as DeckCatalogFilters["kind"] })
+                }
+              >
+                <option value="all">All kinds</option>
+                <option value="unit">Units</option>
+                <option value="spell">Spells</option>
+                <option value="item">Items</option>
+              </select>
+            </label>
+            <label>
+              Rarity
+              <select
+                value={catalogFilters.rarity}
+                onChange={(event) =>
+                  updateCatalogFilters({ rarity: event.target.value as DeckCatalogFilters["rarity"] })
+                }
+              >
+                <option value="all">All rarities</option>
+                <option value="basic">Basic</option>
+                <option value="advanced">Advanced</option>
+                <option value="rare">Rare</option>
+              </select>
+            </label>
+            <label>
+              Mana
+              <select
+                value={String(catalogFilters.manaCost)}
+                onChange={(event) =>
+                  updateCatalogFilters({ manaCost: parseManaCostFilter(event.target.value) })
+                }
+              >
+                {catalogOptions.manaCosts.map((manaCost) => (
+                  <option key={String(manaCost)} value={String(manaCost)}>
+                    {manaCostFilterLabel(manaCost)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="deck-catalog-list">
+            {filteredCards.map((card) => {
+              const copyState = cardCopyState(card, cardCounts, rules);
+
+              return (
+                <div key={card.id} className={`deck-catalog-row ${card.rarity}`}>
+                  <button
+                    type="button"
+                    className="deck-row-select"
+                    onClick={() => setSelectedCardTemplateId(card.templateId)}
+                    aria-label={`Select ${card.name}`}
+                  >
+                    <span>
+                      <strong>{card.name}</strong>
+                      <small>{rarityLabel(card.rarity)} · {card.cost} mana · {cardKindLabel(card)}</small>
+                    </span>
+                    {copyState.count > 0 ? <em>{copyState.count}</em> : null}
+                  </button>
+                  <button
+                    className="icon-button deck-add-button"
+                    type="button"
+                    onClick={() => addCard(card)}
+                    disabled={busy || copyState.copyLimitReached}
+                    title={
+                      copyState.copyLimitReached
+                        ? `${rarityLabel(card.rarity)} copy limit reached`
+                        : `Add ${card.name}`
+                    }
+                    aria-label={`Add ${card.name}`}
+                  >
+                    <Plus size={17} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </aside>
 
         <section className="deck-editor" aria-label="Deck editor">
@@ -286,6 +443,7 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
               Default
             </label>
             <button className="primary-button" type="button" onClick={() => void handleSave()} disabled={busy || !selectedDeckId}>
+              <Save size={18} />
               Save
             </button>
             <button className="secondary-link" type="button" onClick={() => void handleDuplicate()} disabled={busy || !selectedDeckId}>
@@ -293,93 +451,277 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
               Duplicate
             </button>
             <button className="secondary-link" type="button" onClick={() => void handleDelete()} disabled={busy || !selectedDeckId || decks.length <= 1}>
-              <X size={18} />
+              <Trash2 size={18} />
               Delete
             </button>
           </div>
 
-          <section className="deck-config-panel" aria-label="Wizard configuration">
-            <div className="preferred-wizard-control">
-              <span>Wizard</span>
-              <select
-                value={selectedWizardType}
-                onChange={(event) => {
-                  const wizardType = event.target.value as WizardType;
-                  setSelectedWizardType(wizardType);
-                  setSelectedRuneIds(defaultRuneIdsForWizard(progressionLoadState.progression, wizardType));
-                }}
-              >
-                {WIZARD_OPTIONS.map((wizard) => (
-                  <option key={wizard.id} value={wizard.id}>
-                    {wizard.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="deck-config-skills">
-              <span>Active Skills</span>
-              <strong>
-                {skillNamesForWizard(progressionLoadState.progression, selectedWizardType).join(", ") ||
-                  "Base skill only"}
-              </strong>
-            </div>
-            <RuneSelector
-              progression={progressionLoadState.progression}
-              wizardType={selectedWizardType}
-              selectedRuneIds={selectedRuneIds}
-              onChange={setSelectedRuneIds}
-            />
-          </section>
-
-          {previewLegality ? <DeckLegalityPanel legality={previewLegality} /> : null}
           {notice ? <p className="notice">{notice}</p> : null}
 
-          <label className="catalog-search deck-search" htmlFor="deck-card-search">
-            <Search size={17} />
-            <input
-              id="deck-card-search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search cards"
-              autoComplete="off"
-            />
-          </label>
+          <div className="deck-panel-heading">
+            <div>
+              <p className="eyebrow">Deck recipe</p>
+              <h2>Picked Cards</h2>
+            </div>
+            <span>{stats.totalCards}/{stats.minCards}</span>
+          </div>
 
-          <div className="deck-builder-grid">
-            {filteredCards.map((card) => {
-              const count = cardCounts[card.templateId] ?? 0;
-              const copyLimit = copyLimitForRarity(card.rarity, rules);
-              const copyLimitReached = count >= copyLimit;
-
-              return (
-                <div key={card.id} className={`deck-card-row ${card.rarity}`}>
-                  <div>
-                    <strong>{card.name}</strong>
-                    <span>{card.rarity} · {card.cost} mana</span>
-                  </div>
-                  <p>{card.text}</p>
-                  <div className="deck-count-controls">
-                    <button type="button" onClick={() => adjustCount(card, -1)} disabled={busy}>
-                      -
-                    </button>
-                    <strong>{count}</strong>
-                    <button
-                      type="button"
-                      onClick={() => adjustCount(card, 1)}
-                      disabled={busy || copyLimitReached}
-                      title={copyLimitReached ? `${rarityLabel(card.rarity)} copy limit reached` : undefined}
-                    >
-                      +
-                    </button>
-                  </div>
+          <div className="picked-card-list">
+            {deckCardRows.length === 0 ? (
+              <div className="deck-empty-state">
+                <WandSparkles size={22} />
+                <strong>No Cards picked</strong>
+                <span>Add Cards from the catalog to build this Deck recipe.</span>
+              </div>
+            ) : (
+              deckCardRows.map((row) => (
+                <div
+                  key={row.card.id}
+                  className={`picked-card-row ${row.card.rarity} ${
+                    selectedCardTemplateId === row.card.templateId ? "selected" : ""
+                  }`}
+                >
+                  <button
+                    type="button"
+                    className="deck-row-select"
+                    onClick={() => setSelectedCardTemplateId(row.card.templateId)}
+                    aria-label={`Select ${row.card.name}`}
+                  >
+                    <span>
+                      <strong>{row.card.name}</strong>
+                      <small>
+                        {rarityLabel(row.card.rarity)} · {row.card.cost} mana · {row.kindLabel} · {row.kindDetail}
+                      </small>
+                    </span>
+                  </button>
+                  <p>{row.card.text}</p>
+                  <DeckCountControls
+                    card={row.card}
+                    count={row.count}
+                    copyLimitReached={row.copyLimitReached}
+                    busy={busy}
+                    onAdjust={adjustCount}
+                  />
                 </div>
-              );
-            })}
+              ))
+            )}
           </div>
         </section>
+
+        <aside className="deck-details-panel" aria-label="Deck details">
+          <DeckStatsPanel
+            stats={stats}
+            selectedWizardType={selectedWizardType}
+            selectedRuneIds={selectedRuneIds}
+            progression={progressionLoadState.progression}
+            onWizardChange={(wizardType) => {
+              setSelectedWizardType(wizardType);
+              setSelectedRuneIds(defaultRuneIdsForWizard(progressionLoadState.progression, wizardType));
+            }}
+            onRuneChange={setSelectedRuneIds}
+          />
+
+          <section className="selected-card-panel" aria-label="Selected card details">
+            <div className="deck-panel-heading">
+              <div>
+                <p className="eyebrow">Card</p>
+                <h2>{selectedCard ? selectedCard.name : "Select a Card"}</h2>
+              </div>
+              {selectedCard ? <span>{rarityLabel(selectedCard.rarity)}</span> : null}
+            </div>
+
+            {selectedCard ? (
+              <SelectedCardDetails
+                card={selectedCard}
+                count={cardCopyState(selectedCard, cardCounts, rules).count}
+                copyLimit={cardCopyState(selectedCard, cardCounts, rules).copyLimit}
+                copyLimitReached={cardCopyState(selectedCard, cardCounts, rules).copyLimitReached}
+                busy={busy}
+                onAdjust={adjustCount}
+              />
+            ) : (
+              <div className="deck-empty-state compact">
+                <WandSparkles size={20} />
+                <span>Pick a Card from the catalog or Deck recipe list to inspect its details.</span>
+              </div>
+            )}
+          </section>
+        </aside>
       </section>
     </main>
   );
+}
+
+function DeckStatsPanel({
+  stats,
+  selectedWizardType,
+  selectedRuneIds,
+  progression,
+  onWizardChange,
+  onRuneChange,
+}: {
+  stats: ReturnType<typeof deckStats>;
+  selectedWizardType: WizardType;
+  selectedRuneIds: string[];
+  progression: ProgressionResponse;
+  onWizardChange: (wizardType: WizardType) => void;
+  onRuneChange: (runeIds: string[]) => void;
+}) {
+  return (
+    <section className={`deck-stats-panel ${stats.legal ? "legal" : "draft"}`} aria-label="Deck stats">
+      <div className="deck-panel-heading">
+        <div>
+          <p className="eyebrow">Stats</p>
+          <h2>{stats.statusLabel}</h2>
+        </div>
+        <span>{stats.totalCards}/{stats.minCards}</span>
+      </div>
+
+      <div className="deck-stat-grid">
+        <DetailStat label="Total" value={`${stats.totalCards}/${stats.minCards}`} />
+        <DetailStat label="Basic" value={String(stats.basicCards)} />
+        <DetailStat
+          label="Advanced"
+          value={
+            stats.advancedTotalLimit === null
+              ? String(stats.advancedCards)
+              : `${stats.advancedCards}/${stats.advancedTotalLimit}`
+          }
+        />
+        <DetailStat
+          label="Rare"
+          value={
+            stats.rareTotalLimit === null
+              ? String(stats.rareCards)
+              : `${stats.rareCards}/${stats.rareTotalLimit}`
+          }
+        />
+      </div>
+
+      {stats.messages.length > 0 ? (
+        <ul className="deck-message-list">
+          {stats.messages.map((message) => (
+            <li key={message}>{message}</li>
+          ))}
+        </ul>
+      ) : null}
+
+      <div className="deck-config-panel" aria-label="Wizard configuration">
+        <div className="preferred-wizard-control">
+          <span>Wizard</span>
+          <select
+            value={selectedWizardType}
+            onChange={(event) => onWizardChange(event.target.value as WizardType)}
+          >
+            {WIZARD_OPTIONS.map((wizard) => (
+              <option key={wizard.id} value={wizard.id}>
+                {wizard.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="deck-config-skills">
+          <span>Active Skills</span>
+          <strong>{stats.skillNames.join(", ") || "Base skill only"}</strong>
+        </div>
+        <RuneSelector
+          progression={progression}
+          wizardType={selectedWizardType}
+          selectedRuneIds={selectedRuneIds}
+          onChange={onRuneChange}
+        />
+      </div>
+    </section>
+  );
+}
+
+function SelectedCardDetails({
+  card,
+  count,
+  copyLimit,
+  copyLimitReached,
+  busy,
+  onAdjust,
+}: {
+  card: CatalogCard;
+  count: number;
+  copyLimit: number;
+  copyLimitReached: boolean;
+  busy: boolean;
+  onAdjust: (card: CatalogCard, delta: number) => void;
+}) {
+  return (
+    <div className={`selected-card-details ${card.rarity}`}>
+      <div className="selected-card-meta">
+        <DetailStat label="Mana" value={String(card.cost)} />
+        <DetailStat label="Kind" value={cardKindLabel(card)} />
+        <DetailStat label="Count" value={`${count}/${copyLimit}`} />
+      </div>
+      <p>{card.text}</p>
+      <p className="selected-card-kind">{cardKindDetail(card)}</p>
+      <DeckCountControls
+        card={card}
+        count={count}
+        copyLimitReached={copyLimitReached}
+        busy={busy}
+        onAdjust={onAdjust}
+      />
+    </div>
+  );
+}
+
+function DeckCountControls({
+  card,
+  count,
+  copyLimitReached,
+  busy,
+  onAdjust,
+}: {
+  card: CatalogCard;
+  count: number;
+  copyLimitReached: boolean;
+  busy: boolean;
+  onAdjust: (card: CatalogCard, delta: number) => void;
+}) {
+  return (
+    <div className="deck-count-controls" aria-label={`${card.name} count`}>
+      <button
+        type="button"
+        onClick={() => onAdjust(card, -1)}
+        disabled={busy || count <= 0}
+        aria-label={`Remove ${card.name}`}
+      >
+        <Minus size={15} />
+      </button>
+      <strong>{count}</strong>
+      <button
+        type="button"
+        onClick={() => onAdjust(card, 1)}
+        disabled={busy || copyLimitReached}
+        title={copyLimitReached ? `${rarityLabel(card.rarity)} copy limit reached` : undefined}
+        aria-label={`Add ${card.name}`}
+      >
+        <Plus size={15} />
+      </button>
+    </div>
+  );
+}
+
+function DetailStat({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="detail-stat">
+      <small>{label}</small>
+      <strong>{value}</strong>
+    </span>
+  );
+}
+
+function parseManaCostFilter(value: string): ManaCostFilter {
+  if (value === "all" || value === "5plus") {
+    return value;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : "all";
 }
 
 export function DeckLegalityPanel({ legality }: { legality: DeckLegality }) {
