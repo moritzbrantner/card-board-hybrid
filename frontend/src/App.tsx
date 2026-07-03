@@ -70,9 +70,11 @@ import {
 } from "./boardAnimations";
 import { Board3DRenderer, type Board3DTileInteraction } from "./Board3D";
 import {
+  boardRendererFallbackMessage,
   canCreateWebGLContext,
   isBoardRendererInteractive,
   selectBoardRenderer,
+  type BoardRendererFallbackReason,
 } from "./boardRenderer";
 import { ProfilePage } from "./profile";
 import { clearAuthToken, getAuthToken, saveAuthToken } from "./session";
@@ -3366,11 +3368,14 @@ function Board({
   const [webglFailed, setWebglFailed] = useState(
     () => boardVisualMode === "3d" && !canCreateWebGLContext(),
   );
+  const [rendererFallbackReason, setRendererFallbackReason] =
+    useState<BoardRendererFallbackReason | null>(() =>
+      boardVisualMode === "3d" && !canCreateWebGLContext() ? "webgl-unavailable" : null,
+    );
   const [assetFailureCount, setAssetFailureCount] = useState(0);
-  const webglUnavailable = boardVisualMode === "3d" && !canCreateWebGLContext();
   const renderer = selectBoardRenderer({
     requestedMode: boardVisualMode,
-    webglFailed: webglFailed || webglUnavailable,
+    webglFailed,
     readOnly,
   });
   const isInteractive = isBoardRendererInteractive({ renderer, readOnly, disabled });
@@ -3412,13 +3417,19 @@ function Board({
   useEffect(() => {
     if (boardVisualMode === "2d") {
       setWebglFailed(false);
+      setRendererFallbackReason(null);
       setAssetFailureCount(0);
       return;
     }
 
     if (!canCreateWebGLContext()) {
       setWebglFailed(true);
+      setRendererFallbackReason("webgl-unavailable");
+      return;
     }
+
+    setWebglFailed(false);
+    setRendererFallbackReason(null);
   }, [boardVisualMode]);
 
   useEffect(() => {
@@ -3441,6 +3452,7 @@ function Board({
         className={`board board-visual-mode-${boardVisualMode} ${readOnly ? "read-only" : ""}`}
         data-board-visual-mode={boardVisualMode}
         data-board-renderer="3d"
+        data-board-asset-failures={assetFailureCount}
         aria-label="Hex board"
       >
         {assetFailureCount > 0 ? (
@@ -3466,7 +3478,10 @@ function Board({
 
             onUnitContextMenu(piece, { x: event.clientX, y: event.clientY });
           }}
-          onFatalRenderError={() => setWebglFailed(true)}
+          onFatalRenderError={() => {
+            setWebglFailed(true);
+            setRendererFallbackReason("render-failed");
+          }}
           onAssetFailure={() => setAssetFailureCount((count) => count + 1)}
         />
       </section>
@@ -3480,9 +3495,9 @@ function Board({
       data-board-renderer="2d"
       aria-label="Hex board"
     >
-      {webglFailed || webglUnavailable ? (
+      {rendererFallbackReason ? (
         <div className="board-renderer-notice" role="status">
-          3D board unavailable, using 2D.
+          {boardRendererFallbackMessage(rendererFallbackReason)}
         </div>
       ) : null}
       <div className="hex-board">

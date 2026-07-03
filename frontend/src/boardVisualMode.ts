@@ -15,14 +15,26 @@ export function defaultBoardVisualMode(prefersReducedMotion: boolean): BoardVisu
   return prefersReducedMotion ? "2d" : "3d";
 }
 
+export function defaultBoardVisualModeForCapability({
+  prefersReducedMotion,
+  lowCapabilityDevice,
+}: {
+  prefersReducedMotion: boolean;
+  lowCapabilityDevice: boolean;
+}): BoardVisualMode {
+  return prefersReducedMotion || lowCapabilityDevice ? "2d" : "3d";
+}
+
 export function resolveBoardVisualMode({
   accountMode,
   storedMode,
   prefersReducedMotion,
+  lowCapabilityDevice = false,
 }: {
   accountMode?: BoardVisualMode | null;
   storedMode?: string | null;
   prefersReducedMotion: boolean;
+  lowCapabilityDevice?: boolean;
 }): BoardVisualMode {
   if (accountMode) {
     return accountMode;
@@ -32,7 +44,7 @@ export function resolveBoardVisualMode({
     return storedMode;
   }
 
-  return defaultBoardVisualMode(prefersReducedMotion);
+  return defaultBoardVisualModeForCapability({ prefersReducedMotion, lowCapabilityDevice });
 }
 
 export function readLocalBoardVisualMode(storage: StorageLike | undefined = browserStorage()) {
@@ -57,11 +69,25 @@ export function browserPrefersReducedMotion() {
   );
 }
 
+export function browserHasLowBoardCapability() {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  const hasCoarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  const hasSmallViewport = window.innerWidth < 760 || window.innerHeight < 520;
+  const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  const hasLowMemory = typeof deviceMemory === "number" && deviceMemory <= 4;
+
+  return hasCoarsePointer || hasSmallViewport || hasLowMemory;
+}
+
 export function effectiveBoardVisualMode(currentUser: AuthUser | null): BoardVisualMode {
   return resolveBoardVisualMode({
     accountMode: currentUser?.boardVisualMode,
     storedMode: readLocalBoardVisualMode(),
     prefersReducedMotion: browserPrefersReducedMotion(),
+    lowCapabilityDevice: browserHasLowBoardCapability(),
   });
 }
 

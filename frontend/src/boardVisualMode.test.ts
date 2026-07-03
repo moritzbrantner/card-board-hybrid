@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BOARD_VISUAL_MODE_STORAGE_KEY,
   defaultBoardVisualMode,
+  defaultBoardVisualModeForCapability,
   readLocalBoardVisualMode,
   resolveBoardVisualMode,
   saveLocalBoardVisualMode,
@@ -41,12 +42,43 @@ describe("board visual mode preferences", () => {
   it("defaults reduced-motion users to 2D until explicitly changed", () => {
     expect(defaultBoardVisualMode(true)).toBe("2d");
     expect(
+      defaultBoardVisualModeForCapability({
+        prefersReducedMotion: true,
+        lowCapabilityDevice: false,
+      }),
+    ).toBe("2d");
+    expect(
       resolveBoardVisualMode({
         accountMode: null,
         storedMode: null,
         prefersReducedMotion: true,
       }),
     ).toBe("2d");
+  });
+
+  it("defaults low-capability browsers to 2D until explicitly changed", () => {
+    expect(
+      defaultBoardVisualModeForCapability({
+        prefersReducedMotion: false,
+        lowCapabilityDevice: true,
+      }),
+    ).toBe("2d");
+    expect(
+      resolveBoardVisualMode({
+        accountMode: null,
+        storedMode: null,
+        prefersReducedMotion: false,
+        lowCapabilityDevice: true,
+      }),
+    ).toBe("2d");
+    expect(
+      resolveBoardVisualMode({
+        accountMode: null,
+        storedMode: "3d",
+        prefersReducedMotion: false,
+        lowCapabilityDevice: true,
+      }),
+    ).toBe("3d");
   });
 
   it("defaults to 3D when there is no account, local setting, or reduced-motion request", () => {

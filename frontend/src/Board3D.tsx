@@ -1,5 +1,14 @@
 import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
-import { Component, type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Component,
+  type DragEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Box3, Group, Object3D, Vector3 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { axialToBoardPosition } from "./boardRenderer";
@@ -329,6 +338,13 @@ function PieceMesh({
   const [x, y, z] = axialToBoardPosition(piece.position, 1);
   const visualIdentity =
     piece.pieceType === "wizard" ? visualCatalog.wizard(piece) : visualCatalog.unit(piece);
+  const resolvedAssetPath = resolved.status === "available" ? resolved.entry.path : null;
+  const handleAssetFailure = useCallback(() => {
+    setAssetFailed(true);
+    if (resolvedAssetPath) {
+      onAssetFailure?.(resolvedAssetPath);
+    }
+  }, [onAssetFailure, resolvedAssetPath]);
 
   const innerPiece =
     resolved.status === "available" && !assetFailed ? (
@@ -342,10 +358,7 @@ function PieceMesh({
         disabled={disabled}
         onClick={onClick}
         onContextMenu={onContextMenu}
-        onAssetFailure={() => {
-          setAssetFailed(true);
-          onAssetFailure?.(resolved.entry.path);
-        }}
+        onAssetFailure={handleAssetFailure}
       />
     ) : (
       <FallbackPieceMarker
