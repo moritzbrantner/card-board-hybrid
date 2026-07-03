@@ -4035,7 +4035,7 @@ function tileTitle(
 }
 
 function droppedItemsAt(match: MatchState, coord: HexCoord) {
-  return match.board.droppedItems.filter((item) => sameCoord(item.position, coord));
+  return (match.board.droppedItems ?? []).filter((item) => sameCoord(item.position, coord));
 }
 
 function pieceStatLabel(piece: BoardPiece) {

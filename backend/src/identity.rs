@@ -50,7 +50,17 @@ pub struct IdentityModule<'a> {
     connection: &'a mut Connection,
 }
 
-type LoginProfileRow = (i64, String, String, String, String, String, String, String, i64);
+type LoginProfileRow = (
+    i64,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    i64,
+);
 
 #[derive(Debug)]
 pub enum IdentityError {

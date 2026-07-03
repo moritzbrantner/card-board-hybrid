@@ -831,6 +831,10 @@ impl MatchState {
         )
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "test and store constructors pass mirrored player/opponent setup explicitly"
+    )]
     fn new_with_seed_wizard_types_mode_and_decks(
         seed: u64,
         player_wizard_type: WizardType,
@@ -1369,6 +1373,10 @@ impl MatchState {
         }
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "spell resolution records side, source card, target, and replay context together"
+    )]
     fn apply_spell(
         &mut self,
         side: Side,

@@ -20,6 +20,15 @@ use crate::progression;
 
 pub const MATCH_DATABASE_PATH_ENV: &str = "RUNE_LANES_DB_PATH";
 
+type ReadySharedLoadouts = (
+    WizardType,
+    WizardType,
+    DeckRecipeSnapshot,
+    DeckRecipeSnapshot,
+    MatchProgressionLoadout,
+    MatchProgressionLoadout,
+);
+
 #[derive(Clone, Debug)]
 pub struct StoredMatch {
     pub id: String,
@@ -281,6 +290,10 @@ impl SqliteMatchStore {
         )
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "match creation stores mirrored player/opponent decks and progression loadouts"
+    )]
     pub fn create_match_for_user_with_decks(
         &mut self,
         player_wizard_type: WizardType,
@@ -1125,17 +1138,7 @@ fn insert_shared_seat(
 fn ready_shared_loadouts(
     transaction: &Transaction<'_>,
     match_id: &str,
-) -> Result<
-    Option<(
-        WizardType,
-        WizardType,
-        DeckRecipeSnapshot,
-        DeckRecipeSnapshot,
-        MatchProgressionLoadout,
-        MatchProgressionLoadout,
-    )>,
-    MatchStoreError,
-> {
+) -> Result<Option<ReadySharedLoadouts>, MatchStoreError> {
     let mut statement = transaction.prepare(
         "
         SELECT side, wizard_type, deck_recipe_snapshot_json, progression_loadout_json, joined_at

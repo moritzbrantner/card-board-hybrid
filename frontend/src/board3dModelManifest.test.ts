@@ -35,7 +35,7 @@ describe("3D board model manifest", () => {
   });
 });
 
-function makeWizard(wizardType: Wizard["wizardType"]) {
+function makeWizard(wizardType: Wizard["wizardType"]): Wizard & { pieceType: "wizard"; name: string } {
   return {
     pieceType: "wizard",
     id: `wizard-${wizardType}`,
@@ -49,10 +49,10 @@ function makeWizard(wizardType: Wizard["wizardType"]) {
     apRemaining: 2,
     maxAp: 2,
     hasAttacked: false,
-  } as const;
+  };
 }
 
-function makeUnit(templateId: Unit["templateId"]) {
+function makeUnit(templateId: Unit["templateId"]): Unit & { pieceType: "unit" } {
   return {
     pieceType: "unit",
     id: "unit-1",
@@ -66,5 +66,6 @@ function makeUnit(templateId: Unit["templateId"]) {
     apRemaining: 1,
     maxAp: 1,
     hasAttacked: false,
-  } as const;
+    items: [],
+  };
 }

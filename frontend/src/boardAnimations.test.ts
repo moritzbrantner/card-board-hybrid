@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createBoardAnimationCue } from "./boardAnimations";
-import type { MatchState } from "./types";
+import type { MatchProgressionLoadout, MatchState } from "./types";
 
 describe("createBoardAnimationCue", () => {
   it("uses accepted piece move events for interpolation endpoints", () => {
@@ -134,8 +134,10 @@ function matchWithUnit({
           apRemaining: 1,
           maxAp: 1,
           hasAttacked: false,
+          items: [],
         },
       ],
+      droppedItems: [],
     },
   };
 }
@@ -167,6 +169,7 @@ function matchWithoutUnits(): MatchState {
       handCount: 0,
       deckCount: 0,
       discardCount: 0,
+      progression: defaultProgression(),
     },
     opponent: {
       side: "opponent",
@@ -187,14 +190,33 @@ function matchWithoutUnits(): MatchState {
       handCount: 0,
       deckCount: 0,
       discardCount: 0,
+      progression: defaultProgression(),
     },
     board: {
       radius: 3,
       tiles: [],
       units: [],
+      droppedItems: [],
     },
     actionStack: [],
     log: [],
     winner: null,
+  };
+}
+
+function defaultProgression(): MatchProgressionLoadout {
+  return {
+    runeIds: [],
+    skillIds: [],
+    effects: {
+      maxHpDelta: 0,
+      attackDelta: 0,
+      maxApDelta: 0,
+      manaDelta: 0,
+      openingHandDelta: 0,
+      summonedUnitArmorDelta: 0,
+      firstSummonedUnitArmorDelta: 0,
+      spellDamageDelta: 0,
+    },
   };
 }

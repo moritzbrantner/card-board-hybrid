@@ -18,7 +18,7 @@ import {
   type BoardModelManifest,
 } from "./board3dModelManifest";
 import type { MatchVisualCatalog, UnitVisualIdentity, WizardVisualIdentity } from "./matchVisualIdentity";
-import type { HexCoord, HexTile, Side, WizardType } from "./types";
+import type { HexCoord, HexTile, Side, Unit, WizardType } from "./types";
 import { BOARD_ANIMATION_DURATION_MS, type BoardAnimationCue, type PieceAnimation } from "./boardAnimations";
 
 export type Board3DWizard = {
@@ -49,6 +49,7 @@ export type Board3DUnit = {
   apRemaining: number;
   maxAp: number;
   hasAttacked: boolean;
+  items: Unit["items"];
 };
 
 export type Board3DPiece = Board3DWizard | Board3DUnit;

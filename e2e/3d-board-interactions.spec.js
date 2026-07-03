@@ -396,6 +396,7 @@ function playableMatch({
       handCount: hand.length,
       deckCount: 40,
       discardCount: 0,
+      progression: defaultProgression(),
     },
     opponent: {
       side: "opponent",
@@ -416,11 +417,13 @@ function playableMatch({
       handCount: 0,
       deckCount: 40,
       discardCount: 0,
+      progression: defaultProgression(),
     },
     board: {
       radius: 3,
       tiles: radiusThreeTiles(),
       units,
+      droppedItems: [],
     },
     actionStack: [],
     log: [],
@@ -465,6 +468,24 @@ function ashScout(position) {
     apRemaining: 2,
     maxAp: 2,
     hasAttacked: false,
+    items: [],
+  };
+}
+
+function defaultProgression() {
+  return {
+    runeIds: [],
+    skillIds: [],
+    effects: {
+      maxHpDelta: 0,
+      attackDelta: 0,
+      maxApDelta: 0,
+      manaDelta: 0,
+      openingHandDelta: 0,
+      summonedUnitArmorDelta: 0,
+      firstSummonedUnitArmorDelta: 0,
+      spellDamageDelta: 0,
+    },
   };
 }
 

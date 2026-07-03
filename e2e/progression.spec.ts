@@ -58,7 +58,6 @@ test("selects and replaces default rune loadout within slot limit", async ({ pag
 
 async function signInExperiencedAccount(page) {
   await page.goto("/profile");
-  await page.getByRole("button", { name: "I already have an account" }).click();
   await page.getByLabel("Email").fill(EXPERIENCED_EMAIL);
   await page.getByLabel("Password").fill(EXPERIENCED_PASSWORD);
   await page.getByRole("button", { name: /Sign In/ }).click();
@@ -134,6 +133,7 @@ function experiencedUser() {
     displayName: "Experienced",
     avatar: { symbol: "sparkles", color: "emerald" },
     preferredWizardType: "runekeeper",
+    boardVisualMode: "3d",
     progressionSummary: experiencedProgression().account,
   };
 }
