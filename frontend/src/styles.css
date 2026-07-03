@@ -24,6 +24,45 @@
   --token-size: clamp(96px, 7.875vw, 108px);
 }
 
+:root[data-theme="light"] {
+  color: #17201d;
+  background: #f6f1e6;
+  --panel: rgba(255, 251, 242, 0.96);
+  --panel-strong: #efe6d3;
+  --line: rgba(23, 32, 29, 0.18);
+  --ink: #f8f0df;
+  --muted: #4f625b;
+}
+
+:root[data-theme="highContrast"] {
+  color: #ffffff;
+  background: #000000;
+  --panel: #050505;
+  --panel-strong: #111111;
+  --line: #ffffff;
+  --gold: #ffe45c;
+  --teal: #4dffd2;
+  --blue: #7bd7ff;
+  --red: #ff6b5f;
+  --green: #9cff6b;
+  --ink: #000000;
+  --muted: #ffffff;
+}
+
+:root[data-board-scale="compact"] {
+  --hex-width: clamp(118px, 10vw, 140px);
+  --hex-height: clamp(108px, 9.15vw, 128px);
+  --hex-board-min-width: clamp(649px, 56.25vw, 770px);
+  --token-size: clamp(78px, 6.6vw, 92px);
+}
+
+:root[data-board-scale="large"] {
+  --hex-width: clamp(162px, 13.5vw, 190px);
+  --hex-height: clamp(148px, 12.3vw, 173px);
+  --hex-board-min-width: clamp(891px, 75.9vw, 1045px);
+  --token-size: clamp(108px, 9vw, 124px);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -46,6 +85,18 @@ button {
     linear-gradient(130deg, rgba(88, 183, 161, 0.2), transparent 34%),
     linear-gradient(315deg, rgba(122, 167, 217, 0.18), transparent 30%),
     #151817;
+}
+
+:root[data-theme="light"] .app-shell {
+  background:
+    linear-gradient(rgba(246, 241, 230, 0.91), rgba(246, 241, 230, 0.84)),
+    linear-gradient(130deg, rgba(88, 183, 161, 0.2), transparent 34%),
+    linear-gradient(315deg, rgba(122, 167, 217, 0.2), transparent 30%),
+    #f6f1e6;
+}
+
+:root[data-theme="highContrast"] .app-shell {
+  background: #000000;
 }
 
 .centered {
@@ -82,6 +133,13 @@ button {
   display: grid;
   gap: 16px;
   width: min(980px, 100%);
+  margin: 0 auto;
+}
+
+.settings-layout {
+  display: grid;
+  gap: 16px;
+  width: min(760px, 100%);
   margin: 0 auto;
 }
 
@@ -1486,6 +1544,49 @@ h1 {
   background: var(--panel);
 }
 
+.settings-panel {
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  background: var(--panel);
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.24);
+}
+
+.settings-control {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-control span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.settings-control select {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: inherit;
+  background: rgba(8, 11, 11, 0.48);
+  font: inherit;
+  font-weight: 800;
+}
+
+:root[data-theme="light"] .settings-control select {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .profile-fields {
   display: grid;
   gap: 8px;
@@ -1512,6 +1613,12 @@ h1 {
   color: #fffaf0;
   background: rgba(255, 255, 255, 0.08);
   font: inherit;
+}
+
+:root[data-theme="light"] .profile-fields input,
+:root[data-theme="light"] .preferred-wizard-control select {
+  color: #17201d;
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .preferred-wizard-control select {
@@ -2962,4 +3069,22 @@ h1 {
   .piece-feedback {
     display: none;
   }
+}
+
+:root[data-motion="reduced"] .card-button,
+:root[data-motion="reduced"] .piece-token {
+  transition: none;
+  animation: none;
+}
+
+:root[data-motion="reduced"] .card-button:not(:disabled):hover,
+:root[data-motion="reduced"] .hex-tile:not(:disabled):hover .piece-token,
+:root[data-motion="reduced"] .card-button.dragging,
+:root[data-motion="reduced"] .card-button.selected,
+:root[data-motion="reduced"] .card-button.played {
+  transform: none;
+}
+
+:root[data-motion="reduced"] .piece-feedback {
+  display: none;
 }

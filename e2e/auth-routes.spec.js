@@ -32,7 +32,7 @@ test("login submits credentials to the existing login API and opens a safe next 
   expect(authRequests).toEqual(["/api/auth/login"]);
 });
 
-for (const protectedPath of ["/profile", "/decks", "/matches"]) {
+for (const protectedPath of ["/profile", "/settings", "/decks", "/matches"]) {
   test(`signed-out players visiting ${protectedPath} are redirected to login with next`, async ({
     page,
   }) => {
@@ -46,7 +46,7 @@ for (const protectedPath of ["/profile", "/decks", "/matches"]) {
   });
 }
 
-for (const nextPath of ["/profile", "/decks", "/matches"]) {
+for (const nextPath of ["/profile", "/settings", "/decks", "/matches"]) {
   test(`successful login from ${nextPath} lands on the requested protected route`, async ({
     page,
   }) => {
@@ -213,7 +213,7 @@ test("signing out clears the session and returns to the public match picker", as
 test("protected route redirects replace the protected URL in browser history", async ({ page }) => {
   await mockAuthApi(page);
 
-  for (const protectedPath of ["/profile", "/decks", "/matches"]) {
+  for (const protectedPath of ["/profile", "/settings", "/decks", "/matches"]) {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Choose Your Wizard" })).toBeVisible();
 

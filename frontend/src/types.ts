@@ -187,6 +187,30 @@ export type AccountProfile = AuthUser;
 
 export type BoardVisualMode = "2d" | "3d";
 
+export type PreferenceTheme = "system" | "dark" | "light" | "highContrast";
+
+export type MotionPreference = "system" | "reduced" | "full";
+
+export type AnimationSpeed = "slow" | "normal" | "fast";
+
+export type BoardScale = "compact" | "normal" | "large";
+
+export type HotkeyBinding = {
+  commandId: string;
+  binding: string;
+};
+
+export type AccountPreferences = {
+  theme: PreferenceTheme;
+  motion: MotionPreference;
+  animationSpeed: AnimationSpeed;
+  boardScale: BoardScale;
+  hotkeys: HotkeyBinding[];
+  updatedAt: number | null;
+};
+
+export type UpdatePreferencesRequest = Omit<AccountPreferences, "updatedAt">;
+
 export type ProgressionSummary = {
   totalXp: number;
   level: number;
