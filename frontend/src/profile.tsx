@@ -1,5 +1,5 @@
 import { History, House, LogOut, Play, RotateCcw, Save, Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import {
   loadProfileMatches,
   loadProgression,
@@ -41,6 +41,8 @@ type ProgressionState =
 
 const AVATAR_SYMBOLS = ["sparkles", "shield", "sword", "wand", "rune", "flame"] as const;
 const AVATAR_COLORS = ["emerald", "indigo", "rose", "amber", "sky", "slate"] as const;
+const SKILL_GRAPH_WIDTH = 760;
+const SKILL_GRAPH_HEIGHT = 420;
 
 export function ProfilePage({
   currentUser,
@@ -424,6 +426,7 @@ function ProgressionPanel({
                     type="button"
                     className={selected ? "selected" : ""}
                     disabled={disabled}
+                    aria-pressed={selected}
                     onClick={() => void handleToggleRune(rune)}
                     title={rune.unlocked ? rune.text : `Unlocks at account level ${rune.unlockLevel}`}
                   >
@@ -434,32 +437,131 @@ function ProgressionPanel({
               })}
             </div>
           </div>
-          <div className="skill-tree" aria-label="Wizard skill tree">
-            {tree.nodes.map((node) => {
-              const unlocked = node.root || wizard.unlockedSkillIds.includes(node.id);
-              const prerequisiteMet =
-                !node.prerequisiteId ||
-                node.prerequisiteId === tree.nodes[0]?.id ||
-                wizard.unlockedSkillIds.includes(node.prerequisiteId);
-              const disabled = unlocked || !prerequisiteMet || wizard.availableSkillPoints === 0;
-              return (
-                <button
-                  key={node.id}
-                  type="button"
-                  className={unlocked ? "unlocked" : ""}
-                  disabled={disabled}
-                  onClick={() => void handleUnlock(node)}
-                >
-                  <strong>{node.name}</strong>
-                  <span>{node.text}</span>
-                </button>
-              );
-            })}
-          </div>
+          <SkillTreeGraph tree={tree} wizard={wizard} onUnlock={handleUnlock} />
         </div>
       ) : null}
     </div>
   );
+}
+
+function SkillTreeGraph({
+  tree,
+  wizard,
+  onUnlock,
+}: {
+  tree: WizardSkillTree;
+  wizard: WizardProgression;
+  onUnlock: (node: SkillNodeDefinition) => Promise<void>;
+}) {
+  const layout = skillGraphLayout(tree.nodes);
+  const rootId = tree.nodes.find((node) => node.root)?.id;
+
+  return (
+    <div className="skill-tree-viewport">
+      <div
+        className="skill-tree-graph"
+        aria-label="Wizard skill tree"
+        style={
+          {
+            "--skill-graph-width": `${SKILL_GRAPH_WIDTH}px`,
+            "--skill-graph-height": `${SKILL_GRAPH_HEIGHT}px`,
+          } as CSSProperties
+        }
+      >
+        <svg className="skill-tree-edges" viewBox={`0 0 ${SKILL_GRAPH_WIDTH} ${SKILL_GRAPH_HEIGHT}`} aria-hidden="true">
+          {tree.nodes
+            .filter((node) => node.prerequisiteId)
+            .map((node) => {
+              const from = layout.get(node.prerequisiteId ?? "");
+              const to = layout.get(node.id);
+              if (!from || !to) {
+                return null;
+              }
+              const unlocked = wizard.unlockedSkillIds.includes(node.id);
+              const prerequisiteUnlocked =
+                node.prerequisiteId === rootId || wizard.unlockedSkillIds.includes(node.prerequisiteId ?? "");
+              return (
+                <line
+                  key={`${node.prerequisiteId}-${node.id}`}
+                  className={unlocked ? "unlocked" : prerequisiteUnlocked ? "available" : ""}
+                  x1={from.x}
+                  y1={from.y}
+                  x2={to.x}
+                  y2={to.y}
+                />
+              );
+            })}
+        </svg>
+        {tree.nodes.map((node) => {
+          const position = layout.get(node.id) ?? { x: SKILL_GRAPH_WIDTH / 2, y: SKILL_GRAPH_HEIGHT / 2 };
+          const unlocked = node.root || wizard.unlockedSkillIds.includes(node.id);
+          const prerequisiteMet =
+            !node.prerequisiteId ||
+            node.prerequisiteId === rootId ||
+            wizard.unlockedSkillIds.includes(node.prerequisiteId);
+          const disabled = unlocked || !prerequisiteMet || wizard.availableSkillPoints === 0;
+          const status = unlocked ? "Unlocked" : prerequisiteMet && wizard.availableSkillPoints > 0 ? "Available" : "Locked";
+          return (
+            <button
+              key={node.id}
+              type="button"
+              className={`skill-node ${unlocked ? "unlocked" : ""} ${status.toLowerCase()}`}
+              disabled={disabled}
+              aria-pressed={unlocked}
+              onClick={() => void onUnlock(node)}
+              style={{ left: position.x, top: position.y }}
+            >
+              <span>{status}</span>
+              <strong>{node.name}</strong>
+              <small>{node.text}</small>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function skillGraphLayout(nodes: SkillNodeDefinition[]) {
+  const root = nodes.find((node) => node.root) ?? nodes[0];
+  const positions = new Map<string, { x: number; y: number }>();
+  if (!root) {
+    return positions;
+  }
+
+  positions.set(root.id, { x: SKILL_GRAPH_WIDTH / 2, y: 66 });
+  const rootChildren = nodes.filter((node) => node.prerequisiteId === root.id);
+  const rootChildX = distributedX(rootChildren.length);
+  rootChildren.forEach((node, index) => {
+    const x = rootChildX[index] ?? SKILL_GRAPH_WIDTH / 2;
+    positions.set(node.id, { x, y: 214 });
+
+    const childNodes = nodes.filter((candidate) => candidate.prerequisiteId === node.id);
+    const childX = distributedX(childNodes.length, x, 122);
+    childNodes.forEach((childNode, childIndex) => {
+      positions.set(childNode.id, { x: childX[childIndex] ?? x, y: 354 });
+    });
+  });
+
+  const unplaced = nodes.filter((node) => !positions.has(node.id));
+  const unplacedX = distributedX(unplaced.length);
+  unplaced.forEach((node, index) => {
+    positions.set(node.id, { x: unplacedX[index] ?? SKILL_GRAPH_WIDTH / 2, y: 354 });
+  });
+
+  return positions;
+}
+
+function distributedX(count: number, center = SKILL_GRAPH_WIDTH / 2, spread = 300) {
+  if (count <= 0) {
+    return [];
+  }
+  if (count === 1) {
+    return [center];
+  }
+  const first = center - spread / 2;
+  const step = spread / (count - 1);
+  return Array.from({ length: count }, (_, index) => first + step * index);
 }
 
 function ProgressBar({ label, value, max }: { label: string; value: number; max: number }) {

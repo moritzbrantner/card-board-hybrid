@@ -10,6 +10,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::match_session::WizardType;
 
+pub const EXPERIENCED_LOCAL_EMAIL: &str = "experienced@local.dev";
+pub const EXPERIENCED_LOCAL_PASSWORD: &str = "experienced";
+pub const EXPERIENCED_LOCAL_XP: i64 = 20_000;
+const EXPERIENCED_LOCAL_USER_ID: i64 = 10_000;
+
 #[derive(Clone, Debug)]
 pub struct AccountProfile {
     pub id: i64,
@@ -417,6 +422,50 @@ pub fn migrate(connection: &Connection) -> Result<(), IdentityError> {
         [],
     )?;
     Ok(())
+}
+
+#[cfg(debug_assertions)]
+pub fn seed_experienced_local_account(connection: &Connection) -> Result<i64, IdentityError> {
+    let password_hash = hash_password(EXPERIENCED_LOCAL_PASSWORD)?;
+    connection.execute(
+        "
+        INSERT INTO users (
+            id,
+            email,
+            email_normalized,
+            password_hash,
+            display_name,
+            avatar_symbol,
+            avatar_color,
+            preferred_wizard_type,
+            total_xp,
+            created_at
+        )
+        VALUES (?1, ?2, ?2, ?3, 'Experienced', 'sparkles', 'emerald', 'runekeeper', ?4, unixepoch())
+        ON CONFLICT(email_normalized) DO UPDATE SET
+            email = excluded.email,
+            password_hash = excluded.password_hash,
+            display_name = excluded.display_name,
+            avatar_symbol = excluded.avatar_symbol,
+            avatar_color = excluded.avatar_color,
+            preferred_wizard_type = excluded.preferred_wizard_type,
+            total_xp = excluded.total_xp
+        ",
+        params![
+            EXPERIENCED_LOCAL_USER_ID,
+            EXPERIENCED_LOCAL_EMAIL,
+            password_hash,
+            EXPERIENCED_LOCAL_XP
+        ],
+    )?;
+
+    connection
+        .query_row(
+            "SELECT id FROM users WHERE email_normalized = ?1",
+            params![EXPERIENCED_LOCAL_EMAIL],
+            |row| row.get(0),
+        )
+        .map_err(IdentityError::from)
 }
 
 pub fn normalized_email(email: &str) -> Option<(String, String)> {

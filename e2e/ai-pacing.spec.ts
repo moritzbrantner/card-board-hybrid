@@ -238,6 +238,7 @@ function matchAt(opponentPosition, activeSide) {
       radius: 3,
       tiles: radiusThreeTiles(),
       units: [],
+      droppedItems: [],
     },
     actionStack: [],
     log: [],

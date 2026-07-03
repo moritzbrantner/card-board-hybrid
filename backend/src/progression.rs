@@ -489,6 +489,29 @@ pub fn migrate(connection: &Connection) -> Result<(), ProgressionError> {
     Ok(())
 }
 
+#[cfg(debug_assertions)]
+pub fn seed_experienced_local_mastery(
+    connection: &Connection,
+    user_id: i64,
+) -> Result<(), ProgressionError> {
+    for wizard_type in wizard_types() {
+        connection.execute(
+            "
+            INSERT INTO wizard_mastery (user_id, wizard_type, xp)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT(user_id, wizard_type) DO UPDATE SET
+                xp = excluded.xp
+            ",
+            params![
+                user_id,
+                wizard_type_to_db(wizard_type),
+                crate::identity::EXPERIENCED_LOCAL_XP
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 pub fn award_completed_match(
     connection: &mut Connection,
     match_id: &str,

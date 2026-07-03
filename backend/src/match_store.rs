@@ -221,6 +221,11 @@ impl SqliteMatchStore {
         identity::migrate(&connection)?;
         deck_library::migrate(&connection)?;
         progression::migrate(&connection)?;
+        #[cfg(debug_assertions)]
+        {
+            let experienced_user_id = identity::seed_experienced_local_account(&connection)?;
+            progression::seed_experienced_local_mastery(&connection, experienced_user_id)?;
+        }
         add_column_if_missing(&connection, "matches", "initial_snapshot_json", "TEXT")?;
         add_column_if_missing(&connection, "matches", "completed_at", "INTEGER")?;
         add_column_if_missing(

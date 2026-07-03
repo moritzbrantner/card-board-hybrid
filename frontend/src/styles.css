@@ -1698,8 +1698,7 @@ h1 {
 }
 
 .wizard-progression-tabs button,
-.rune-grid button,
-.skill-tree button {
+.rune-grid button {
   border: 1px solid var(--line);
   border-radius: 8px;
   color: #fffaf0;
@@ -1715,8 +1714,7 @@ h1 {
 }
 
 .wizard-progression-tabs button.active,
-.rune-grid button.selected,
-.skill-tree button.unlocked {
+.rune-grid button.selected {
   border-color: var(--gold);
   background: rgba(217, 184, 79, 0.14);
 }
@@ -1739,8 +1737,7 @@ h1 {
   margin: 0;
 }
 
-.rune-grid,
-.skill-tree {
+.rune-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 10px;
@@ -1750,8 +1747,7 @@ h1 {
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 
-.rune-grid button,
-.skill-tree button {
+.rune-grid button {
   display: grid;
   gap: 6px;
   min-height: 96px;
@@ -1759,19 +1755,131 @@ h1 {
 }
 
 .rune-grid button:disabled,
-.skill-tree button:disabled,
 .wizard-progression-tabs button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
 
-.rune-grid button span,
-.skill-tree button span {
+.rune-grid button span {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 800;
   line-height: 1.3;
   text-transform: none;
+}
+
+.skill-tree-viewport {
+  width: 100%;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.skill-tree-graph {
+  position: relative;
+  width: max(100%, var(--skill-graph-width));
+  min-width: min(var(--skill-graph-width), 100%);
+  height: var(--skill-graph-height);
+  border: 1px solid rgba(247, 243, 234, 0.12);
+  border-radius: 8px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    rgba(255, 255, 255, 0.035);
+  background-size: 44px 44px;
+}
+
+.skill-tree-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.skill-tree-edges line {
+  stroke: rgba(247, 243, 234, 0.2);
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+.skill-tree-edges line.available {
+  stroke: rgba(88, 183, 161, 0.48);
+}
+
+.skill-tree-edges line.unlocked {
+  stroke: rgba(217, 184, 79, 0.7);
+}
+
+.skill-node {
+  position: absolute;
+  display: grid;
+  gap: 5px;
+  width: min(220px, calc(100vw - 64px));
+  min-height: 112px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #fffaf0;
+  background: rgba(28, 33, 32, 0.96);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  text-align: left;
+  transform: translate(-50%, -50%);
+}
+
+.skill-node.unlocked {
+  border-color: var(--gold);
+  background: rgba(217, 184, 79, 0.16);
+}
+
+.skill-node.available:not(:disabled) {
+  border-color: rgba(88, 183, 161, 0.82);
+  box-shadow:
+    0 0 0 2px rgba(88, 183, 161, 0.16),
+    0 12px 24px rgba(0, 0, 0, 0.18);
+}
+
+.skill-node:disabled {
+  cursor: not-allowed;
+}
+
+.skill-node.locked {
+  opacity: 0.62;
+}
+
+.skill-node > span {
+  justify-self: start;
+  border: 1px solid rgba(247, 243, 234, 0.14);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.skill-node.available > span {
+  color: #dff5ed;
+  border-color: rgba(88, 183, 161, 0.45);
+}
+
+.skill-node.unlocked > span {
+  color: #fff3bd;
+  border-color: rgba(217, 184, 79, 0.45);
+}
+
+.skill-node strong {
+  color: #fffaf0;
+  font-size: 0.95rem;
+  line-height: 1.15;
+}
+
+.skill-node small {
+  color: var(--muted);
+  font-size: 0.77rem;
+  font-weight: 800;
+  line-height: 1.28;
 }
 
 .section-heading {
