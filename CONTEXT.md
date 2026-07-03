@@ -80,6 +80,38 @@ _Avoid_: seat
 The player-facing account presentation, including display name, generated avatar, and owned match history.
 _Avoid_: public player page
 
+**Account experience**:
+Total progression earned by a signed-in account from completed matches.
+_Avoid_: player score, account points
+
+**Account level**:
+A derived profile level from account experience, used for broad account progression such as generic rune unlocks.
+_Avoid_: rank
+
+**Wizard mastery**:
+Wizard-specific experience earned by completing matches with that wizard.
+_Avoid_: class level, wizard rank
+
+**Skill point**:
+A wizard-specific point earned from wizard mastery levels and spent in that wizard's skill tree.
+_Avoid_: talent point
+
+**Skill tree**:
+A per-wizard set of unlockable passive skills.
+_Avoid_: talent tree
+
+**Skill**:
+A wizard-specific passive upgrade unlocked with skill points.
+_Avoid_: talent, perk
+
+**Rune**:
+A generic pre-match loadout modifier unlocked by account level and equipped before a match.
+_Avoid_: skill, card rune
+
+**Rune loadout**:
+The selected runes frozen into a match for one side.
+_Avoid_: build, rune page
+
 **Generated avatar**:
 A profile avatar made from persisted symbol and color choices, not uploaded media.
 _Avoid_: avatar upload

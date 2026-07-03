@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 448" role="img" aria-labelledby="title desc">
+  <title id="title">Rune Charm</title>
+  <desc id="desc">A green-gold rune charm hanging from a cord.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#1f6f68"/>
+      <stop offset="1" stop-color="#2f3f2e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="44%" r="42%">
+      <stop offset="0" stop-color="#fff4a8"/>
+      <stop offset="1" stop-color="#c7a845" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="320" height="448" rx="22" fill="url(#bg)"/>
+  <rect x="18" y="18" width="284" height="412" rx="18" fill="none" stroke="#f1d879" stroke-width="6"/>
+  <circle cx="160" cy="196" r="118" fill="url(#glow)"/>
+  <path d="M112 82c26 46 70 46 96 0" fill="none" stroke="#1a2320" stroke-width="14" stroke-linecap="round"/>
+  <path d="M160 112v74" fill="none" stroke="#1a2320" stroke-width="12" stroke-linecap="round"/>
+  <path d="M104 202l56-56 56 56-56 92z" fill="#e7c95f" stroke="#fff4be" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M160 166v80M128 210h64M142 246l36-72" fill="none" stroke="#225a54" stroke-width="12" stroke-linecap="round"/>
+  <path d="M78 340h164" fill="none" stroke="#fff0a6" stroke-width="10" stroke-linecap="round" opacity=".8"/>
+  <path d="M105 372h110" fill="none" stroke="#fff0a6" stroke-width="8" stroke-linecap="round" opacity=".62"/>
+</svg>

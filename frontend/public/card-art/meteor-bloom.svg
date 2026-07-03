@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Meteor Bloom">
+  <rect width="320" height="220" fill="#201717"/>
+  <path d="M72 48 172 118" stroke="#d9b84f" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="206" cy="142" r="48" fill="#d1665a"/>
+  <circle cx="206" cy="142" r="24" fill="#f0c96a"/>
+  <path d="M154 132c26-20 74-20 100 0-18 36-82 36-100 0z" fill="#58b7a1" opacity=".55"/>
+</svg>

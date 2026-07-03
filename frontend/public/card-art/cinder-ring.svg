@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Cinder Ring">
+  <rect width="320" height="220" fill="#211817"/>
+  <circle cx="160" cy="110" r="58" fill="none" stroke="#d1665a" stroke-width="18"/>
+  <circle cx="160" cy="110" r="20" fill="#d9b84f"/>
+  <circle cx="94" cy="88" r="18" fill="#d1665a" opacity=".8"/>
+  <circle cx="218" cy="142" r="22" fill="#d1665a" opacity=".75"/>
+  <path d="M160 46v128M96 110h128" stroke="#f0c96a" stroke-width="8" stroke-linecap="round" opacity=".75"/>
+</svg>

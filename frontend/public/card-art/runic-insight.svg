@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Runic Insight">
+  <rect width="320" height="220" fill="#17201e"/>
+  <path d="M76 170h168V56H76z" fill="#23312d" stroke="#d9b84f" stroke-width="8"/>
+  <path d="M112 92h96M112 122h72M112 152h48" stroke="#58b7a1" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="236" cy="70" r="24" fill="#7aa7d9" opacity=".85"/>
+</svg>

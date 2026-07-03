@@ -5,6 +5,7 @@ mod identity;
 mod match_access;
 mod match_session;
 mod match_store;
+mod progression;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -36,6 +37,10 @@ use match_session::{
 use match_store::{
     CreatedSharedMatch, MatchStoreError, SharedMatchStatus, SqliteMatchStore, StoredMatch,
     StoredMatchSummary, StoredReplayFrame, StoredSharedMatch,
+};
+use progression::{
+    ProgressionError, ProgressionModule, ProgressionResponse, ProgressionSummary,
+    SaveRuneLoadoutRequest,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -92,6 +97,7 @@ struct AuthUserResponse {
     avatar: GeneratedAvatarResponse,
     preferred_wizard_type: WizardType,
     board_visual_mode: BoardVisualMode,
+    progression_summary: ProgressionSummary,
 }
 
 #[derive(Serialize)]
@@ -141,6 +147,8 @@ struct CreateMatchRequest {
     player_deck_id: Option<i64>,
     #[serde(default)]
     ai_opponent: Option<AiOpponentRequest>,
+    #[serde(default)]
+    rune_ids: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -165,6 +173,8 @@ struct JoinSharedMatchRequest {
     wizard_type: WizardType,
     #[serde(default)]
     deck_recipe_id: Option<i64>,
+    #[serde(default)]
+    rune_ids: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -320,6 +330,19 @@ fn create_app(store: SqliteMatchStore) -> Router {
         .route("/api/auth/me", get(current_account))
         .route("/api/profile", get(load_profile).patch(update_profile))
         .route("/api/profile/matches", get(list_profile_matches))
+        .route("/api/progression", get(load_progression))
+        .route(
+            "/api/progression/wizards/{wizard_type}/skills/{node_id}",
+            post(unlock_progression_skill),
+        )
+        .route(
+            "/api/progression/wizards/{wizard_type}/respec",
+            post(respec_progression_wizard),
+        )
+        .route(
+            "/api/progression/wizards/{wizard_type}/loadout",
+            axum::routing::patch(save_progression_loadout),
+        )
         .route("/api/matches", get(list_matches).post(create_match))
         .route("/api/matches/{match_id}", get(load_match))
         .route("/api/matches/{match_id}/replay", get(load_replay))
@@ -693,6 +716,85 @@ async fn list_profile_matches(
     .into_response()
 }
 
+async fn load_progression(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let profile = match required_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
+        Err(response) => return response,
+    };
+    let response = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let mut progression = ProgressionModule::new(store.connection_mut());
+        match progression.load_for_user(profile.id) {
+            Ok(response) => response,
+            Err(error) => return progression_error_response(error),
+        }
+    };
+    Json(response).into_response()
+}
+
+async fn unlock_progression_skill(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((wizard_type, node_id)): Path<(WizardType, String)>,
+) -> impl IntoResponse {
+    mutate_progression(&state, &headers, |progression, user_id| {
+        progression.unlock_skill(user_id, wizard_type, &node_id)
+    })
+}
+
+async fn respec_progression_wizard(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(wizard_type): Path<WizardType>,
+) -> impl IntoResponse {
+    mutate_progression(&state, &headers, |progression, user_id| {
+        progression.respec_wizard(user_id, wizard_type)
+    })
+}
+
+async fn save_progression_loadout(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(wizard_type): Path<WizardType>,
+    Json(request): Json<SaveRuneLoadoutRequest>,
+) -> impl IntoResponse {
+    mutate_progression(&state, &headers, |progression, user_id| {
+        progression.save_rune_loadout(user_id, wizard_type, request)
+    })
+}
+
+fn mutate_progression(
+    state: &SharedState,
+    headers: &HeaderMap,
+    mutate: impl FnOnce(
+        &mut ProgressionModule<'_>,
+        i64,
+    ) -> Result<ProgressionResponse, ProgressionError>,
+) -> axum::response::Response {
+    let profile = match required_profile_from_headers(state, headers) {
+        Ok(profile) => profile,
+        Err(response) => return response,
+    };
+    let response = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let mut progression = ProgressionModule::new(store.connection_mut());
+        match mutate(&mut progression, profile.id) {
+            Ok(response) => response,
+            Err(error) => return progression_error_response(error),
+        }
+    };
+    Json(response).into_response()
+}
+
 async fn logout_account(State(state): State<SharedState>, headers: HeaderMap) -> impl IntoResponse {
     let Some(token) = bearer_token_from_headers(&headers) else {
         return Json(AuthMessageResponse {
@@ -754,6 +856,7 @@ async fn create_match(
             wizard_type: None,
             player_deck_id: None,
             ai_opponent: None,
+            rune_ids: None,
         }
     } else {
         match serde_json::from_slice::<CreateMatchRequest>(&body) {
@@ -800,11 +903,24 @@ async fn create_match(
                 Ok(deck) => deck,
                 Err(error) => return deck_error_response(error),
             };
+        let player_progression = {
+            let mut progression = ProgressionModule::new(store.connection_mut());
+            match progression.match_loadout(
+                profile.as_ref().map(|profile| profile.id),
+                player_wizard_type,
+                request.rune_ids,
+            ) {
+                Ok(loadout) => loadout,
+                Err(error) => return progression_error_response(error),
+            }
+        };
         let result = store.create_match_for_user_with_decks(
             player_wizard_type,
             opponent_wizard_type,
             player_deck,
             opponent_deck,
+            player_progression,
+            Default::default(),
             profile.as_ref().map(|profile| profile.id),
         );
         match result {
@@ -884,11 +1000,23 @@ async fn join_shared_match(
             Ok(deck_recipe) => deck_recipe,
             Err(response) => return response,
         };
+        let progression_loadout = {
+            let mut progression = ProgressionModule::new(store.connection_mut());
+            match progression.match_loadout(
+                profile.as_ref().map(|profile| profile.id),
+                request.wizard_type,
+                request.rune_ids,
+            ) {
+                Ok(loadout) => loadout,
+                Err(error) => return progression_error_response(error),
+            }
+        };
         match store.join_shared_match(
             &match_id,
             &seat_token,
             request.wizard_type,
             deck_recipe,
+            progression_loadout,
             profile.as_ref().map(|profile| profile.id),
         ) {
             Ok(Some(shared)) => shared,
@@ -1405,6 +1533,29 @@ fn deck_error_response(error: DeckLibraryError) -> axum::response::Response {
         .into_response()
 }
 
+fn progression_error_response(error: ProgressionError) -> axum::response::Response {
+    let status = match error {
+        ProgressionError::Sqlite(_) | ProgressionError::Snapshot(_) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+        ProgressionError::UnknownRune(_)
+        | ProgressionError::LockedRune(_)
+        | ProgressionError::DuplicateRune(_)
+        | ProgressionError::TooManyRunes { .. }
+        | ProgressionError::UnknownSkill(_)
+        | ProgressionError::SkillAlreadyUnlocked(_)
+        | ProgressionError::SkillPrerequisiteMissing(_)
+        | ProgressionError::NotEnoughSkillPoints => StatusCode::BAD_REQUEST,
+    };
+    (
+        status,
+        Json(ApiError {
+            message: error.to_string(),
+        }),
+    )
+        .into_response()
+}
+
 fn identity_error_response(error: IdentityError) -> axum::response::Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -1615,6 +1766,7 @@ impl From<AccountProfile> for AuthUserResponse {
             },
             preferred_wizard_type: profile.preferred_wizard_type,
             board_visual_mode: profile.board_visual_mode,
+            progression_summary: progression::summary_for_xp(profile.total_xp),
         }
     }
 }
@@ -3150,13 +3302,14 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         let cards = body["cards"].as_array().expect("cards should be an array");
-        assert_eq!(cards.len(), 24);
+        assert_eq!(cards.len(), 34);
         assert_eq!(cards[0]["id"], "ember-squire");
-        assert_eq!(cards[23]["id"], "comet-spear");
+        assert_eq!(cards[33]["id"], "comet-spear");
         assert_eq!(cards[0]["copyCount"], 5);
         assert_eq!(cards[4]["copyCount"], 1);
         assert_eq!(cards[19]["copyCount"], 1);
-        assert_eq!(cards[15]["kind"]["priority"], 4);
+        assert_eq!(cards[9]["kind"]["type"], "item");
+        assert_eq!(cards[17]["kind"]["priority"], 4);
         assert_eq!(
             cards
                 .iter()

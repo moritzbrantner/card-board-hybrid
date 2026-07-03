@@ -14,6 +14,7 @@ import type {
   MatchReplayResponse,
   MatchResponse,
   MatchState,
+  ProgressionResponse,
   SoloAiOpponentSelection,
   SharedMatchResponse,
   SystemDeckListResponse,
@@ -89,6 +90,34 @@ export function loadProfileMatches() {
   return request<MatchArchiveResponse>("/api/profile/matches");
 }
 
+export function loadProgression() {
+  return request<ProgressionResponse>("/api/progression");
+}
+
+export function unlockWizardSkill(wizardType: WizardType, nodeId: string) {
+  return request<ProgressionResponse>(
+    `/api/progression/wizards/${encodeURIComponent(wizardType)}/skills/${encodeURIComponent(nodeId)}`,
+    { method: "POST" },
+  );
+}
+
+export function respecWizardSkills(wizardType: WizardType) {
+  return request<ProgressionResponse>(
+    `/api/progression/wizards/${encodeURIComponent(wizardType)}/respec`,
+    { method: "POST" },
+  );
+}
+
+export function saveWizardRuneLoadout(wizardType: WizardType, runeIds: string[]) {
+  return request<ProgressionResponse>(
+    `/api/progression/wizards/${encodeURIComponent(wizardType)}/loadout`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ runeIds }),
+    },
+  );
+}
+
 export function loadDecks() {
   return request<DeckListResponse>("/api/decks");
 }
@@ -156,6 +185,7 @@ export function createMatch(options?: {
   wizardType?: WizardType;
   playerDeckId?: number;
   aiOpponent?: SoloAiOpponentSelection;
+  runeIds?: string[];
 }) {
   return request<MatchResponse>("/api/matches", {
     method: "POST",
@@ -181,12 +211,13 @@ export function joinSharedMatch(
   seatToken: string,
   wizardType: WizardType,
   deckRecipeId?: number,
+  runeIds?: string[],
 ) {
   return request<SharedMatchResponse>(
     `/api/shared-matches/${encodeURIComponent(matchId)}/seats/${encodeURIComponent(seatToken)}/join`,
     {
       method: "POST",
-      body: JSON.stringify({ wizardType, deckRecipeId }),
+      body: JSON.stringify({ wizardType, deckRecipeId, runeIds }),
     },
   );
 }
@@ -224,6 +255,10 @@ export function movePiece(matchId: string, pieceId: string, to: HexCoord) {
 
 export function attack(matchId: string, attackerId: string, targetId: string) {
   return matchAction(matchId, { type: "attack", attackerId, targetId });
+}
+
+export function activateItem(matchId: string, unitId: string, itemId: string) {
+  return matchAction(matchId, { type: "activateItem", unitId, itemId });
 }
 
 export function endTurn(matchId: string) {

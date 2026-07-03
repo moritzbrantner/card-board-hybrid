@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Thunder Rail">
+  <rect width="320" height="220" fill="#141b1e"/>
+  <path d="M50 170h220" stroke="#334144" stroke-width="18" stroke-linecap="round"/>
+  <path d="M60 160 260 60" stroke="#d9b84f" stroke-width="14" stroke-linecap="round"/>
+  <path d="M104 138h44l-22 34 58-54h-42l24-38z" fill="#7aa7d9"/>
+  <circle cx="250" cy="62" r="22" fill="#58b7a1"/>
+</svg>

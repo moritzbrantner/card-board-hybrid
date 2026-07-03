@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Vanguard Golem">
+  <rect width="320" height="220" fill="#171c19"/>
+  <path d="M112 74h96l24 42-24 58h-96l-24-58z" fill="#303832" stroke="#d9b84f" stroke-width="8"/>
+  <path d="M130 108h60M126 140h68" stroke="#58b7a1" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="132" cy="74" r="18" fill="#7aa7d9"/>
+  <circle cx="198" cy="74" r="18" fill="#7aa7d9"/>
+</svg>
