@@ -2,6 +2,63 @@ import { expect, test } from "@playwright/test";
 
 const MATCH_ID = "e2e-3d-board";
 const BOARD_VISUAL_MODE_STORAGE_KEY = "rune-lanes-board-visual-mode";
+const MATCH_CHROME_STORAGE_KEY = "rune-lanes-match-chrome-minimized";
+
+test("renders Solo matches as a full-screen board with persistent collapsible chrome", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await useStoredBoardVisualMode(page, "3d");
+  const match = playableMatch({
+    playerWizard: { q: 0, r: 1 },
+    opponentWizard: { q: 1, r: 1 },
+    hand: [sparkJolt()],
+    prioritySide: "player",
+    actionStack: [
+      {
+        id: "pending-spell",
+        side: "opponent",
+        priority: 0,
+        action: {
+          type: "castSpell",
+          card: { id: "pending-card", templateId: "spark-jolt", name: "Spark Jolt" },
+          targetId: "player-wizard",
+        },
+      },
+    ],
+  });
+
+  await mockMatchApi(page, async () => matchResponse(match), () => match);
+
+  await page.goto(`/match/${MATCH_ID}`);
+  const board = page.getByRole("region", { name: "Hex board" });
+  const boardBox = await board.boundingBox();
+  expect(boardBox.width).toBeGreaterThanOrEqual(1276);
+  expect(boardBox.height).toBeGreaterThanOrEqual(716);
+  await expect(page.getByText("You", { exact: true })).toBeVisible();
+  await expect(page.getByText("Opponent", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Enemy hand, 0 cards")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Spark Jolt/ })).toBeVisible();
+
+  await expect(page.getByRole("button", { name: "Pass Priority" })).toBeVisible();
+  await page.getByRole("button", { name: "Minimize match chrome" }).click();
+  await expect(page.getByRole("button", { name: "Restore match chrome" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Pass Priority" })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate((key) => localStorage.getItem(key), MATCH_CHROME_STORAGE_KEY))
+    .toBe("true");
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Restore match chrome" })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.reload();
+  const mobileBoardBox = await board.boundingBox();
+  expect(mobileBoardBox.width).toBeGreaterThanOrEqual(386);
+  expect(mobileBoardBox.height).toBeGreaterThanOrEqual(696);
+  const shellBox = await page.locator(".board-3d-shell").boundingBox();
+  expect(shellBox.width).toBeLessThanOrEqual(390);
+  await expect(page.getByText("You", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Hand", { exact: true })).toBeVisible();
+});
 
 test("moves and attacks through the 3D board", async ({ page }) => {
   await useStoredBoardVisualMode(page, "3d");
@@ -374,13 +431,15 @@ function playableMatch({
   opponentWizard,
   hand = [],
   units = [],
+  prioritySide = null,
+  actionStack = [],
 }) {
   return {
     mode: "solo",
     round: 1,
     phase,
     activeSide,
-    prioritySide: null,
+    prioritySide,
     player: {
       side: "player",
       mana: 5,
@@ -430,7 +489,7 @@ function playableMatch({
       units,
       droppedItems: [],
     },
-    actionStack: [],
+    actionStack,
     log: [],
     winner: phase === "matchOver" ? "opponent" : null,
   };

@@ -156,6 +156,8 @@ import type {
   ReactNode,
 } from "react";
 
+const MATCH_CHROME_STORAGE_KEY = "rune-lanes-match-chrome-minimized";
+
 type LoadState =
   | { status: "loading" }
   | { status: "ready"; match: MatchState }
@@ -219,6 +221,14 @@ type BoardUnit = Unit & { pieceType: "unit"; hp?: never; maxHp?: never };
 type BoardPiece = BoardWizard | BoardUnit;
 
 const EMPTY_MATCH_VISUAL_CATALOG = createMatchVisualCatalog([]);
+
+function readStoredMatchChromeMinimized() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.localStorage.getItem(MATCH_CHROME_STORAGE_KEY) === "true";
+}
 
 type AccountProps = {
   currentUser: AuthUser | null;
@@ -2022,6 +2032,7 @@ function MatchPage({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [boardAnimation, setBoardAnimation] = useState<BoardAnimationCue | null>(null);
+  const [matchChromeMinimized, setMatchChromeMinimized] = useState(() => readStoredMatchChromeMinimized());
   const animationSequenceRef = useRef(0);
   const reducedMotion = visualPreferences.effectiveMotion === "reduced";
 
@@ -2051,6 +2062,10 @@ function MatchPage({
       .then((response) => setCatalogCards(response.cards))
       .catch(() => setCatalogCards([]));
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(MATCH_CHROME_STORAGE_KEY, matchChromeMinimized ? "true" : "false");
+  }, [matchChromeMinimized]);
 
   const visualCatalog = useMemo(
     () => createMatchVisualCatalog(catalogCards),
@@ -2495,9 +2510,9 @@ function MatchPage({
   }
 
   return (
-    <main className="app-shell">
-      <section className="table">
-        <header className="top-bar">
+    <main className={`app-shell match-app-shell ${matchChromeMinimized ? "match-chrome-minimized" : ""}`}>
+      <section className="table match-table">
+        <header className="top-bar match-chrome">
           <div>
             <p className="eyebrow">Rune Lanes</p>
             <h1>Round {match.round}</h1>
@@ -2515,32 +2530,52 @@ function MatchPage({
               <RotateCcw size={18} />
             </button>
             <button
-              className="primary-button"
+              className="icon-button"
               type="button"
-              onClick={() => void runAction(() => endTurn(matchId))}
-              disabled={
-                busy ||
-                match.phase === "matchOver" ||
-                match.activeSide !== viewerSide ||
-                hasPendingStack
-              }
+              onClick={() => setMatchChromeMinimized(true)}
+              title="Minimize match chrome"
+              aria-label="Minimize match chrome"
             >
-              <Play size={18} />
-              End Turn
+              <EyeOff size={18} />
             </button>
-            {hasPendingStack ? (
-              <button
-                className="primary-button"
-                type="button"
-                onClick={() => void runAction(() => passPriority(matchId))}
-                disabled={busy || match.phase === "matchOver" || !isPlayerPriority}
-              >
-                <Zap size={18} />
-                Pass Priority
-              </button>
-            ) : null}
           </div>
         </header>
+        <button
+          className="icon-button match-chrome-restore"
+          type="button"
+          onClick={() => setMatchChromeMinimized(false)}
+          title="Restore match chrome"
+          aria-label="Restore match chrome"
+        >
+          <Eye size={18} />
+        </button>
+        <div className="match-action-dock" aria-label="Match actions">
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => void runAction(() => endTurn(matchId))}
+            disabled={
+              busy ||
+              match.phase === "matchOver" ||
+              match.activeSide !== viewerSide ||
+              hasPendingStack
+            }
+          >
+            <Play size={18} />
+            End Turn
+          </button>
+          {hasPendingStack ? (
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void runAction(() => passPriority(matchId))}
+              disabled={busy || match.phase === "matchOver" || !isPlayerPriority}
+            >
+              <Zap size={18} />
+              Pass Priority
+            </button>
+          ) : null}
+        </div>
 
         <section className="battlefield">
           <div className="battlefield-hud battlefield-hud-player">

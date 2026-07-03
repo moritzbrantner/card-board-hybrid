@@ -117,6 +117,18 @@ button {
   margin: 0 auto;
 }
 
+.match-app-shell {
+  min-height: 100svh;
+  overflow-x: hidden;
+  padding: 0;
+}
+
+.match-table {
+  width: 100%;
+  min-height: 100svh;
+  margin: 0;
+}
+
 .catalog-layout {
   width: min(1380px, 100%);
   margin: 0 auto;
@@ -467,6 +479,60 @@ button {
   margin-bottom: 16px;
 }
 
+.match-chrome {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  z-index: 18;
+  margin: 0;
+  border: 1px solid rgba(247, 243, 234, 0.16);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(21, 24, 23, 0.86);
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(12px);
+}
+
+.match-chrome h1 {
+  font-size: clamp(1.75rem, 3vw, 2.6rem);
+}
+
+.match-chrome-minimized .match-chrome {
+  display: none;
+}
+
+.match-chrome-restore {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 18;
+  display: none;
+  background: rgba(21, 24, 23, 0.88);
+  backdrop-filter: blur(12px);
+}
+
+.match-chrome-minimized .match-chrome-restore {
+  display: inline-flex;
+}
+
+.match-action-dock {
+  position: fixed;
+  top: 116px;
+  right: 18px;
+  z-index: 17;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: min(460px, calc(100vw - 36px));
+  pointer-events: auto;
+}
+
+.match-chrome-minimized .match-action-dock {
+  top: 16px;
+}
+
 .catalog-header {
   align-items: end;
 }
@@ -593,6 +659,10 @@ h1 {
   position: relative;
 }
 
+.match-table .battlefield {
+  min-height: 100svh;
+}
+
 .battlefield-hud {
   position: absolute;
   z-index: 10;
@@ -696,6 +766,28 @@ h1 {
   box-shadow: 0 24px 90px rgba(0, 0, 0, 0.34);
   overscroll-behavior-x: contain;
   scrollbar-gutter: stable both-edges;
+}
+
+.match-table .board {
+  width: 100vw;
+  min-height: 100svh;
+  border: 0;
+  border-radius: 0;
+  padding: 124px 30px 144px;
+}
+
+.match-table .board-visual-mode-3d {
+  align-items: stretch;
+  justify-items: stretch;
+  overflow: hidden;
+}
+
+.match-table .board-3d-shell,
+.match-table .board-3d-fallback {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: calc(100svh - 268px);
 }
 
 .hand-overlay {
@@ -2810,6 +2902,10 @@ h1 {
     padding: 14px;
   }
 
+  .match-app-shell {
+    padding: 0;
+  }
+
   .top-bar,
   .score-row,
   .hand-and-log,
@@ -2824,6 +2920,31 @@ h1 {
 
   .account-actions > span {
     max-width: calc(100vw - 100px);
+  }
+
+  .match-chrome {
+    top: 10px;
+    right: 10px;
+    left: 10px;
+  }
+
+  .match-chrome .actions {
+    flex-wrap: wrap;
+  }
+
+  .match-action-dock {
+    top: 184px;
+    right: 14px;
+    max-width: calc(100vw - 28px);
+  }
+
+  .match-chrome-minimized .match-action-dock {
+    top: 14px;
+  }
+
+  .match-chrome-restore {
+    top: 14px;
+    left: 14px;
   }
 
   .deck-layout {
@@ -2946,6 +3067,19 @@ h1 {
 }
 
 @media (max-width: 520px) {
+  .match-action-dock {
+    top: 232px;
+  }
+
+  .match-chrome-minimized .match-action-dock {
+    top: 14px;
+  }
+
+  .match-action-dock .primary-button {
+    min-height: 38px;
+    padding: 0 12px;
+  }
+
   .board {
     padding-top: 214px;
   }
