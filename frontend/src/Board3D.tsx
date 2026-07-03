@@ -1,6 +1,6 @@
-import { Canvas, type ThreeEvent } from "@react-three/fiber";
-import { Component, type DragEvent, type ReactNode, useEffect, useMemo, useState } from "react";
-import { Box3, Object3D, Vector3 } from "three";
+import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
+import { Component, type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Box3, Group, Object3D, Vector3 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { axialToBoardPosition } from "./boardRenderer";
 import {
@@ -10,6 +10,7 @@ import {
 } from "./board3dModelManifest";
 import type { MatchVisualCatalog, UnitVisualIdentity, WizardVisualIdentity } from "./matchVisualIdentity";
 import type { HexCoord, HexTile, Side, WizardType } from "./types";
+import { BOARD_ANIMATION_DURATION_MS, type BoardAnimationCue, type PieceAnimation } from "./boardAnimations";
 
 export type Board3DWizard = {
   pieceType: "wizard";
@@ -64,6 +65,7 @@ type Board3DProps = {
   readOnly: boolean;
   disabled: boolean;
   tileInteractions: Board3DTileInteraction[];
+  animation?: BoardAnimationCue | null;
   onTileClick?: (tile: HexTile) => void;
   onTileDrop?: (tile: HexTile, cardId: string) => void;
   onTileContextMenu?: (tile: HexTile, event: { clientX: number; clientY: number }) => void;
@@ -108,6 +110,7 @@ export function Board3DRenderer({
   readOnly,
   disabled,
   tileInteractions,
+  animation,
   onTileClick,
   onTileDrop,
   onTileContextMenu,
@@ -122,6 +125,10 @@ export function Board3DRenderer({
   const tileByKey = useMemo(
     () => new Map(tiles.map((tile) => [coordKey(tile.coord), tile])),
     [tiles],
+  );
+  const animationByPieceId = useMemo(
+    () => new Map((animation?.pieces ?? []).map((pieceAnimation) => [pieceAnimation.pieceId, pieceAnimation])),
+    [animation],
   );
 
   function handleTileClick(coord: HexCoord) {
@@ -201,6 +208,7 @@ export function Board3DRenderer({
               <PieceMesh
                 key={piece.id}
                 piece={piece}
+                animation={animationByPieceId.get(piece.id)}
                 visualCatalog={visualCatalog}
                 manifest={manifest}
                 onAssetFailure={onAssetFailure}
@@ -295,6 +303,7 @@ function HexTileMesh({
 
 function PieceMesh({
   piece,
+  animation,
   visualCatalog,
   manifest,
   onAssetFailure,
@@ -305,6 +314,7 @@ function PieceMesh({
   onContextMenu,
 }: {
   piece: Board3DPiece;
+  animation?: PieceAnimation;
   visualCatalog: MatchVisualCatalog;
   manifest: BoardModelManifest;
   onAssetFailure?: (path: string) => void;
@@ -320,12 +330,12 @@ function PieceMesh({
   const visualIdentity =
     piece.pieceType === "wizard" ? visualCatalog.wizard(piece) : visualCatalog.unit(piece);
 
-  if (resolved.status === "available" && !assetFailed) {
-    return (
+  const innerPiece =
+    resolved.status === "available" && !assetFailed ? (
       <LoadableModelPiece
         path={resolved.entry.path}
         scale={resolved.entry.scale}
-        position={[x, y + 0.16, z]}
+        position={[0, 0, 0]}
         side={piece.side}
         coord={piece.position}
         readOnly={readOnly}
@@ -337,12 +347,9 @@ function PieceMesh({
           onAssetFailure?.(resolved.entry.path);
         }}
       />
-    );
-  }
-
-  return (
+    ) : (
       <FallbackPieceMarker
-        position={[x, y + 0.2, z]}
+        position={[0, 0.04, 0]}
         side={piece.side}
         pieceType={piece.pieceType}
         visualIdentity={visualIdentity}
@@ -354,6 +361,83 @@ function PieceMesh({
         onClick={onClick}
         onContextMenu={onContextMenu}
       />
+  );
+
+  return (
+    <AnimatedPieceGroup
+      position={[x, y + 0.16, z]}
+      piece={piece}
+      animation={animation}
+    >
+      {innerPiece}
+    </AnimatedPieceGroup>
+  );
+}
+
+function AnimatedPieceGroup({
+  position,
+  piece,
+  animation,
+  children,
+}: {
+  position: [number, number, number];
+  piece: Board3DPiece;
+  animation?: PieceAnimation;
+  children: ReactNode;
+}) {
+  const groupRef = useRef<Group>(null);
+  const startedAtRef = useRef(0);
+  const target = useMemo(() => new Vector3(...position), [position]);
+  const from = useMemo(() => {
+    if (animation?.kind !== "move" || !animation.from) {
+      return target.clone();
+    }
+
+    const [fromX, fromY, fromZ] = axialToBoardPosition(animation.from, 1);
+    return new Vector3(fromX, fromY + 0.16, fromZ);
+  }, [animation, target]);
+
+  useEffect(() => {
+    startedAtRef.current = performance.now();
+    groupRef.current?.position.copy(animation?.kind === "move" ? from : target);
+    groupRef.current?.scale.setScalar(animation?.kind === "summon" ? 0.35 : 1);
+  }, [animation, from, target]);
+
+  useFrame(() => {
+    const group = groupRef.current;
+    if (!group) {
+      return;
+    }
+
+    const elapsed = performance.now() - startedAtRef.current;
+    const progress = Math.min(elapsed / BOARD_ANIMATION_DURATION_MS, 1);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    group.position.copy(from.clone().lerp(target, eased));
+
+    if (animation?.kind === "summon") {
+      group.scale.setScalar(0.35 + eased * 0.65);
+    } else if (animation?.kind === "destroy") {
+      group.scale.setScalar(Math.max(0.12, 1 - eased * 0.85));
+      group.position.y = target.y + eased * 0.34;
+    } else if (animation?.kind === "attack") {
+      const lunge = Math.sin(progress * Math.PI) * (piece.side === "player" ? -0.22 : 0.22);
+      group.position.z = target.z + lunge;
+      group.scale.setScalar(1 + Math.sin(progress * Math.PI) * 0.08);
+    } else if (animation?.kind === "damage") {
+      group.position.x = target.x + Math.sin(progress * Math.PI * 6) * 0.035;
+      group.scale.setScalar(1 - Math.sin(progress * Math.PI) * 0.06);
+    } else if (animation?.kind === "heal" || animation?.kind === "buff") {
+      group.position.y = target.y + Math.sin(progress * Math.PI) * 0.16;
+      group.scale.setScalar(1 + Math.sin(progress * Math.PI) * 0.07);
+    } else {
+      group.scale.setScalar(1);
+    }
+  });
+
+  return (
+    <group ref={groupRef} userData={{ animation: animation?.kind ?? "idle" }}>
+      {children}
+    </group>
   );
 }
 
