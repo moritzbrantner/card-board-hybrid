@@ -94,6 +94,7 @@ import { clearAuthToken, getAuthToken, saveAuthToken } from "./session";
 import { SettingsPage, type SettingsState } from "./settings";
 import { WIZARD_OPTIONS } from "./wizards";
 import { liveAiPlaybackFrames } from "./livePlayback";
+import { dispatchHotkeyEvent, type HotkeyHandlers } from "./hotkeyRuntime";
 import {
   createMatchVisualCatalog,
   type CardVisualIdentity,
@@ -378,6 +379,17 @@ function useAccountPreferences(currentUser: AuthUser | null) {
   return { state, refresh, save };
 }
 
+function useHotkeyHandlers(hotkeys: AccountPreferences["hotkeys"], handlers: HotkeyHandlers) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      dispatchHotkeyEvent(event, hotkeys, handlers);
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [hotkeys, handlers]);
+}
+
 function useAppliedVisualPreferences(preferences: AccountPreferences): AppliedVisualPreferences {
   const prefersDarkTheme = usePrefersDarkTheme();
   const prefersReducedMotion = usePrefersReducedMotion();
@@ -473,6 +485,28 @@ export function App() {
   const currentUser = authState.status === "signedIn" ? authState.user : null;
   const preferences = useAccountPreferences(currentUser);
   const visualPreferences = useAppliedVisualPreferences(preferences.state.preferences);
+  const appHotkeyHandlers = useMemo<HotkeyHandlers>(
+    () => ({
+      openSettings: () => {
+        navigate("/settings");
+        return true;
+      },
+      openCatalog: () => {
+        navigate("/catalog/");
+        return true;
+      },
+      openDecks: () => {
+        navigate("/decks");
+        return true;
+      },
+      openMatchArchive: () => {
+        navigate("/matches");
+        return true;
+      },
+    }),
+    [],
+  );
+  useHotkeyHandlers(preferences.state.preferences.hotkeys, appHotkeyHandlers);
 
   if (authState.status === "loading") {
     return <ShellMessage title="Rune Lanes" message="Checking account" />;
@@ -1994,6 +2028,7 @@ function MatchPage({
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
+  const [focusedUnitPieceId, setFocusedUnitPieceId] = useState<string | null>(null);
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [playedCardId, setPlayedCardId] = useState<string | null>(null);
   const [unitModalPieceId, setUnitModalPieceId] = useState<string | null>(null);
@@ -2007,6 +2042,7 @@ function MatchPage({
   useEffect(() => {
     setLoadState({ status: "loading" });
     setSelection(null);
+    setFocusedUnitPieceId(null);
     setDraggedCardId(null);
     setPlayedCardId(null);
     setUnitContextMenu(null);
@@ -2078,12 +2114,22 @@ function MatchPage({
     return piece?.pieceType === "unit" ? piece : null;
   }, [loadState, unitContextMenu]);
 
+  const focusedUnit = useMemo(() => {
+    if (loadState.status !== "ready" || focusedUnitPieceId === null) {
+      return null;
+    }
+
+    const piece = pieceById(loadState.match, focusedUnitPieceId);
+    return piece?.pieceType === "unit" ? piece : null;
+  }, [loadState, focusedUnitPieceId]);
+
   async function runAction(action: () => Promise<MatchResponse>) {
     setBusy(true);
     setNotice(null);
 
     try {
       setSelection(null);
+      setFocusedUnitPieceId(null);
       setDraggedCardId(null);
       setPlayedCardId(null);
       setUnitModalPieceId(null);
@@ -2157,6 +2203,85 @@ function MatchPage({
     return () => window.clearTimeout(timeoutId);
   }, [readyMatch, busy, matchId, playerHasPriorityResponse, visualPreferences.liveAiDelayMs]);
 
+  const matchHotkeyHandlers = useMemo<HotkeyHandlers>(
+    () => ({
+      cancel: () => {
+        const hadContext =
+          selection !== null ||
+          draggedCardId !== null ||
+          playedCardId !== null ||
+          unitModalPieceId !== null ||
+          unitContextMenu !== null;
+        if (!hadContext) {
+          return false;
+        }
+
+        setSelection(null);
+        setDraggedCardId(null);
+        setPlayedCardId(null);
+        setUnitModalPieceId(null);
+        setUnitContextMenu(null);
+        setNotice(null);
+        return true;
+      },
+      endTurn: () => {
+        if (
+          !readyMatch ||
+          busy ||
+          readyMatch.phase === "matchOver" ||
+          readyMatch.activeSide !== viewerSide ||
+          readyMatch.actionStack.length > 0
+        ) {
+          return false;
+        }
+
+        void runAction(() => endTurn(matchId));
+        return true;
+      },
+      passPriority: () => {
+        if (
+          !readyMatch ||
+          busy ||
+          readyMatch.phase === "matchOver" ||
+          readyMatch.actionStack.length === 0 ||
+          readyMatch.prioritySide !== viewerSide
+        ) {
+          return false;
+        }
+
+        void runAction(() => passPriority(matchId));
+        return true;
+      },
+      openCardInfo: () => {
+        const unit =
+          contextMenuUnit ??
+          (selectedPiece?.pieceType === "unit" ? selectedPiece : null) ??
+          focusedUnit;
+        if (!unit) {
+          return false;
+        }
+
+        setUnitModalPieceId(unit.id);
+        setUnitContextMenu(null);
+        return true;
+      },
+    }),
+    [
+      busy,
+      contextMenuUnit,
+      draggedCardId,
+      focusedUnit,
+      matchId,
+      playedCardId,
+      readyMatch,
+      selectedPiece,
+      selection,
+      unitContextMenu,
+      unitModalPieceId,
+    ],
+  );
+  useHotkeyHandlers(visualPreferences.preferences.hotkeys, matchHotkeyHandlers);
+
   async function handleCreateSeparateMatch() {
     setBusy(true);
     setNotice(null);
@@ -2220,6 +2345,7 @@ function MatchPage({
 
     setUnitContextMenu(null);
     const piece = pieceAt(match, tile.coord);
+    setFocusedUnitPieceId(piece?.pieceType === "unit" ? piece.id : null);
 
     if (selectedCard) {
       const target = cardTargetForTile(match, viewerSide, selectedCard, tile);
@@ -2257,6 +2383,7 @@ function MatchPage({
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", card.id);
     setUnitContextMenu(null);
+    setFocusedUnitPieceId(null);
     setSelection({ type: "card", cardId: card.id });
     setDraggedCardId(card.id);
     setUnitModalPieceId(null);
@@ -2297,6 +2424,7 @@ function MatchPage({
       x: position.x,
       y: position.y,
     });
+    setFocusedUnitPieceId(unit.id);
   }
 
   async function handleBoardVisualModeChange(mode: BoardVisualMode) {
@@ -2394,6 +2522,7 @@ function MatchPage({
             onTileClick={handleTileClick}
             onTileDrop={handleCardDrop}
             onUnitContextMenu={handleUnitContextMenu}
+            onFocusedUnitChange={setFocusedUnitPieceId}
           />
           <div className="hand-overlay">
             <div className="hand" aria-label="Hand">
@@ -2409,6 +2538,7 @@ function MatchPage({
                   disabled={busy || !isPlayableCard(match, viewerSide, card)}
                   onClick={() => {
                     setUnitContextMenu(null);
+                    setFocusedUnitPieceId(null);
                     setSelection(
                       selection?.type === "card" && card.id === selection.cardId
                         ? null
@@ -2500,6 +2630,7 @@ function SharedMatchPage({
   const [loadState, setLoadState] = useState<SharedLoadState>({ status: "loading" });
   const [catalogCards, setCatalogCards] = useState<CatalogCard[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
+  const [focusedUnitPieceId, setFocusedUnitPieceId] = useState<string | null>(null);
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [playedCardId, setPlayedCardId] = useState<string | null>(null);
   const [unitModalPieceId, setUnitModalPieceId] = useState<string | null>(null);
@@ -2531,6 +2662,7 @@ function SharedMatchPage({
   useEffect(() => {
     setLoadState({ status: "loading" });
     setSelection(null);
+    setFocusedUnitPieceId(null);
     setDraggedCardId(null);
     setPlayedCardId(null);
     setNotice(null);
@@ -2639,6 +2771,7 @@ function SharedMatchPage({
         setBusy(false);
         if (message.type === "actionAccepted") {
           setSelection(null);
+          setFocusedUnitPieceId(null);
           setDraggedCardId(null);
           setPlayedCardId(null);
           setUnitModalPieceId(null);
@@ -2728,6 +2861,15 @@ function SharedMatchPage({
     return piece?.pieceType === "unit" ? piece : null;
   }, [match, unitContextMenu]);
 
+  const focusedUnit = useMemo(() => {
+    if (!match || focusedUnitPieceId === null) {
+      return null;
+    }
+
+    const piece = pieceById(match, focusedUnitPieceId);
+    return piece?.pieceType === "unit" ? piece : null;
+  }, [match, focusedUnitPieceId]);
+
   function sendSharedAction(action: MatchActionRequest) {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -2744,6 +2886,75 @@ function SharedMatchPage({
     };
     socket.send(JSON.stringify(message));
   }
+
+  const sharedHotkeyHandlers = useMemo<HotkeyHandlers>(
+    () => ({
+      cancel: () => {
+        const hadContext =
+          selection !== null ||
+          draggedCardId !== null ||
+          playedCardId !== null ||
+          unitModalPieceId !== null ||
+          unitContextMenu !== null;
+        if (!hadContext) {
+          return false;
+        }
+
+        setSelection(null);
+        setDraggedCardId(null);
+        setPlayedCardId(null);
+        setUnitModalPieceId(null);
+        setUnitContextMenu(null);
+        setNotice(null);
+        return true;
+      },
+      endTurn: () => {
+        if (!match || busy || match.phase === "matchOver" || !isActiveViewer || hasPendingStack) {
+          return false;
+        }
+
+        sendSharedAction({ type: "endTurn" });
+        return true;
+      },
+      passPriority: () => {
+        if (!match || busy || match.phase === "matchOver" || !hasPendingStack || !isPriorityViewer) {
+          return false;
+        }
+
+        sendSharedAction({ type: "passPriority" });
+        return true;
+      },
+      openCardInfo: () => {
+        const unit =
+          contextMenuUnit ??
+          (selectedPiece?.pieceType === "unit" ? selectedPiece : null) ??
+          focusedUnit;
+        if (!unit) {
+          return false;
+        }
+
+        setUnitModalPieceId(unit.id);
+        setUnitContextMenu(null);
+        return true;
+      },
+    }),
+    [
+      busy,
+      contextMenuUnit,
+      draggedCardId,
+      focusedUnit,
+      hasPendingStack,
+      isActiveViewer,
+      isPriorityViewer,
+      match,
+      playedCardId,
+      selectedPiece,
+      selection,
+      unitContextMenu,
+      unitModalPieceId,
+    ],
+  );
+  useHotkeyHandlers(visualPreferences.preferences.hotkeys, sharedHotkeyHandlers);
 
   function claimForfeit() {
     const socket = socketRef.current;
@@ -2795,6 +3006,7 @@ function SharedMatchPage({
 
     setUnitContextMenu(null);
     const piece = pieceAt(match, tile.coord);
+    setFocusedUnitPieceId(piece?.pieceType === "unit" ? piece.id : null);
 
     if (selectedCard) {
       const target = cardTargetForTile(match, viewerSide, selectedCard, tile);
@@ -2832,6 +3044,7 @@ function SharedMatchPage({
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", card.id);
     setUnitContextMenu(null);
+    setFocusedUnitPieceId(null);
     setSelection({ type: "card", cardId: card.id });
     setDraggedCardId(card.id);
     setUnitModalPieceId(null);
@@ -2872,6 +3085,7 @@ function SharedMatchPage({
       x: position.x,
       y: position.y,
     });
+    setFocusedUnitPieceId(unit.id);
   }
 
   async function handleBoardVisualModeChange(mode: BoardVisualMode) {
@@ -3117,6 +3331,7 @@ function SharedMatchPage({
             onTileClick={handleTileClick}
             onTileDrop={handleCardDrop}
             onUnitContextMenu={handleUnitContextMenu}
+            onFocusedUnitChange={setFocusedUnitPieceId}
           />
           <div className="hand-overlay">
             <div className="hand" aria-label="Hand">
@@ -3132,6 +3347,7 @@ function SharedMatchPage({
                   disabled={busy || !canAct || !isPlayableCard(match, viewerSide, card)}
                   onClick={() => {
                     setUnitContextMenu(null);
+                    setFocusedUnitPieceId(null);
                     setSelection(
                       selection?.type === "card" && card.id === selection.cardId
                         ? null
@@ -3690,6 +3906,7 @@ function Board({
   onTileClick,
   onTileDrop,
   onUnitContextMenu,
+  onFocusedUnitChange,
 }: {
   match: MatchState;
   animation?: BoardAnimationCue | null;
@@ -3703,6 +3920,7 @@ function Board({
   onTileClick?: (tile: HexTile) => void;
   onTileDrop?: (tile: HexTile, cardId: string) => void;
   onUnitContextMenu?: (unit: BoardUnit, position: { x: number; y: number }) => void;
+  onFocusedUnitChange?: (pieceId: string | null) => void;
 }) {
   const [webglFailed, setWebglFailed] = useState(
     () => boardVisualMode === "3d" && !canCreateWebGLContext(),
@@ -3861,6 +4079,7 @@ function Board({
                   type="button"
                   disabled={disabled && !readOnly}
                   tabIndex={readOnly ? -1 : undefined}
+                  onFocus={() => onFocusedUnitChange?.(piece?.pieceType === "unit" ? piece.id : null)}
                   onClick={() => onTileClick?.(tile)}
                   onDragOver={(event: ReactDragEvent<HTMLButtonElement>) => {
                     if (readOnly || disabled || !selectedCard || !isLegal) {
