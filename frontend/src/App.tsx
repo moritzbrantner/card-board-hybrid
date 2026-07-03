@@ -81,6 +81,7 @@ import {
   isBoardCursorDirectionCommand,
   moveBoardCursorCoord,
   type BoardCursorSelection,
+  type BoardCursorState,
 } from "./boardCursor";
 import {
   boardRendererFallbackMessage,
@@ -2724,6 +2725,10 @@ function SharedMatchPage({
   const [playedCardId, setPlayedCardId] = useState<string | null>(null);
   const [unitModalPieceId, setUnitModalPieceId] = useState<string | null>(null);
   const [unitContextMenu, setUnitContextMenu] = useState<UnitContextMenu>(null);
+  const [boardCursor, setBoardCursor] = useState<BoardCursorState>({
+    coord: null,
+    visible: false,
+  });
   const [selectedWizardType, setSelectedWizardType] = useState<WizardType>(() => {
     const stored = sessionStorage.getItem(`rune-lanes-wizard:${matchId}`);
     return isWizardType(stored) ? stored : (currentUser?.preferredWizardType ?? "runekeeper");
@@ -2756,6 +2761,7 @@ function SharedMatchPage({
     setPlayedCardId(null);
     setNotice(null);
     setBoardAnimation(null);
+    setBoardCursor({ coord: null, visible: false });
     latestSharedMatchRef.current = null;
     loadSharedMatch(matchId, seatToken)
       .then((shared) => {
@@ -2959,6 +2965,14 @@ function SharedMatchPage({
     return piece?.pieceType === "unit" ? piece : null;
   }, [match, focusedUnitPieceId]);
 
+  useEffect(() => {
+    if (!match || boardCursor.coord) {
+      return;
+    }
+
+    setBoardCursor({ coord: initialBoardCursorCoord(match, viewerSide), visible: false });
+  }, [boardCursor.coord, match, viewerSide]);
+
   function sendSharedAction(action: MatchActionRequest) {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -2981,6 +2995,7 @@ function SharedMatchPage({
       cancel: () => {
         const hadContext =
           selection !== null ||
+          boardCursor.visible ||
           draggedCardId !== null ||
           playedCardId !== null ||
           unitModalPieceId !== null ||
@@ -2990,12 +3005,56 @@ function SharedMatchPage({
         }
 
         setSelection(null);
+        setBoardCursor(hideBoardCursor);
         setDraggedCardId(null);
         setPlayedCardId(null);
         setUnitModalPieceId(null);
         setUnitContextMenu(null);
         setNotice(null);
         return true;
+      },
+      cursorNorthwest: () => moveSharedKeyboardCursor("cursorNorthwest"),
+      cursorNortheast: () => moveSharedKeyboardCursor("cursorNortheast"),
+      cursorEast: () => moveSharedKeyboardCursor("cursorEast"),
+      cursorWest: () => moveSharedKeyboardCursor("cursorWest"),
+      cursorSouthwest: () => moveSharedKeyboardCursor("cursorSouthwest"),
+      cursorSoutheast: () => moveSharedKeyboardCursor("cursorSoutheast"),
+      confirm: () => {
+        if (!match || busy || match.phase === "matchOver" || !canAct) {
+          return false;
+        }
+
+        const coord = boardCursor.coord ?? initialBoardCursorCoord(match, viewerSide);
+        const tile = tileAt(match, coord);
+        if (!tile) {
+          return false;
+        }
+
+        const piece = pieceAt(match, coord);
+        const intent = boardCursorConfirmIntent({
+          coord,
+          selection: selection as BoardCursorSelection,
+          focusedPiece: piece ? { id: piece.id, side: piece.side } : null,
+          viewerSide,
+        });
+
+        setBoardCursor({ coord, visible: true });
+
+        if (intent.type === "selectPiece") {
+          setSelection({ type: "piece", pieceId: intent.pieceId });
+          setFocusedUnitPieceId(piece?.pieceType === "unit" ? piece.id : null);
+          setUnitContextMenu(null);
+          setUnitModalPieceId(null);
+          setNotice(null);
+          return true;
+        }
+
+        if (intent.type === "targetHex") {
+          handleTileClick(tile);
+          return true;
+        }
+
+        return false;
       },
       endTurn: () => {
         if (!match || busy || match.phase === "matchOver" || !isActiveViewer || hasPendingStack) {
@@ -3029,6 +3088,8 @@ function SharedMatchPage({
     }),
     [
       busy,
+      boardCursor,
+      canAct,
       contextMenuUnit,
       draggedCardId,
       focusedUnit,
@@ -3044,6 +3105,27 @@ function SharedMatchPage({
     ],
   );
   useHotkeyHandlers(visualPreferences.preferences.hotkeys, sharedHotkeyHandlers);
+
+  function moveSharedKeyboardCursor(commandId: Parameters<typeof moveBoardCursorCoord>[1]) {
+    if (
+      !isBoardCursorDirectionCommand(commandId) ||
+      !match ||
+      busy ||
+      match.phase === "matchOver"
+    ) {
+      return false;
+    }
+
+    const radius = match.board.radius;
+    const currentCoord = boardCursor.coord ?? initialBoardCursorCoord(match, viewerSide);
+    const coord = moveBoardCursorCoord(currentCoord, commandId, radius);
+    const piece = pieceAt(match, coord);
+    setBoardCursor({ coord, visible: true });
+    setFocusedUnitPieceId(piece?.pieceType === "unit" ? piece.id : null);
+    setUnitContextMenu(null);
+    setNotice(null);
+    return true;
+  }
 
   function claimForfeit() {
     const socket = socketRef.current;
@@ -3416,6 +3498,7 @@ function SharedMatchPage({
             visualCatalog={visualCatalog}
             selectedCard={selectedCard}
             selectedPiece={selectedPiece}
+            focusedCoord={boardCursor.visible ? boardCursor.coord : null}
             disabled={busy || match.phase === "matchOver" || !canAct}
             onTileClick={handleTileClick}
             onTileDrop={handleCardDrop}
