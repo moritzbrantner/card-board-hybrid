@@ -1,4 +1,6 @@
 import type { BoardVisualMode, HexCoord } from "./types";
+import type { Camera } from "three";
+import { Vector3 } from "three";
 
 export type BoardRendererKind = "2d" | "3d";
 export type BoardRendererFallbackReason = "webgl-unavailable" | "render-failed" | "low-capability";
@@ -14,6 +16,26 @@ export type BoardInteractionState = {
   readOnly: boolean;
   disabled: boolean;
 };
+
+export type BoardProjectionViewport = {
+  width: number;
+  height: number;
+};
+
+export type ProjectedBoardPosition = {
+  x: number;
+  y: number;
+  visible: boolean;
+};
+
+export const BOARD_3D_CAMERA = {
+  position: [0, 7.6, 7.9] as const,
+  fov: 38,
+  near: 0.1,
+  far: 60,
+};
+
+export const BOARD_3D_GROUP_ROTATION_Y = Math.PI / 6;
 
 export function selectBoardRenderer({
   requestedMode,
@@ -72,4 +94,21 @@ export function axialToBoardPosition(coord: HexCoord, tileRadius = 1): [number, 
   const z = 1.5 * tileRadius * coord.r;
 
   return [x, 0, z];
+}
+
+export function projectBoardPositionToViewport(
+  coord: HexCoord,
+  camera: Camera,
+  viewport: BoardProjectionViewport,
+  tileRadius = 1,
+): ProjectedBoardPosition {
+  const worldPosition = new Vector3(...axialToBoardPosition(coord, tileRadius));
+  worldPosition.applyAxisAngle(new Vector3(0, 1, 0), BOARD_3D_GROUP_ROTATION_Y);
+  worldPosition.project(camera);
+
+  return {
+    x: ((worldPosition.x + 1) / 2) * viewport.width,
+    y: ((1 - worldPosition.y) / 2) * viewport.height,
+    visible: worldPosition.z >= -1 && worldPosition.z <= 1,
+  };
 }
