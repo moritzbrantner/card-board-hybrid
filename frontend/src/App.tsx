@@ -62,6 +62,8 @@ import {
   effectiveBoardVisualMode,
   saveLocalBoardVisualMode,
 } from "./boardVisualMode";
+import { Board3DRenderer } from "./Board3D";
+import { canCreateWebGLContext, selectBoardRenderer } from "./boardRenderer";
 import { ProfilePage } from "./profile";
 import { clearAuthToken, getAuthToken, saveAuthToken } from "./session";
 import { WIZARD_OPTIONS } from "./wizards";
@@ -3267,14 +3269,73 @@ function Board({
   onTileDrop?: (tile: HexTile, cardId: string) => void;
   onUnitContextMenu?: (unit: BoardUnit, position: { x: number; y: number }) => void;
 }) {
+  const [webglFailed, setWebglFailed] = useState(
+    () => boardVisualMode === "3d" && readOnly && !canCreateWebGLContext(),
+  );
+  const [assetFailureCount, setAssetFailureCount] = useState(0);
+  const webglUnavailable = boardVisualMode === "3d" && readOnly && !canCreateWebGLContext();
+  const renderer = selectBoardRenderer({
+    requestedMode: boardVisualMode,
+    webglFailed: webglFailed || webglUnavailable,
+    readOnly,
+  });
   const columns = groupTilesByColumn(match.board.tiles);
+  const pieces = piecesInMatch(match);
+
+  useEffect(() => {
+    if (boardVisualMode === "2d") {
+      setWebglFailed(false);
+      setAssetFailureCount(0);
+      return;
+    }
+
+    if (readOnly && !canCreateWebGLContext()) {
+      setWebglFailed(true);
+    }
+  }, [boardVisualMode, readOnly]);
+
+  if (renderer === "3d") {
+    return (
+      <section
+        className={`board board-visual-mode-${boardVisualMode} ${readOnly ? "read-only" : ""}`}
+        data-board-visual-mode={boardVisualMode}
+        data-board-renderer="3d"
+        aria-label="Hex board"
+      >
+        {assetFailureCount > 0 ? (
+          <div className="board-renderer-notice" role="status">
+            Some 3D models are unavailable, so fallback markers are shown.
+          </div>
+        ) : null}
+        <Board3DRenderer
+          tiles={match.board.tiles}
+          pieces={pieces}
+          visualCatalog={visualCatalog}
+          readOnly={readOnly}
+          onFatalRenderError={() => setWebglFailed(true)}
+          onAssetFailure={() => setAssetFailureCount((count) => count + 1)}
+        />
+      </section>
+    );
+  }
 
   return (
     <section
       className={`board board-visual-mode-${boardVisualMode} ${readOnly ? "read-only" : ""}`}
       data-board-visual-mode={boardVisualMode}
+      data-board-renderer="2d"
       aria-label="Hex board"
     >
+      {boardVisualMode === "3d" && !readOnly ? (
+        <div className="board-renderer-notice" role="status">
+          3D board preview is read-only in this version, using 2D for play.
+        </div>
+      ) : null}
+      {webglFailed || webglUnavailable ? (
+        <div className="board-renderer-notice" role="status">
+          3D board unavailable, using 2D.
+        </div>
+      ) : null}
       <div className="hex-board">
         {columns.map((column) => (
           <div className="hex-column" key={column.q}>
