@@ -1,7 +1,9 @@
 use serde::Serialize;
 
 use crate::deck_library::starter_recipe_count;
-use crate::match_session::{Card, CardKind, Rarity, SpellEffect};
+use crate::match_session::{
+    Card, CardKind, ItemActiveEffect, ItemPassiveEffect, Rarity, SpellEffect,
+};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -155,6 +157,20 @@ pub fn starter_card_templates() -> Vec<Card> {
                 armor: 1,
             },
         ),
+        item_card(
+            "rune-charm",
+            "Rune Charm",
+            Rarity::Basic,
+            1,
+            "Range 2. Equip to an allied unit. Passive: +1 armor. Drops when the unit dies.",
+            2,
+            ItemPassiveEffect::StatBonus {
+                attack: 0,
+                armor: 1,
+                max_ap: 0,
+            },
+            None,
+        ),
         unit_card(
             "rune-runner",
             "Rune Runner",
@@ -256,6 +272,20 @@ pub fn starter_card_templates() -> Vec<Card> {
             0,
             2,
             SpellEffect::Draw { amount: 2 },
+        ),
+        item_card(
+            "ember-flask",
+            "Ember Flask",
+            Rarity::Advanced,
+            2,
+            "Range 2. Equip to an allied unit. Passive: +1 attack. Active: spend 1 unit AP to heal carrier 2.",
+            2,
+            ItemPassiveEffect::StatBonus {
+                attack: 1,
+                armor: 0,
+                max_ap: 0,
+            },
+            Some(ItemActiveEffect::HealCarrier { amount: 2 }),
         ),
         spell_card(
             "cinder-ring",
@@ -479,6 +509,35 @@ fn spell_card(
             range,
             priority,
             effect,
+        },
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "card templates read clearly at call sites"
+)]
+fn item_card(
+    template_id: &str,
+    name: &str,
+    rarity: Rarity,
+    cost: u8,
+    text: &str,
+    range: u8,
+    passive: ItemPassiveEffect,
+    active: Option<ItemActiveEffect>,
+) -> Card {
+    Card {
+        id: template_id.to_string(),
+        template_id: template_id.to_string(),
+        name: name.to_string(),
+        rarity,
+        cost,
+        text: text.to_string(),
+        kind: CardKind::Item {
+            range,
+            passive,
+            active,
         },
     }
 }

@@ -183,6 +183,7 @@ function makeUnit(overrides: { templateId?: string; name: string }): Unit {
     apRemaining: 1,
     maxAp: 2,
     hasAttacked: false,
+    items: [],
   };
 }
 

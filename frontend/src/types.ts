@@ -39,6 +39,18 @@ export type SpellEffect =
       amount: number;
     };
 
+export type ItemPassiveEffect = {
+  type: "statBonus";
+  attack: number;
+  armor: number;
+  maxAp: number;
+};
+
+export type ItemActiveEffect = {
+  type: "healCarrier";
+  amount: number;
+};
+
 export type CardKind =
   | {
       type: "unit";
@@ -51,6 +63,12 @@ export type CardKind =
       range: number;
       priority: number;
       effect: SpellEffect;
+    }
+  | {
+      type: "item";
+      range: number;
+      passive: ItemPassiveEffect;
+      active?: ItemActiveEffect;
     };
 
 export type Card = {
@@ -152,6 +170,7 @@ export type AuthUser = {
   avatar: GeneratedAvatar;
   preferredWizardType: WizardType;
   boardVisualMode: BoardVisualMode;
+  progressionSummary: ProgressionSummary;
 };
 
 export type AuthSessionResponse = {
@@ -167,6 +186,81 @@ export type GeneratedAvatar = {
 export type AccountProfile = AuthUser;
 
 export type BoardVisualMode = "2d" | "3d";
+
+export type ProgressionSummary = {
+  totalXp: number;
+  level: number;
+  currentLevelXp: number;
+  nextLevelXp: number;
+  xpIntoLevel: number;
+  xpToNextLevel: number;
+  runeSlots: number;
+};
+
+export type RuneDefinition = {
+  id: string;
+  name: string;
+  text: string;
+  unlockLevel: number;
+  unlocked: boolean;
+};
+
+export type WizardProgression = {
+  wizardType: WizardType;
+  xp: number;
+  level: number;
+  currentLevelXp: number;
+  nextLevelXp: number;
+  xpIntoLevel: number;
+  xpToNextLevel: number;
+  totalSkillPoints: number;
+  spentSkillPoints: number;
+  availableSkillPoints: number;
+  unlockedSkillIds: string[];
+};
+
+export type WizardSkillTree = {
+  wizardType: WizardType;
+  nodes: SkillNodeDefinition[];
+};
+
+export type SkillNodeDefinition = {
+  id: string;
+  name: string;
+  text: string;
+  root: boolean;
+  prerequisiteId: string | null;
+};
+
+export type SavedRuneLoadout = {
+  wizardType: WizardType;
+  runeIds: string[];
+};
+
+export type ProgressionResponse = {
+  account: ProgressionSummary;
+  runes: RuneDefinition[];
+  wizards: WizardProgression[];
+  skillTrees: WizardSkillTree[];
+  loadouts: SavedRuneLoadout[];
+};
+
+export type MatchProgressionEffects = {
+  maxHpDelta: number;
+  attackDelta: number;
+  maxApDelta: number;
+  manaDelta: number;
+  openingHandDelta: number;
+  summonedUnitArmorDelta: number;
+  firstSummonedUnitArmorDelta: number;
+  spellDamageDelta: number;
+};
+
+export type MatchProgressionLoadout = {
+  runeIds: string[];
+  skillIds: string[];
+  effects: MatchProgressionEffects;
+};
 
 export type Wizard = {
   id: string;
@@ -200,6 +294,22 @@ export type Unit = {
   apRemaining: number;
   maxAp: number;
   hasAttacked: boolean;
+  items: CarriedItem[];
+};
+
+export type CarriedItem = {
+  id: string;
+  templateId: string;
+  name: string;
+  passive: ItemPassiveEffect;
+  active?: ItemActiveEffect;
+  activeUsedThisTurn: boolean;
+};
+
+export type DroppedItem = {
+  id: string;
+  position: HexCoord;
+  item: CarriedItem;
 };
 
 export type HexTile = {
@@ -210,6 +320,7 @@ export type HexBoard = {
   radius: number;
   tiles: HexTile[];
   units: Unit[];
+  droppedItems: DroppedItem[];
 };
 
 export type MatchParticipantState = {
@@ -217,6 +328,7 @@ export type MatchParticipantState = {
   mana: number;
   maxMana: number;
   wizard: Wizard;
+  progression: MatchProgressionLoadout;
   hand?: Card[];
   handCount: number;
   deckCount: number;
@@ -269,6 +381,16 @@ export type StackAction =
       type: "attack";
       attackerId: string;
       targetId: string;
+    }
+  | {
+      type: "equipItem";
+      card: CardSummary;
+      unitId: string;
+    }
+  | {
+      type: "activateItem";
+      unitId: string;
+      itemId: string;
     };
 
 export type MatchResponse = {
@@ -344,6 +466,11 @@ export type MatchActionRequest =
       type: "attack";
       attackerId: string;
       targetId: string;
+    }
+  | {
+      type: "activateItem";
+      unitId: string;
+      itemId: string;
     }
   | {
       type: "endTurn";
@@ -481,6 +608,28 @@ export type ReplayEvent =
       type: "unitDestroyed";
       side: Side;
       unitId: string;
+      name: string;
+    }
+  | {
+      type: "itemEquipped";
+      side: Side;
+      unitId: string;
+      itemId: string;
+      name: string;
+    }
+  | {
+      type: "itemDropped";
+      side: Side;
+      unitId: string;
+      itemId: string;
+      name: string;
+      position: HexCoord;
+    }
+  | {
+      type: "itemActivated";
+      side: Side;
+      unitId: string;
+      itemId: string;
       name: string;
     }
   | {

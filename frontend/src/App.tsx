@@ -31,6 +31,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   attack,
+  activateItem,
   advanceAi,
   createMatch,
   createSharedMatch,
@@ -44,6 +45,7 @@ import {
   loadDecks,
   loadMatch,
   loadMatches,
+  loadProgression,
   loadReplay,
   loadSharedMatch,
   loadSystemDecks,
@@ -105,6 +107,8 @@ import type {
   MatchSummary,
   MatchParticipantState,
   MatchState,
+  ProgressionResponse,
+  RuneDefinition,
   Rarity,
   ReplayFrame,
   ReplayEvent,
@@ -163,6 +167,11 @@ type ReplayLoadState =
 type SharedLoadState =
   | { status: "loading" }
   | { status: "ready"; shared: SharedMatchResponse }
+  | { status: "error"; message: string };
+
+type ProgressionLoadState =
+  | { status: "loading" }
+  | { status: "ready"; progression: ProgressionResponse }
   | { status: "error"; message: string };
 
 type AuthState =
@@ -492,7 +501,7 @@ export function App() {
   );
 }
 
-type KindFilter = "all" | "unit" | "spell";
+type KindFilter = "all" | "unit" | "spell" | "item";
 type RarityFilter = "all" | Rarity;
 
 function CatalogPage({ onNavigate }: { onNavigate: (to: string) => void }) {
@@ -591,6 +600,7 @@ function CatalogPage({ onNavigate }: { onNavigate: (to: string) => void }) {
               ["all", "All"],
               ["unit", "Units"],
               ["spell", "Spells"],
+              ["item", "Items"],
             ]}
             onChange={(value) => setKindFilter(value as KindFilter)}
           />
@@ -708,11 +718,20 @@ function CatalogDetail({ card }: { card: CatalogCard | null }) {
               <DetailStat label="Armor" value={card.kind.armor} />
               <DetailStat label="Unit AP" value={card.kind.maxAp} />
             </>
-          ) : (
+          ) : card.kind.type === "spell" ? (
             <>
               <DetailStat label="Range" value={card.kind.range} />
               <DetailStat label="Priority" value={card.kind.priority} />
               <DetailStat label="Effect" value={spellEffectLabel(card)} />
+            </>
+          ) : (
+            <>
+              <DetailStat label="Range" value={card.kind.range} />
+              <DetailStat label="Passive" value={itemPassiveLabel(card.kind.passive)} />
+              <DetailStat
+                label="Active"
+                value={card.kind.active ? itemActiveLabel(card.kind.active) : "None"}
+              />
             </>
           )}
         </div>
@@ -1214,6 +1233,7 @@ function AccountActions({ currentUser, onSignOut, onNavigate }: AccountProps) {
           {avatarSymbolLabel(currentUser.avatar.symbol)}
         </span>
         {currentUser.displayName}
+        <span className="level-badge">Lv. {currentUser.progressionSummary.level}</span>
       </button>
       <button className="icon-button" type="button" onClick={onSignOut} title="Sign out">
         <LogOut size={18} />
@@ -1270,9 +1290,13 @@ function MatchPicker({
   const [systemDeckLoadState, setSystemDeckLoadState] = useState<SystemDeckLoadState>({
     status: "loading",
   });
+  const [progressionLoadState, setProgressionLoadState] = useState<ProgressionLoadState | null>(
+    currentUser ? { status: "loading" } : null,
+  );
   const [selectedPlayerDeckId, setSelectedPlayerDeckId] = useState<string>("starter");
   const [selectedAiDeck, setSelectedAiDeck] = useState<string>("system:balanced-starter");
   const [selectedAiWizardType, setSelectedAiWizardType] = useState<WizardType>("runekeeper");
+  const [selectedRuneIds, setSelectedRuneIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -1295,7 +1319,9 @@ function MatchPicker({
   useEffect(() => {
     if (!currentUser) {
       setDeckLoadState(null);
+      setProgressionLoadState(null);
       setSelectedPlayerDeckId("starter");
+      setSelectedRuneIds([]);
       return;
     }
     setDeckLoadState({ status: "loading" });
@@ -1313,7 +1339,25 @@ function MatchPicker({
           message: error instanceof Error ? error.message : "Could not load decks",
         }),
       );
+    setProgressionLoadState({ status: "loading" });
+    loadProgression()
+      .then((progression) => {
+        setProgressionLoadState({ status: "ready", progression });
+        setSelectedRuneIds(defaultRuneIdsForWizard(progression, selectedWizardType));
+      })
+      .catch((error: unknown) =>
+        setProgressionLoadState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not load progression",
+        }),
+      );
   }, [currentUser]);
+
+  useEffect(() => {
+    if (progressionLoadState?.status === "ready") {
+      setSelectedRuneIds(defaultRuneIdsForWizard(progressionLoadState.progression, selectedWizardType));
+    }
+  }, [selectedWizardType, progressionLoadState?.status]);
 
   async function handleCreateMatch() {
     setBusy(true);
@@ -1326,6 +1370,7 @@ function MatchPicker({
           ? { playerDeckId: Number(selectedPlayerDeckId) }
           : {}),
         ...(aiOpponent ? { aiOpponent } : {}),
+        ...(selectedRuneIds.length > 0 ? { runeIds: selectedRuneIds } : {}),
       });
       onNavigate(`/match/${created.matchId}`);
     } catch (error) {
@@ -1345,6 +1390,7 @@ function MatchPicker({
         `${window.location.origin}${created.inviteSeatUrl}`,
       );
       sessionStorage.setItem(`rune-lanes-wizard:${created.matchId}`, selectedWizardType);
+      sessionStorage.setItem(`rune-lanes-runes:${created.matchId}`, JSON.stringify(selectedRuneIds));
       onNavigate(created.playerSeatUrl);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not create multiplayer match");
@@ -1475,6 +1521,17 @@ function MatchPicker({
             <p className="notice">{systemDeckLoadState.message}</p>
           ) : null}
         </section>
+        {progressionLoadState?.status === "ready" ? (
+          <RuneSelector
+            progression={progressionLoadState.progression}
+            wizardType={selectedWizardType}
+            selectedRuneIds={selectedRuneIds}
+            onChange={setSelectedRuneIds}
+          />
+        ) : null}
+        {progressionLoadState?.status === "error" ? (
+          <p className="notice">{progressionLoadState.message}</p>
+        ) : null}
         <div className="picker-actions">
           <button
             className="primary-button"
@@ -1719,6 +1776,64 @@ function WizardPicker({
         ))}
       </div>
     </fieldset>
+  );
+}
+
+function RuneSelector({
+  progression,
+  wizardType,
+  selectedRuneIds,
+  onChange,
+}: {
+  progression: ProgressionResponse;
+  wizardType: WizardType;
+  selectedRuneIds: string[];
+  onChange: (runeIds: string[]) => void;
+}) {
+  const wizard = wizardOptionByType(wizardType);
+  function toggleRune(rune: RuneDefinition) {
+    if (!rune.unlocked) {
+      return;
+    }
+    if (selectedRuneIds.includes(rune.id)) {
+      onChange(selectedRuneIds.filter((runeId) => runeId !== rune.id));
+      return;
+    }
+    if (selectedRuneIds.length >= progression.account.runeSlots) {
+      return;
+    }
+    onChange([...selectedRuneIds, rune.id]);
+  }
+
+  return (
+    <section className="setup-rune-selector" aria-label="Rune loadout">
+      <div>
+        <span>Runes</span>
+        <strong>
+          {wizard?.name ?? "Wizard"} · {selectedRuneIds.length}/{progression.account.runeSlots}
+        </strong>
+      </div>
+      <div className="rune-grid compact">
+        {progression.runes.map((rune) => {
+          const selected = selectedRuneIds.includes(rune.id);
+          const disabled =
+            !rune.unlocked || (!selected && selectedRuneIds.length >= progression.account.runeSlots);
+          return (
+            <button
+              key={rune.id}
+              type="button"
+              className={selected ? "selected" : ""}
+              disabled={disabled}
+              onClick={() => toggleRune(rune)}
+              title={rune.unlocked ? rune.text : `Unlocks at account level ${rune.unlockLevel}`}
+            >
+              <strong>{rune.name}</strong>
+              <span>{rune.unlocked ? rune.text : `Level ${rune.unlockLevel}`}</span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -2071,6 +2186,11 @@ function MatchPage({
     }
   }
 
+  function handleActivateUnitItem(unit: BoardUnit, itemId: string) {
+    setUnitContextMenu(null);
+    void runAction(() => activateItem(matchId, unit.id, itemId));
+  }
+
   return (
     <main className="app-shell">
       <section className="table">
@@ -2226,6 +2346,12 @@ function MatchPage({
             setUnitModalPieceId(contextMenuUnit.id);
             setUnitContextMenu(null);
           }}
+          canActivateItems={
+            match.actionStack.length === 0 &&
+            match.activeSide === viewerSide &&
+            contextMenuUnit.side === viewerSide
+          }
+          onActivateItem={(itemId) => handleActivateUnitItem(contextMenuUnit, itemId)}
         />
       ) : null}
     </main>
@@ -2262,7 +2388,14 @@ function SharedMatchPage({
   const [deckLoadState, setDeckLoadState] = useState<DeckLoadState | null>(
     currentUser ? { status: "loading" } : null,
   );
+  const [progressionLoadState, setProgressionLoadState] = useState<ProgressionLoadState | null>(
+    currentUser ? { status: "loading" } : null,
+  );
   const [selectedDeckId, setSelectedDeckId] = useState<string>("starter");
+  const [selectedRuneIds, setSelectedRuneIds] = useState<string[]>(() => {
+    const stored = sessionStorage.getItem(`rune-lanes-runes:${matchId}`);
+    return stored ? parseRuneIds(stored) : [];
+  });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
@@ -2307,7 +2440,9 @@ function SharedMatchPage({
   useEffect(() => {
     if (!currentUser) {
       setDeckLoadState(null);
+      setProgressionLoadState(null);
       setSelectedDeckId("starter");
+      setSelectedRuneIds([]);
       return;
     }
     setDeckLoadState({ status: "loading" });
@@ -2325,7 +2460,30 @@ function SharedMatchPage({
           message: error instanceof Error ? error.message : "Could not load decks",
         }),
       );
+    setProgressionLoadState({ status: "loading" });
+    loadProgression()
+      .then((progression) => {
+        setProgressionLoadState({ status: "ready", progression });
+        setSelectedRuneIds((current) =>
+          current.length > 0 ? current : defaultRuneIdsForWizard(progression, selectedWizardType),
+        );
+      })
+      .catch((error: unknown) =>
+        setProgressionLoadState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not load progression",
+        }),
+      );
   }, [currentUser]);
+
+  useEffect(() => {
+    if (progressionLoadState?.status === "ready") {
+      const stored = sessionStorage.getItem(`rune-lanes-runes:${matchId}`);
+      setSelectedRuneIds(
+        stored ? parseRuneIds(stored) : defaultRuneIdsForWizard(progressionLoadState.progression, selectedWizardType),
+      );
+    }
+  }, [selectedWizardType, progressionLoadState?.status, matchId]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
@@ -2489,8 +2647,10 @@ function SharedMatchPage({
         seatToken,
         selectedWizardType,
         selectedDeckId === "starter" ? undefined : Number(selectedDeckId),
+        selectedRuneIds,
       );
       sessionStorage.setItem(`rune-lanes-wizard:${matchId}`, selectedWizardType);
+      sessionStorage.setItem(`rune-lanes-runes:${matchId}`, JSON.stringify(selectedRuneIds));
       setLoadState({ status: "ready", shared: joined });
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not join match");
@@ -2502,6 +2662,7 @@ function SharedMatchPage({
   function handleSelectLobbyWizard(wizardType: WizardType) {
     setSelectedWizardType(wizardType);
     sessionStorage.setItem(`rune-lanes-wizard:${matchId}`, wizardType);
+    sessionStorage.removeItem(`rune-lanes-runes:${matchId}`);
   }
 
   function handleTileClick(tile: HexTile) {
@@ -2599,6 +2760,11 @@ function SharedMatchPage({
     }
   }
 
+  function handleActivateUnitItem(unit: BoardUnit, itemId: string) {
+    setUnitContextMenu(null);
+    sendSharedAction({ type: "activateItem", unitId: unit.id, itemId });
+  }
+
   if (loadState.status === "loading") {
     return <ShellMessage title={`Match ${matchId}`} message="Loading multiplayer match" />;
   }
@@ -2689,6 +2855,17 @@ function SharedMatchPage({
             </label>
             {deckLoadState?.status === "error" ? <p className="notice">{deckLoadState.message}</p> : null}
           </section>
+          {progressionLoadState?.status === "ready" ? (
+            <RuneSelector
+              progression={progressionLoadState.progression}
+              wizardType={selectedWizardType}
+              selectedRuneIds={selectedRuneIds}
+              onChange={setSelectedRuneIds}
+            />
+          ) : null}
+          {progressionLoadState?.status === "error" ? (
+            <p className="notice">{progressionLoadState.message}</p>
+          ) : null}
           <div className="lobby-status-grid" aria-label="Lobby status">
             <LobbySeatStatus
               label="You"
@@ -2895,6 +3072,13 @@ function SharedMatchPage({
             setUnitModalPieceId(contextMenuUnit.id);
             setUnitContextMenu(null);
           }}
+          canActivateItems={
+            canAct &&
+            match.actionStack.length === 0 &&
+            match.activeSide === viewerSide &&
+            contextMenuUnit.side === viewerSide
+          }
+          onActivateItem={(itemId) => handleActivateUnitItem(contextMenuUnit, itemId)}
         />
       ) : null}
     </main>
@@ -3077,11 +3261,15 @@ function UnitContextMenuView({
   unit,
   onClose,
   onOpenCardInfo,
+  canActivateItems,
+  onActivateItem,
 }: {
   menu: Exclude<UnitContextMenu, null>;
   unit: BoardUnit;
   onClose: () => void;
   onOpenCardInfo: () => void;
+  canActivateItems: boolean;
+  onActivateItem: (itemId: string) => void;
 }) {
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -3114,6 +3302,20 @@ function UnitContextMenuView({
         <LibraryBig size={15} />
         Card info
       </button>
+      {unit.items
+        .filter((item) => item.active)
+        .map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="menuitem"
+            disabled={!canActivateItems || unit.apRemaining === 0 || item.activeUsedThisTurn}
+            onClick={() => onActivateItem(item.id)}
+          >
+            <Sparkles size={15} />
+            {item.name}
+          </button>
+        ))}
     </div>
   );
 }
@@ -3191,7 +3393,20 @@ function UnitCardModal({
             <DetailStat label="Armor" value={`${unit.armor}/${unit.maxArmor}`} />
             <DetailStat label="AP" value={`${unit.apRemaining}/${unit.maxAp}`} />
             <DetailStat label="Attacked" value={unit.hasAttacked ? "Yes" : "No"} />
+            <DetailStat label="Items" value={unit.items.length} />
           </div>
+
+          {unit.items.length > 0 ? (
+            <div className="unit-item-list" aria-label="Carried items">
+              {unit.items.map((item) => (
+                <p key={item.id}>
+                  <strong>{item.name}</strong>
+                  <span>{itemPassiveLabel(item.passive)}</span>
+                  {item.active ? <span>{itemActiveLabel(item.active)}</span> : null}
+                </p>
+              ))}
+            </div>
+          ) : null}
 
           <p className="detail-rules">
             {unitVisualIdentity.baseStats?.text ??
@@ -3506,13 +3721,14 @@ function Board({
             {column.tiles.map((tile) => {
               const piece = pieceAt(match, tile.coord);
               const displayPiece = displayPieceByCoord.get(coordKey(tile.coord)) ?? piece;
+              const droppedItems = droppedItemsAt(match, tile.coord);
               const interaction = tileInteractions.find(
                 (candidate) => coordKey(candidate.coord) === coordKey(tile.coord),
               );
               const isLegal = interaction?.isLegal ?? false;
               const isSelected = piece?.id === selectedPiece?.id;
               const occupantClass = displayPiece ? `occupied occupied-${displayPiece.side}` : "";
-              const title = tileTitle(tile, piece, viewerSide);
+              const title = tileTitle(tile, piece, viewerSide, droppedItems.length);
 
               return (
                 <button
@@ -3568,6 +3784,11 @@ function Board({
                         visualCatalog={visualCatalog}
                       />
                     </>
+                  ) : null}
+                  {droppedItems.length > 0 ? (
+                    <span className="dropped-item-count" aria-hidden="true">
+                      {droppedItems.length}
+                    </span>
                   ) : null}
                 </button>
               );
@@ -3642,6 +3863,12 @@ function PieceToken({
         <Footprints size={11} />
         {piece.apRemaining}
       </span>
+      {piece.pieceType === "unit" && piece.items.length > 0 ? (
+        <span>
+          <Sparkles size={11} />
+          {piece.items.length}
+        </span>
+      ) : null}
       </span>
       {feedbackLabel ? <span className="piece-feedback">{feedbackLabel}</span> : null}
     </span>
@@ -3790,14 +4017,25 @@ function pieceAt(match: MatchState, coord: HexCoord): BoardPiece | null {
   return unit ? { ...unit, pieceType: "unit" } : null;
 }
 
-function tileTitle(tile: HexTile, piece: BoardPiece | null, viewerSide: Side) {
+function tileTitle(
+  tile: HexTile,
+  piece: BoardPiece | null,
+  viewerSide: Side,
+  droppedItemCount = 0,
+) {
   const coordLabel = `q ${tile.coord.q}, r ${tile.coord.r}`;
+  const dropLabel =
+    droppedItemCount > 0 ? `, ${droppedItemCount} dropped item${droppedItemCount === 1 ? "" : "s"}` : "";
   if (!piece) {
-    return `${coordLabel}, empty hex`;
+    return `${coordLabel}, empty hex${dropLabel}`;
   }
 
   const owner = viewerSideLabel(piece.side, viewerSide);
-  return `${coordLabel}, occupied by ${owner} ${piece.pieceType}`;
+  return `${coordLabel}, occupied by ${owner} ${piece.pieceType}${dropLabel}`;
+}
+
+function droppedItemsAt(match: MatchState, coord: HexCoord) {
+  return match.board.droppedItems.filter((item) => sameCoord(item.position, coord));
 }
 
 function pieceStatLabel(piece: BoardPiece) {
@@ -3927,6 +4165,10 @@ function cardTargetForTile(
     return { type: "hex", coord: tile.coord };
   }
 
+  if (card.kind.type === "item") {
+    return piece && piece.pieceType === "unit" ? { type: "piece", pieceId: piece.id } : null;
+  }
+
   return piece ? { type: "piece", pieceId: piece.id } : null;
 }
 
@@ -3945,6 +4187,15 @@ function isLegalCardTarget(
 
   if (card.kind.type === "unit") {
     return !piece && distance(participant.wizard.position, coord) === 1;
+  }
+
+  if (card.kind.type === "item") {
+    return (
+      !!piece &&
+      piece.pieceType === "unit" &&
+      piece.side === viewerSide &&
+      distance(participant.wizard.position, piece.position) <= card.kind.range
+    );
   }
 
   if (!piece || distance(participant.wizard.position, piece.position) > card.kind.range) {
@@ -4053,6 +4304,10 @@ function kindSummary(card: Card | CatalogCard) {
     return `${card.kind.attack}/${card.kind.armor} ap ${card.kind.maxAp}`;
   }
 
+  if (card.kind.type === "item") {
+    return `${itemPassiveLabel(card.kind.passive)} rng ${card.kind.range}`;
+  }
+
   return `${spellEffectLabel(card)} rng ${card.kind.range} pri ${card.kind.priority}`;
 }
 
@@ -4077,6 +4332,27 @@ function spellEffectLabel(card: Card | CatalogCard) {
   }
 }
 
+function itemPassiveLabel(passive: { type: "statBonus"; attack: number; armor: number; maxAp: number }) {
+  const parts = [];
+  if (passive.attack !== 0) {
+    parts.push(`${passive.attack > 0 ? "+" : ""}${passive.attack} atk`);
+  }
+  if (passive.armor !== 0) {
+    parts.push(`${passive.armor > 0 ? "+" : ""}${passive.armor} armor`);
+  }
+  if (passive.maxAp !== 0) {
+    parts.push(`${passive.maxAp > 0 ? "+" : ""}${passive.maxAp} ap`);
+  }
+  return parts.length > 0 ? parts.join(", ") : "No passive";
+}
+
+function itemActiveLabel(active: { type: "healCarrier"; amount: number }) {
+  switch (active.type) {
+    case "healCarrier":
+      return `heal carrier ${active.amount}`;
+  }
+}
+
 function stackItemTitle(item: StackItem) {
   switch (item.action.type) {
     case "playUnit":
@@ -4087,6 +4363,10 @@ function stackItemTitle(item: StackItem) {
       return `${sideLabel(item.side)} moves ${item.action.pieceId}`;
     case "attack":
       return `${sideLabel(item.side)} attacks with ${item.action.attackerId}`;
+    case "equipItem":
+      return `${sideLabel(item.side)} equips ${item.action.card.name}`;
+    case "activateItem":
+      return `${sideLabel(item.side)} activates ${item.action.itemId}`;
   }
 }
 
@@ -4148,6 +4428,12 @@ function eventTitle(event: ReplayEvent) {
       return `${event.pieceId} damaged`;
     case "unitDestroyed":
       return `${event.name} destroyed`;
+    case "itemEquipped":
+      return `${event.name} equipped`;
+    case "itemDropped":
+      return `${event.name} dropped`;
+    case "itemActivated":
+      return `${event.name} activated`;
     case "matchEnded":
       return `${sideLabel(event.winner)} wins`;
   }
@@ -4185,6 +4471,12 @@ function eventDetail(event: ReplayEvent) {
       return `${event.pieceId} took ${event.amount} damage.`;
     case "unitDestroyed":
       return `${event.name} left the board.`;
+    case "itemEquipped":
+      return `${sideLabel(event.side)} equipped ${event.name} to ${event.unitId}.`;
+    case "itemDropped":
+      return `${event.name} dropped at q ${event.position.q}, r ${event.position.r}.`;
+    case "itemActivated":
+      return `${sideLabel(event.side)} activated ${event.name} on ${event.unitId}.`;
     case "matchEnded":
       return `${sideLabel(event.winner)} won the match.`;
   }
@@ -4196,6 +4488,21 @@ function wizardOptionByType(wizardType: WizardType) {
 
 function isWizardType(value: string | null): value is WizardType {
   return WIZARD_OPTIONS.some((wizard) => wizard.id === value);
+}
+
+function defaultRuneIdsForWizard(progression: ProgressionResponse, wizardType: WizardType) {
+  return progression.loadouts.find((loadout) => loadout.wizardType === wizardType)?.runeIds ?? [];
+}
+
+function parseRuneIds(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string")
+      ? parsed
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function wizardTypeLabel(wizardType: WizardType) {

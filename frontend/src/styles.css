@@ -171,6 +171,20 @@ button {
   font-size: 2rem;
 }
 
+.level-badge {
+  display: inline-grid;
+  place-items: center;
+  min-height: 24px;
+  border: 1px solid rgba(217, 184, 79, 0.45);
+  border-radius: 8px;
+  padding: 0 7px;
+  color: #ffe49a;
+  background: rgba(217, 184, 79, 0.12);
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .profile-avatar.emerald,
 .avatar-swatch.emerald {
   background: #2f8f70;
@@ -1126,6 +1140,24 @@ h1 {
   background: rgba(0, 0, 0, 0.42);
 }
 
+.dropped-item-count {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  z-index: 2;
+  display: inline-flex;
+  min-width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: rgba(41, 34, 24, 0.82);
+  color: #fff7d8;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .piece-token svg {
   width: 13px;
   height: 13px;
@@ -1585,6 +1617,163 @@ h1 {
   gap: 12px;
 }
 
+.profile-progression {
+  display: grid;
+  gap: 12px;
+}
+
+.progression-panel {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.progression-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.progression-summary.compact {
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+}
+
+.progression-summary > div {
+  display: grid;
+  gap: 4px;
+  min-height: 72px;
+  border: 1px solid rgba(247, 243, 234, 0.12);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.progression-summary span,
+.wizard-progression-heading span,
+.rune-loadout-editor h3 {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.progression-summary strong {
+  align-self: end;
+  color: #fffaf0;
+  font-size: 1.35rem;
+}
+
+.progress-bar {
+  display: grid;
+  gap: 6px;
+}
+
+.progress-bar > div {
+  height: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(247, 243, 234, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #58b7a1, #d9b84f);
+}
+
+.progress-bar small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.wizard-progression-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wizard-progression-tabs button,
+.rune-grid button,
+.skill-tree button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #fffaf0;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  text-align: left;
+}
+
+.wizard-progression-tabs button {
+  min-height: 38px;
+  padding: 0 12px;
+  font-weight: 900;
+}
+
+.wizard-progression-tabs button.active,
+.rune-grid button.selected,
+.skill-tree button.unlocked {
+  border-color: var(--gold);
+  background: rgba(217, 184, 79, 0.14);
+}
+
+.wizard-progression-detail,
+.rune-loadout-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.wizard-progression-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.wizard-progression-heading h3,
+.rune-loadout-editor h3 {
+  margin: 0;
+}
+
+.rune-grid,
+.skill-tree {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.rune-grid.compact {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.rune-grid button,
+.skill-tree button {
+  display: grid;
+  gap: 6px;
+  min-height: 96px;
+  padding: 10px;
+}
+
+.rune-grid button:disabled,
+.skill-tree button:disabled,
+.wizard-progression-tabs button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.rune-grid button span,
+.skill-tree button span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.3;
+  text-transform: none;
+}
+
 .section-heading {
   display: flex;
   align-items: center;
@@ -1869,6 +2058,33 @@ h1 {
   color: #fffaf0;
   padding: 0 12px;
   font: inherit;
+}
+
+.setup-rune-selector {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.setup-rune-selector > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.setup-rune-selector span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.setup-rune-selector strong {
+  color: #fffaf0;
 }
 
 .deck-list {
@@ -2173,6 +2389,11 @@ h1 {
   outline: 0;
 }
 
+.unit-context-menu button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -2238,6 +2459,28 @@ h1 {
   padding-right: 34px;
   font-size: 2.1rem;
   line-height: 1;
+}
+
+.unit-item-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.unit-item-list p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(31, 41, 55, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.unit-item-list span {
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .modal-close {

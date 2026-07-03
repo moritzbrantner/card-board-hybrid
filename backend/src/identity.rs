@@ -18,6 +18,7 @@ pub struct AccountProfile {
     pub avatar: GeneratedAvatar,
     pub preferred_wizard_type: WizardType,
     pub board_visual_mode: BoardVisualMode,
+    pub total_xp: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -44,7 +45,7 @@ pub struct IdentityModule<'a> {
     connection: &'a mut Connection,
 }
 
-type LoginProfileRow = (i64, String, String, String, String, String, String, String);
+type LoginProfileRow = (i64, String, String, String, String, String, String, String, i64);
 
 #[derive(Debug)]
 pub enum IdentityError {
@@ -136,7 +137,7 @@ impl<'a> IdentityModule<'a> {
             .connection
             .query_row(
                 "
-                SELECT id, email, password_hash, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode
+                SELECT id, email, password_hash, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode, total_xp
                 FROM users
                 WHERE email_normalized = ?1
                 ",
@@ -151,6 +152,7 @@ impl<'a> IdentityModule<'a> {
                         row.get(5)?,
                         row.get(6)?,
                         row.get(7)?,
+                        row.get(8)?,
                     ))
                 },
             )
@@ -165,6 +167,7 @@ impl<'a> IdentityModule<'a> {
             avatar_color,
             preferred_wizard_type,
             board_visual_mode,
+            total_xp,
         )) = row
         else {
             return Ok(None);
@@ -184,6 +187,7 @@ impl<'a> IdentityModule<'a> {
             },
             preferred_wizard_type: wizard_type_from_db(&preferred_wizard_type),
             board_visual_mode: board_visual_mode_from_db(&board_visual_mode),
+            total_xp,
         })
         .map(Some)
     }
@@ -195,7 +199,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT users.id, users.email, users.display_name, users.avatar_symbol, users.avatar_color, users.preferred_wizard_type, users.board_visual_mode
+                SELECT users.id, users.email, users.display_name, users.avatar_symbol, users.avatar_color, users.preferred_wizard_type, users.board_visual_mode, users.total_xp
                 FROM auth_sessions
                 JOIN users ON users.id = auth_sessions.user_id
                 WHERE auth_sessions.token = ?1
@@ -213,6 +217,7 @@ impl<'a> IdentityModule<'a> {
                         },
                         preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(5)?),
                         board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(6)?),
+                        total_xp: row.get(7)?,
                     })
                 },
             )
@@ -286,7 +291,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT id, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode
+                SELECT id, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode, total_xp
                 FROM users
                 WHERE email_normalized = ?1
                 ",
@@ -302,6 +307,7 @@ impl<'a> IdentityModule<'a> {
                         },
                         preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(5)?),
                         board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(6)?),
+                        total_xp: row.get(7)?,
                     })
                 },
             )
@@ -313,7 +319,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT id, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode
+                SELECT id, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode, total_xp
                 FROM users
                 WHERE id = ?1
                 ",
@@ -329,6 +335,7 @@ impl<'a> IdentityModule<'a> {
                         },
                         preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(5)?),
                         board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(6)?),
+                        total_xp: row.get(7)?,
                     })
                 },
             )
@@ -350,6 +357,7 @@ pub fn migrate(connection: &Connection) -> Result<(), IdentityError> {
             avatar_color TEXT NOT NULL DEFAULT 'emerald',
             preferred_wizard_type TEXT NOT NULL DEFAULT 'runekeeper',
             board_visual_mode TEXT NOT NULL DEFAULT '3d',
+            total_xp INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL DEFAULT (unixepoch())
         );
         CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -392,6 +400,12 @@ pub fn migrate(connection: &Connection) -> Result<(), IdentityError> {
         "users",
         "board_visual_mode",
         "TEXT NOT NULL DEFAULT '3d'",
+    )?;
+    add_column_if_missing(
+        connection,
+        "users",
+        "total_xp",
+        "INTEGER NOT NULL DEFAULT 0",
     )?;
     connection.execute(
         "

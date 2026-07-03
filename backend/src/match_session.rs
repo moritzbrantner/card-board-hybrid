@@ -27,6 +27,7 @@ pub struct MatchState {
     pub winner: Option<Side>,
     next_stack_item_id: u32,
     next_unit_id: u32,
+    next_item_id: u32,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -126,6 +127,25 @@ pub enum ReplayEvent {
         unit_id: String,
         name: String,
     },
+    ItemEquipped {
+        side: Side,
+        unit_id: String,
+        item_id: String,
+        name: String,
+    },
+    ItemDropped {
+        side: Side,
+        unit_id: String,
+        item_id: String,
+        name: String,
+        position: HexCoord,
+    },
+    ItemActivated {
+        side: Side,
+        unit_id: String,
+        item_id: String,
+        name: String,
+    },
     MatchEnded {
         winner: Side,
     },
@@ -181,12 +201,13 @@ impl Serialize for PublicPlayerState<'_> {
     where
         S: serde::Serializer,
     {
-        let field_count = if self.expose_hand { 9 } else { 8 };
+        let field_count = if self.expose_hand { 10 } else { 9 };
         let mut state = serializer.serialize_struct("PlayerState", field_count)?;
         state.serialize_field("side", &self.player.side)?;
         state.serialize_field("mana", &self.player.mana)?;
         state.serialize_field("maxMana", &self.player.max_mana)?;
         state.serialize_field("wizard", &self.player.wizard)?;
+        state.serialize_field("progression", &self.player.progression)?;
         if self.expose_hand {
             state.serialize_field("hand", &self.player.hand)?;
         }
@@ -218,6 +239,8 @@ pub struct PlayerState {
     pub mana: u8,
     pub max_mana: u8,
     pub wizard: Wizard,
+    #[serde(default)]
+    pub progression: MatchProgressionLoadout,
     pub hand: Vec<Card>,
     pub deck_count: usize,
     pub discard_count: usize,
@@ -225,6 +248,40 @@ pub struct PlayerState {
     discard: Vec<Card>,
     rng_seed: u64,
     has_started_first_turn: bool,
+    #[serde(default)]
+    summoned_unit_count: u32,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchProgressionLoadout {
+    #[serde(default)]
+    pub rune_ids: Vec<String>,
+    #[serde(default)]
+    pub skill_ids: Vec<String>,
+    #[serde(default)]
+    pub effects: MatchProgressionEffects,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchProgressionEffects {
+    #[serde(default)]
+    pub max_hp_delta: i32,
+    #[serde(default)]
+    pub attack_delta: i32,
+    #[serde(default)]
+    pub max_ap_delta: i8,
+    #[serde(default)]
+    pub mana_delta: i8,
+    #[serde(default)]
+    pub opening_hand_delta: u8,
+    #[serde(default)]
+    pub summoned_unit_armor_delta: i32,
+    #[serde(default)]
+    pub first_summoned_unit_armor_delta: i32,
+    #[serde(default)]
+    pub spell_damage_delta: i32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -298,6 +355,8 @@ pub struct HexBoard {
     pub radius: i32,
     pub tiles: Vec<HexTile>,
     pub units: Vec<Unit>,
+    #[serde(default)]
+    pub dropped_items: Vec<DroppedItem>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -328,6 +387,29 @@ pub struct Unit {
     pub ap_remaining: u8,
     pub max_ap: u8,
     pub has_attacked: bool,
+    #[serde(default)]
+    pub items: Vec<CarriedItem>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CarriedItem {
+    pub id: String,
+    pub template_id: String,
+    pub name: String,
+    pub passive: ItemPassiveEffect,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<ItemActiveEffect>,
+    #[serde(default)]
+    pub active_used_this_turn: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DroppedItem {
+    pub id: String,
+    pub position: HexCoord,
+    pub item: CarriedItem,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -368,6 +450,12 @@ pub enum CardKind {
         priority: u8,
         effect: SpellEffect,
     },
+    Item {
+        range: u8,
+        passive: ItemPassiveEffect,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active: Option<ItemActiveEffect>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -379,6 +467,18 @@ pub enum SpellEffect {
     Draw { amount: u8 },
     AreaDamage { amount: i32, radius: u8 },
     LineDamage { amount: i32 },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ItemPassiveEffect {
+    StatBonus { attack: i32, armor: i32, max_ap: i8 },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ItemActiveEffect {
+    HealCarrier { amount: i32 },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -399,6 +499,10 @@ pub enum MatchActionRequest {
     Attack {
         attacker_id: String,
         target_id: String,
+    },
+    ActivateItem {
+        unit_id: String,
+        item_id: String,
     },
     EndTurn,
     PassPriority,
@@ -431,6 +535,8 @@ pub enum MatchError {
     NotYourPiece,
     NotAdjacent,
     AlreadyAttacked,
+    ItemNotFound,
+    ItemExhausted,
     StackPending,
     EmptyStack,
     PriorityTooLow,
@@ -470,6 +576,14 @@ pub enum StackAction {
         attacker_id: String,
         target_id: String,
     },
+    EquipItem {
+        card: CardSummary,
+        unit_id: String,
+    },
+    ActivateItem {
+        unit_id: String,
+        item_id: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -498,6 +612,8 @@ impl fmt::Display for MatchError {
             Self::NotYourPiece => "that piece is not yours",
             Self::NotAdjacent => "target is not adjacent",
             Self::AlreadyAttacked => "that piece has already attacked this turn",
+            Self::ItemNotFound => "item not found",
+            Self::ItemExhausted => "that item has already been activated this turn",
             Self::StackPending => "resolve the stack before taking that action",
             Self::EmptyStack => "there are no pending actions to resolve",
             Self::PriorityTooLow => "spell priority must be greater than the pending action",
@@ -525,11 +641,33 @@ impl MatchState {
         Self::new_with_seed_and_player_wizard_type(seed, player_wizard_type)
     }
 
+    #[allow(
+        dead_code,
+        reason = "kept as a progression-free constructor for tests and callers"
+    )]
     pub fn new_with_loadouts(
         player_wizard_type: WizardType,
         opponent_wizard_type: WizardType,
         player_deck: Vec<Card>,
         opponent_deck: Vec<Card>,
+    ) -> Self {
+        Self::new_with_progression_loadouts(
+            player_wizard_type,
+            opponent_wizard_type,
+            player_deck,
+            opponent_deck,
+            MatchProgressionLoadout::default(),
+            MatchProgressionLoadout::default(),
+        )
+    }
+
+    pub fn new_with_progression_loadouts(
+        player_wizard_type: WizardType,
+        opponent_wizard_type: WizardType,
+        player_deck: Vec<Card>,
+        opponent_deck: Vec<Card>,
+        player_progression: MatchProgressionLoadout,
+        opponent_progression: MatchProgressionLoadout,
     ) -> Self {
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -543,6 +681,8 @@ impl MatchState {
             MatchMode::Solo,
             player_deck,
             opponent_deck,
+            player_progression,
+            opponent_progression,
         )
     }
 
@@ -567,11 +707,33 @@ impl MatchState {
         )
     }
 
+    #[allow(
+        dead_code,
+        reason = "kept as a progression-free constructor for tests and callers"
+    )]
     pub fn new_shared_with_loadouts(
         player_wizard_type: WizardType,
         opponent_wizard_type: WizardType,
         player_deck: Vec<Card>,
         opponent_deck: Vec<Card>,
+    ) -> Self {
+        Self::new_shared_with_progression_loadouts(
+            player_wizard_type,
+            opponent_wizard_type,
+            player_deck,
+            opponent_deck,
+            MatchProgressionLoadout::default(),
+            MatchProgressionLoadout::default(),
+        )
+    }
+
+    pub fn new_shared_with_progression_loadouts(
+        player_wizard_type: WizardType,
+        opponent_wizard_type: WizardType,
+        player_deck: Vec<Card>,
+        opponent_deck: Vec<Card>,
+        player_progression: MatchProgressionLoadout,
+        opponent_progression: MatchProgressionLoadout,
     ) -> Self {
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -585,6 +747,8 @@ impl MatchState {
             MatchMode::Shared,
             player_deck,
             opponent_deck,
+            player_progression,
+            opponent_progression,
         )
     }
 
@@ -662,6 +826,8 @@ impl MatchState {
             mode,
             player_deck,
             opponent_deck,
+            MatchProgressionLoadout::default(),
+            MatchProgressionLoadout::default(),
         )
     }
 
@@ -672,6 +838,8 @@ impl MatchState {
         mode: MatchMode,
         player_deck: Vec<Card>,
         opponent_deck: Vec<Card>,
+        player_progression: MatchProgressionLoadout,
+        opponent_progression: MatchProgressionLoadout,
     ) -> Self {
         let mut game = Self {
             mode,
@@ -683,12 +851,14 @@ impl MatchState {
                 seed ^ 0xA11C_E551_1234_5678,
                 player_wizard_type,
                 player_deck,
+                player_progression,
             ),
             opponent: PlayerState::new(
                 Side::Opponent,
                 seed ^ 0x0B0E_1234_9876_5432,
                 opponent_wizard_type,
                 opponent_deck,
+                opponent_progression,
             ),
             board: HexBoard::new(BOARD_RADIUS),
             action_stack: Vec::new(),
@@ -697,10 +867,13 @@ impl MatchState {
             winner: None,
             next_stack_item_id: 1,
             next_unit_id: 1,
+            next_item_id: 1,
         };
 
-        for _ in 0..OPENING_HAND_SIZE {
+        for _ in 0..opening_hand_size(&game.player.progression) {
             game.player.draw();
+        }
+        for _ in 0..opening_hand_size(&game.opponent.progression) {
             game.opponent.draw();
         }
         let mut ignored_frames = Vec::new();
@@ -796,6 +969,10 @@ impl MatchState {
             } => {
                 self.require_turn_action_side(side)?;
                 self.attack_for_side(side, &attacker_id, &target_id, &mut frames, action_index)
+            }
+            MatchActionRequest::ActivateItem { unit_id, item_id } => {
+                self.require_turn_action_side(side)?;
+                self.activate_item_for_side(side, &unit_id, &item_id, &mut frames, action_index)
             }
             MatchActionRequest::EndTurn => {
                 self.require_turn_action_side(side)?;
@@ -901,7 +1078,10 @@ impl MatchState {
     }
 
     fn refresh_mana_from_control(&mut self, side: Side) {
-        let mana = self.mana_from_control(side);
+        let mana = mana_with_progression(
+            self.mana_from_control(side),
+            self.player_ref(side).progression.effects.mana_delta,
+        );
         let player = self.player_mut(side);
         player.max_mana = mana;
         player.mana = mana;
@@ -1010,6 +1190,54 @@ impl MatchState {
                         side,
                         card: CardSummary::from(&card),
                         target: ActionTarget::Hex { coord },
+                    },
+                );
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::ActionQueued { side, item },
+                );
+            }
+            CardKind::Item { range, .. } => {
+                let ActionTarget::Piece { piece_id } = target else {
+                    return Err(MatchError::InvalidTarget);
+                };
+                let target = self
+                    .board
+                    .units
+                    .iter()
+                    .find(|unit| unit.id == piece_id)
+                    .cloned()
+                    .ok_or(MatchError::PieceNotFound)?;
+                let caster_position = self.player_ref(side).wizard.position;
+                if target.side != side
+                    || caster_position.distance(target.position) > i32::from(*range)
+                {
+                    return Err(MatchError::InvalidTarget);
+                }
+
+                self.spend_card_resources(side, &card_id, &card)?;
+                self.log.insert(
+                    0,
+                    format!("{} put {} on the stack.", side.label(), card.name),
+                );
+                let item = self.push_stack_item(
+                    side,
+                    0,
+                    StackAction::EquipItem {
+                        card: CardSummary::from(&card),
+                        unit_id: target.id.clone(),
+                    },
+                );
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::CardPlayed {
+                        side,
+                        card: CardSummary::from(&card),
+                        target: ActionTarget::Piece {
+                            piece_id: target.id,
+                        },
                     },
                 );
                 self.record_replay_frame(
@@ -1198,7 +1426,7 @@ impl MatchState {
                 self.damage_pieces(
                     side,
                     vec![target_id.to_string()],
-                    *amount,
+                    damage_with_progression(*amount, &self.player_ref(side).progression),
                     frames,
                     action_index,
                 );
@@ -1231,7 +1459,13 @@ impl MatchState {
                 };
                 let targets =
                     self.enemy_piece_ids_in_area(side, target.position, i32::from(*radius));
-                self.damage_pieces(side, targets, *amount, frames, action_index);
+                self.damage_pieces(
+                    side,
+                    targets,
+                    damage_with_progression(*amount, &self.player_ref(side).progression),
+                    frames,
+                    action_index,
+                );
                 self.log.insert(
                     0,
                     format!("{} cast {} around {}.", side.label(), card_name, target_id),
@@ -1251,7 +1485,13 @@ impl MatchState {
                     direction,
                     i32::from(range),
                 );
-                self.damage_pieces(side, targets, *amount, frames, action_index);
+                self.damage_pieces(
+                    side,
+                    targets,
+                    damage_with_progression(*amount, &self.player_ref(side).progression),
+                    frames,
+                    action_index,
+                );
                 self.log.insert(
                     0,
                     format!("{} cast {} down a line.", side.label(), card_name),
@@ -1329,6 +1569,12 @@ impl MatchState {
             } => {
                 self.resolve_attack(item.side, &attacker_id, &target_id, frames, action_index);
             }
+            StackAction::EquipItem { card, unit_id } => {
+                self.resolve_item_card(item.side, card, &unit_id, frames, action_index);
+            }
+            StackAction::ActivateItem { unit_id, item_id } => {
+                self.resolve_item_activation(item.side, &unit_id, &item_id, frames, action_index);
+            }
         }
 
         self.priority_side = self.action_stack.last().map(|item| item.side.opponent());
@@ -1357,23 +1603,32 @@ impl MatchState {
             return;
         }
 
+        let mut armor = *armor;
+        let progression = &self.player_ref(side).progression;
+        armor += progression.effects.summoned_unit_armor_delta;
+        if self.player_ref(side).summoned_unit_count == 0 {
+            armor += progression.effects.first_summoned_unit_armor_delta;
+        }
+
         let unit = Unit {
             id: self.next_unit_id(side),
             side,
             name: card.name.clone(),
             template_id: Some(card.template_id.clone()),
             attack: *attack,
-            armor: *armor,
-            max_armor: *armor,
+            armor,
+            max_armor: armor,
             position: coord,
             ap_remaining: *max_ap / 2,
             max_ap: *max_ap,
             has_attacked: false,
+            items: Vec::new(),
         };
         let unit_id = unit.id.clone();
         let unit_name = unit.name.clone();
         let unit_position = unit.position;
         self.board.units.push(unit);
+        self.player_mut(side).summoned_unit_count += 1;
         self.log
             .insert(0, format!("{} summoned {}.", side.label(), card.name));
         self.record_replay_frame(
@@ -1418,6 +1673,119 @@ impl MatchState {
             &card.name,
             frames,
             action_index,
+        );
+    }
+
+    fn resolve_item_card(
+        &mut self,
+        side: Side,
+        card: CardSummary,
+        unit_id: &str,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        let CardKind::Item {
+            passive, active, ..
+        } = &card.kind
+        else {
+            return;
+        };
+
+        let item_id = self.next_item_id(side);
+        let Some(unit_index) = self
+            .board
+            .units
+            .iter()
+            .position(|unit| unit.id == unit_id && unit.side == side)
+        else {
+            self.log
+                .insert(0, format!("{} had no legal carrier.", card.name));
+            return;
+        };
+
+        let unit = &mut self.board.units[unit_index];
+        apply_item_passive(unit, passive);
+        unit.items.push(CarriedItem {
+            id: item_id.clone(),
+            template_id: card.template_id.clone(),
+            name: card.name.clone(),
+            passive: passive.clone(),
+            active: active.clone(),
+            active_used_this_turn: false,
+        });
+        self.log.insert(
+            0,
+            format!("{} equipped {} to {}.", side.label(), card.name, unit.name),
+        );
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::ItemEquipped {
+                side,
+                unit_id: unit_id.to_string(),
+                item_id,
+                name: card.name,
+            },
+        );
+    }
+
+    fn resolve_item_activation(
+        &mut self,
+        side: Side,
+        unit_id: &str,
+        item_id: &str,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        let Some((item_name, active)) = self
+            .board
+            .units
+            .iter()
+            .find(|unit| unit.id == unit_id && unit.side == side)
+            .and_then(|unit| {
+                unit.items
+                    .iter()
+                    .find(|item| item.id == item_id)
+                    .and_then(|item| {
+                        item.active
+                            .clone()
+                            .map(|active| (item.name.clone(), active))
+                    })
+            })
+        else {
+            self.log.insert(
+                0,
+                format!("Item activation by {} had no legal item.", unit_id),
+            );
+            return;
+        };
+
+        match active {
+            ItemActiveEffect::HealCarrier { amount } => {
+                self.heal_piece(unit_id, amount);
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::PieceHealed {
+                        side,
+                        piece_id: unit_id.to_string(),
+                        amount,
+                    },
+                );
+            }
+        }
+
+        self.log
+            .insert(0, format!("{} activated {}.", side.label(), item_name));
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::ItemActivated {
+                side,
+                unit_id: unit_id.to_string(),
+                item_id: item_id.to_string(),
+                name: item_name,
+            },
         );
     }
 
@@ -1574,6 +1942,67 @@ impl MatchState {
             self.resolve_all_stack(frames, action_index);
         }
         self.check_winner(frames, action_index);
+        self.truncate_log();
+        Ok(())
+    }
+
+    fn activate_item_for_side(
+        &mut self,
+        side: Side,
+        unit_id: &str,
+        item_id: &str,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) -> Result<(), MatchError> {
+        let unit = self
+            .board
+            .units
+            .iter_mut()
+            .find(|unit| unit.id == unit_id)
+            .ok_or(MatchError::PieceNotFound)?;
+        if unit.side != side {
+            return Err(MatchError::NotYourPiece);
+        }
+        if unit.ap_remaining == 0 {
+            return Err(MatchError::NoActionPoints);
+        }
+        let item = unit
+            .items
+            .iter_mut()
+            .find(|item| item.id == item_id)
+            .ok_or(MatchError::ItemNotFound)?;
+        if item.active.is_none() {
+            return Err(MatchError::InvalidTarget);
+        }
+        if item.active_used_this_turn {
+            return Err(MatchError::ItemExhausted);
+        }
+
+        unit.ap_remaining -= 1;
+        item.active_used_this_turn = true;
+        self.log.insert(
+            0,
+            format!("{} put {}'s item on the stack.", side.label(), unit.name),
+        );
+        let stack_item = self.push_stack_item(
+            side,
+            0,
+            StackAction::ActivateItem {
+                unit_id: unit_id.to_string(),
+                item_id: item_id.to_string(),
+            },
+        );
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::ActionQueued {
+                side,
+                item: stack_item,
+            },
+        );
+        if self.mode == MatchMode::Solo && side == Side::Player {
+            self.resolve_all_stack(frames, action_index);
+        }
         self.truncate_log();
         Ok(())
     }
@@ -1939,6 +2368,9 @@ impl MatchState {
         for unit in self.board.units.iter_mut().filter(|unit| unit.side == side) {
             unit.ap_remaining = unit.max_ap;
             unit.has_attacked = false;
+            for item in &mut unit.items {
+                item.active_used_this_turn = false;
+            }
         }
         self.record_replay_frame(
             frames,
@@ -2122,19 +2554,46 @@ impl MatchState {
             .units
             .iter()
             .filter(|unit| unit.armor <= 0)
-            .map(|unit| (unit.side, unit.id.clone(), unit.name.clone()))
+            .map(|unit| {
+                (
+                    unit.side,
+                    unit.id.clone(),
+                    unit.name.clone(),
+                    unit.position,
+                    unit.items.clone(),
+                )
+            })
             .collect();
         self.board.units.retain(|unit| unit.armor > 0);
-        for (side, unit_id, name) in destroyed {
+        for (side, unit_id, name, position, items) in destroyed {
             self.record_replay_frame(
                 frames,
                 action_index,
                 ReplayEvent::UnitDestroyed {
                     side,
-                    unit_id,
+                    unit_id: unit_id.clone(),
                     name,
                 },
             );
+            for item in items {
+                let dropped_id = format!("dropped-{}", item.id);
+                self.board.dropped_items.push(DroppedItem {
+                    id: dropped_id,
+                    position,
+                    item: item.clone(),
+                });
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::ItemDropped {
+                        side,
+                        unit_id: unit_id.clone(),
+                        item_id: item.id,
+                        name: item.name,
+                        position,
+                    },
+                );
+            }
         }
     }
 
@@ -2188,6 +2647,16 @@ impl MatchState {
         id
     }
 
+    fn next_item_id(&mut self, side: Side) -> String {
+        let prefix = match side {
+            Side::Player => "PI",
+            Side::Opponent => "OI",
+        };
+        let id = format!("{prefix}{}", self.next_item_id);
+        self.next_item_id += 1;
+        id
+    }
+
     fn truncate_log(&mut self) {
         self.log.truncate(12);
     }
@@ -2214,6 +2683,8 @@ struct MatchSnapshot {
     #[serde(default = "default_next_stack_item_id")]
     next_stack_item_id: u32,
     next_unit_id: u32,
+    #[serde(default = "default_next_item_id")]
+    next_item_id: u32,
 }
 
 impl From<&MatchState> for MatchSnapshot {
@@ -2232,6 +2703,7 @@ impl From<&MatchState> for MatchSnapshot {
             winner: match_state.winner,
             next_stack_item_id: match_state.next_stack_item_id,
             next_unit_id: match_state.next_unit_id,
+            next_item_id: match_state.next_item_id,
         }
     }
 }
@@ -2252,6 +2724,7 @@ impl From<MatchSnapshot> for MatchState {
             winner: snapshot.winner,
             next_stack_item_id: snapshot.next_stack_item_id,
             next_unit_id: snapshot.next_unit_id,
+            next_item_id: snapshot.next_item_id,
         }
     }
 }
@@ -2265,6 +2738,10 @@ fn default_active_side() -> Side {
 }
 
 fn default_next_stack_item_id() -> u32 {
+    1
+}
+
+fn default_next_item_id() -> u32 {
     1
 }
 
@@ -2284,6 +2761,7 @@ impl HexBoard {
             radius,
             tiles,
             units: Vec::new(),
+            dropped_items: Vec::new(),
         }
     }
 
@@ -2364,14 +2842,22 @@ impl HexCoord {
 }
 
 impl PlayerState {
-    fn new(side: Side, mut rng_seed: u64, wizard_type: WizardType, mut deck: Vec<Card>) -> Self {
+    fn new(
+        side: Side,
+        mut rng_seed: u64,
+        wizard_type: WizardType,
+        mut deck: Vec<Card>,
+        progression: MatchProgressionLoadout,
+    ) -> Self {
         shuffle(&mut deck, &mut rng_seed);
+        let mana = mana_with_progression(STARTING_MANA, progression.effects.mana_delta);
 
         Self {
             side,
-            mana: STARTING_MANA,
-            max_mana: STARTING_MANA,
-            wizard: Wizard::new(side, wizard_type),
+            mana,
+            max_mana: mana,
+            wizard: Wizard::new(side, wizard_type, &progression.effects),
+            progression,
             hand: Vec::new(),
             deck_count: deck.len(),
             discard_count: 0,
@@ -2379,6 +2865,7 @@ impl PlayerState {
             discard: Vec::new(),
             rng_seed,
             has_started_first_turn: false,
+            summoned_unit_count: 0,
         }
     }
 
@@ -2405,6 +2892,7 @@ impl PlayerState {
             "mana": self.mana,
             "maxMana": self.max_mana,
             "wizard": self.wizard,
+            "progression": self.progression,
             "handCount": self.hand.len(),
             "deckCount": self.deck_count,
             "discardCount": self.discard_count,
@@ -2451,7 +2939,7 @@ impl ReplayEvent {
 }
 
 impl Wizard {
-    fn new(side: Side, wizard_type: WizardType) -> Self {
+    fn new(side: Side, wizard_type: WizardType, effects: &MatchProgressionEffects) -> Self {
         let (id, position) = match side {
             Side::Player => (
                 "player-wizard",
@@ -2469,20 +2957,36 @@ impl Wizard {
             ),
         };
         let profile = wizard_type.profile();
+        let max_hp = (profile.max_hp + effects.max_hp_delta).max(1);
+        let attack = (profile.attack + effects.attack_delta).max(0);
+        let max_ap = (i16::from(profile.max_ap) + i16::from(effects.max_ap_delta)).max(1) as u8;
 
         Self {
             id: id.to_string(),
             side,
             wizard_type,
-            hp: profile.max_hp,
-            max_hp: profile.max_hp,
-            attack: profile.attack,
+            hp: max_hp,
+            max_hp,
+            attack,
             position,
-            ap_remaining: profile.max_ap,
-            max_ap: profile.max_ap,
+            ap_remaining: max_ap,
+            max_ap,
             has_attacked: false,
         }
     }
+}
+
+fn opening_hand_size(progression: &MatchProgressionLoadout) -> usize {
+    OPENING_HAND_SIZE + usize::from(progression.effects.opening_hand_delta)
+}
+
+fn mana_with_progression(base: u8, delta: i8) -> u8 {
+    let value = i16::from(base) + i16::from(delta);
+    value.clamp(0, i16::from(MAX_MANA) + i16::from(delta.max(0))) as u8
+}
+
+fn damage_with_progression(amount: i32, progression: &MatchProgressionLoadout) -> i32 {
+    (amount + progression.effects.spell_damage_delta).max(0)
 }
 
 impl From<&Wizard> for PieceView {
@@ -2532,6 +3036,29 @@ impl Side {
         match self {
             Self::Player => "p",
             Self::Opponent => "o",
+        }
+    }
+}
+
+fn apply_item_passive(unit: &mut Unit, passive: &ItemPassiveEffect) {
+    match passive {
+        ItemPassiveEffect::StatBonus {
+            attack,
+            armor,
+            max_ap,
+        } => {
+            unit.attack += *attack;
+            unit.armor += *armor;
+            unit.max_armor += *armor;
+            if *max_ap >= 0 {
+                let amount = *max_ap as u8;
+                unit.ap_remaining = unit.ap_remaining.saturating_add(amount);
+                unit.max_ap = unit.max_ap.saturating_add(amount);
+            } else {
+                let amount = max_ap.unsigned_abs();
+                unit.ap_remaining = unit.ap_remaining.saturating_sub(amount);
+                unit.max_ap = unit.max_ap.saturating_sub(amount);
+            }
         }
     }
 }
@@ -2741,6 +3268,7 @@ mod tests {
             ap_remaining: 2,
             max_ap: 2,
             has_attacked: false,
+            items: Vec::new(),
         });
         let card = starter_card_templates()
             .into_iter()
@@ -2851,7 +3379,7 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(starter_card_templates().len(), 32);
+        assert_eq!(starter_card_templates().len(), 34);
         assert_eq!(game.player.hand.len(), 4);
         assert_eq!(game.player.deck_count, 56);
     }
@@ -2927,6 +3455,7 @@ mod tests {
             ap_remaining: 2,
             max_ap: 2,
             has_attacked: false,
+            items: Vec::new(),
         });
         game.board.units.push(Unit {
             id: "opponent-unit".to_string(),
@@ -2940,6 +3469,7 @@ mod tests {
             ap_remaining: 2,
             max_ap: 2,
             has_attacked: false,
+            items: Vec::new(),
         });
 
         game.apply_action(MatchActionRequest::Attack {
@@ -2989,6 +3519,7 @@ mod tests {
             ap_remaining: 2,
             max_ap: 2,
             has_attacked: false,
+            items: Vec::new(),
         });
         game.board.units.push(Unit {
             id: "enemy".to_string(),
@@ -3002,6 +3533,7 @@ mod tests {
             ap_remaining: 3,
             max_ap: 3,
             has_attacked: false,
+            items: Vec::new(),
         });
 
         let heal = starter_card_templates()
@@ -3065,6 +3597,92 @@ mod tests {
     }
 
     #[test]
+    fn item_cards_equip_passives_activate_and_drop_when_carrier_dies() {
+        let mut game = MatchState::new_with_seed(7);
+        game.player.mana = 8;
+        game.player.wizard.ap_remaining = 3;
+        game.board.units.push(Unit {
+            id: "ally".to_string(),
+            side: Side::Player,
+            name: "Stoneguard".to_string(),
+            template_id: Some("stoneguard".to_string()),
+            attack: 1,
+            armor: 1,
+            max_armor: 4,
+            position: hex(0, 2),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+            items: Vec::new(),
+        });
+        let flask = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "ember-flask")
+            .expect("item exists");
+        let flask_id = put_card_in_hand(&mut game, flask);
+
+        game.apply_action(MatchActionRequest::PlayCard {
+            card_id: flask_id,
+            target: ActionTarget::Piece {
+                piece_id: "ally".to_string(),
+            },
+        })
+        .expect("item should equip to an allied unit");
+
+        let item_id = {
+            let ally = game
+                .board
+                .units
+                .iter()
+                .find(|unit| unit.id == "ally")
+                .expect("ally should survive");
+            assert_eq!(ally.attack, 2);
+            assert_eq!(ally.items.len(), 1);
+            ally.items[0].id.clone()
+        };
+
+        game.apply_action(MatchActionRequest::ActivateItem {
+            unit_id: "ally".to_string(),
+            item_id: item_id.clone(),
+        })
+        .expect("active item should be usable by its carrier");
+
+        let ally = game
+            .board
+            .units
+            .iter()
+            .find(|unit| unit.id == "ally")
+            .expect("ally should survive");
+        assert_eq!(ally.armor, 3);
+        assert_eq!(ally.ap_remaining, 1);
+        assert!(ally.items[0].active_used_this_turn);
+
+        let result = game.apply_action(MatchActionRequest::ActivateItem {
+            unit_id: "ally".to_string(),
+            item_id,
+        });
+        assert_eq!(result, Err(MatchError::ItemExhausted));
+
+        let mut frames = Vec::new();
+        game.damage_pieces(
+            Side::Opponent,
+            vec!["ally".to_string()],
+            10,
+            &mut frames,
+            None,
+        );
+
+        assert!(!game.board.units.iter().any(|unit| unit.id == "ally"));
+        assert_eq!(game.board.dropped_items.len(), 1);
+        assert_eq!(game.board.dropped_items[0].item.name, "Ember Flask");
+        assert!(
+            frames
+                .iter()
+                .any(|frame| matches!(frame.event, ReplayEvent::ItemDropped { .. }))
+        );
+    }
+
+    #[test]
     fn draw_spells_target_the_caster_and_draw_cards() {
         let mut game = MatchState::new_with_seed(7);
         game.player.mana = 8;
@@ -3107,6 +3725,7 @@ mod tests {
             ap_remaining: 2,
             max_ap: 2,
             has_attacked: false,
+            items: Vec::new(),
         });
         game.board.units.push(Unit {
             id: "enemy-neighbor".to_string(),
@@ -3120,6 +3739,7 @@ mod tests {
             ap_remaining: 2,
             max_ap: 2,
             has_attacked: false,
+            items: Vec::new(),
         });
         game.board.units.push(Unit {
             id: "ally-neighbor".to_string(),
@@ -3133,6 +3753,7 @@ mod tests {
             ap_remaining: 2,
             max_ap: 2,
             has_attacked: false,
+            items: Vec::new(),
         });
         let cinder = starter_card_templates()
             .into_iter()
@@ -3170,6 +3791,7 @@ mod tests {
             ap_remaining: 2,
             max_ap: 2,
             has_attacked: false,
+            items: Vec::new(),
         });
         game.board.units.push(Unit {
             id: "enemy-back".to_string(),
@@ -3183,6 +3805,7 @@ mod tests {
             ap_remaining: 2,
             max_ap: 2,
             has_attacked: false,
+            items: Vec::new(),
         });
         game.board.units.push(Unit {
             id: "enemy-offline".to_string(),
@@ -3196,6 +3819,7 @@ mod tests {
             ap_remaining: 3,
             max_ap: 3,
             has_attacked: false,
+            items: Vec::new(),
         });
         let ray = starter_card_templates()
             .into_iter()
@@ -3233,6 +3857,7 @@ mod tests {
             ap_remaining: 3,
             max_ap: 3,
             has_attacked: false,
+            items: Vec::new(),
         });
         let ray = starter_card_templates()
             .into_iter()
@@ -3380,6 +4005,7 @@ mod tests {
             ap_remaining: 2,
             max_ap: 2,
             has_attacked: false,
+            items: Vec::new(),
         });
         game.board.units.push(Unit {
             id: "opponent-guard".to_string(),
@@ -3393,6 +4019,7 @@ mod tests {
             ap_remaining: 2,
             max_ap: 2,
             has_attacked: false,
+            items: Vec::new(),
         });
 
         game.apply_action(MatchActionRequest::EndTurn)
@@ -3476,6 +4103,7 @@ mod tests {
             ap_remaining: 2,
             max_ap: 2,
             has_attacked: false,
+            items: Vec::new(),
         });
 
         game.apply_action_recording_for_side(Side::Player, MatchActionRequest::EndTurn, 0)
@@ -3527,6 +4155,7 @@ mod tests {
             ap_remaining: 2,
             max_ap: 2,
             has_attacked: false,
+            items: Vec::new(),
         });
 
         let bolt = starter_card_templates()
@@ -3627,6 +4256,7 @@ mod tests {
             ap_remaining: 2,
             max_ap: 2,
             has_attacked: false,
+            items: Vec::new(),
         });
 
         let bolt = starter_card_templates()
@@ -3681,6 +4311,7 @@ mod tests {
             ap_remaining: 1,
             max_ap: 1,
             has_attacked: false,
+            items: Vec::new(),
         });
 
         game.apply_action(MatchActionRequest::Attack {
