@@ -1,5 +1,5 @@
 import { House, Keyboard, LogOut, RefreshCcw, RotateCcw, Save } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   defaultHotkeyMap,
   HOTKEY_COMMANDS,
@@ -83,7 +83,7 @@ export function SettingsPage({
   );
   const controlsDisabled = busy || preferencesState.status === "loading";
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setTheme(preferences.theme);
     setMotion(preferences.motion);
     setAnimationSpeed(preferences.animationSpeed);
