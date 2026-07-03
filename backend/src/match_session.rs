@@ -7,6 +7,9 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+#[path = "card_interactions.rs"]
+mod card_interactions;
+
 const BOARD_RADIUS: i32 = 3;
 const STARTING_MANA: u8 = 2;
 const MAX_MANA: u8 = 8;
@@ -1160,19 +1163,14 @@ impl MatchState {
 
         match &card.kind {
             CardKind::Unit { .. } => {
-                let ActionTarget::Hex { coord } = target else {
-                    return Err(MatchError::InvalidTarget);
-                };
                 let wizard_position = self.player_ref(side).wizard.position;
-                if !self.board.is_valid(coord) {
-                    return Err(MatchError::InvalidHex);
-                }
-                if !wizard_position.is_adjacent(coord) {
-                    return Err(MatchError::InvalidTarget);
-                }
-                if self.is_occupied(coord) {
-                    return Err(MatchError::OccupiedHex);
-                }
+                let planned_unit_play = card_interactions::plan_unit_play(
+                    &card,
+                    target,
+                    wizard_position,
+                    &self.board,
+                    |coord| self.is_occupied(coord),
+                )?;
 
                 self.spend_card_resources(side, &card_id, &card)?;
                 self.log.insert(
@@ -1184,7 +1182,7 @@ impl MatchState {
                     0,
                     StackAction::PlayUnit {
                         card: CardSummary::from(&card),
-                        coord,
+                        coord: planned_unit_play.coord,
                     },
                 );
                 self.record_replay_frame(
@@ -1193,7 +1191,9 @@ impl MatchState {
                     ReplayEvent::CardPlayed {
                         side,
                         card: CardSummary::from(&card),
-                        target: ActionTarget::Hex { coord },
+                        target: ActionTarget::Hex {
+                            coord: planned_unit_play.coord,
+                        },
                     },
                 );
                 self.record_replay_frame(
@@ -1596,41 +1596,26 @@ impl MatchState {
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) {
-        let CardKind::Unit {
-            attack,
-            armor,
-            max_ap,
-        } = &card.kind
-        else {
-            return;
-        };
-
-        if !self.board.is_valid(coord) || self.is_occupied(coord) {
+        let wizard_position = self.player_ref(side).wizard.position;
+        if !card_interactions::can_resolve_unit_play(coord, wizard_position, &self.board, |coord| {
+            self.is_occupied(coord)
+        }) {
             self.log
                 .insert(0, format!("{} could not resolve.", card.name));
             return;
         }
 
-        let mut armor = *armor;
-        let progression = &self.player_ref(side).progression;
-        armor += progression.effects.summoned_unit_armor_delta;
-        if self.player_ref(side).summoned_unit_count == 0 {
-            armor += progression.effects.first_summoned_unit_armor_delta;
-        }
-
-        let unit = Unit {
-            id: self.next_unit_id(side),
+        let progression = self.player_ref(side).progression.clone();
+        let is_first_summoned_unit = self.player_ref(side).summoned_unit_count == 0;
+        let Some(unit) = card_interactions::summon_unit_from_card(
+            &card,
             side,
-            name: card.name.clone(),
-            template_id: Some(card.template_id.clone()),
-            attack: *attack,
-            armor,
-            max_armor: armor,
-            position: coord,
-            ap_remaining: *max_ap / 2,
-            max_ap: *max_ap,
-            has_attacked: false,
-            items: Vec::new(),
+            || self.next_unit_id(side),
+            coord,
+            &progression,
+            is_first_summoned_unit,
+        ) else {
+            return;
         };
         let unit_id = unit.id.clone();
         let unit_name = unit.name.clone();
@@ -2824,7 +2809,7 @@ impl HexBoard {
         }
     }
 
-    fn is_valid(&self, coord: HexCoord) -> bool {
+    pub(crate) fn is_valid(&self, coord: HexCoord) -> bool {
         coord.distance(HexCoord { q: 0, r: 0 }) <= self.radius
     }
 }
@@ -2837,7 +2822,7 @@ impl HexCoord {
         dq.abs().max(dr.abs()).max(ds.abs())
     }
 
-    fn is_adjacent(self, other: Self) -> bool {
+    pub(crate) fn is_adjacent(self, other: Self) -> bool {
         self.distance(other) == 1
     }
 
@@ -3502,6 +3487,39 @@ mod tests {
         });
 
         assert_eq!(result, Err(MatchError::InvalidTarget));
+    }
+
+    #[test]
+    fn unit_summons_reject_occupied_adjacent_hexes() {
+        let mut game = MatchState::new_with_seed(7);
+        game.board.units.push(Unit {
+            id: "blocking-unit".to_string(),
+            side: Side::Player,
+            name: "Blocking Unit".to_string(),
+            template_id: Some("blocking-unit".to_string()),
+            attack: 1,
+            armor: 1,
+            max_armor: 1,
+            position: hex(0, 2),
+            ap_remaining: 1,
+            max_ap: 2,
+            has_attacked: false,
+            items: Vec::new(),
+        });
+        let card = player_unit_card(&game, "ember-squire");
+        let card_id = put_card_in_hand(&mut game, card);
+        let initial_mana = game.player.mana;
+        let initial_wizard_ap = game.player.wizard.ap_remaining;
+
+        let result = game.apply_action(MatchActionRequest::PlayCard {
+            card_id,
+            target: ActionTarget::Hex { coord: hex(0, 2) },
+        });
+
+        assert_eq!(result, Err(MatchError::OccupiedHex));
+        assert_eq!(game.player.mana, initial_mana);
+        assert_eq!(game.player.wizard.ap_remaining, initial_wizard_ap);
+        assert_eq!(game.board.units.len(), 1);
     }
 
     #[test]
