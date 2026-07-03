@@ -2,9 +2,56 @@ import { expect, test } from "@playwright/test";
 
 const AUTH_TOKEN_STORAGE_KEY = "rune-lanes-auth-token";
 const BOARD_VISUAL_MODE_STORAGE_KEY = "rune-lanes-board-visual-mode";
+const MATCH_CHROME_STORAGE_KEY = "rune-lanes-match-chrome-minimized";
 const MATCH_ID = "shared-cursor";
 const PLAYER_SEAT_TOKEN = "player-seat";
 const OPPONENT_SEAT_TOKEN = "opponent-seat";
+
+test("shared active matches use persistent full-screen collapsible chrome", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await installSharedWebSocket(page);
+  await page.addInitScript(
+    ({ authKey, boardKey, chromeKey }) => {
+      localStorage.removeItem(authKey);
+      localStorage.setItem(boardKey, "3d");
+      localStorage.removeItem(chromeKey);
+    },
+    {
+      authKey: AUTH_TOKEN_STORAGE_KEY,
+      boardKey: BOARD_VISUAL_MODE_STORAGE_KEY,
+      chromeKey: MATCH_CHROME_STORAGE_KEY,
+    },
+  );
+  await mockSharedApi(page, { signedIn: false });
+
+  await page.goto(`/match/${MATCH_ID}/${PLAYER_SEAT_TOKEN}`);
+  const board = page.getByRole("region", { name: "Hex board" });
+  const boardBox = await board.boundingBox();
+  expect(boardBox.width).toBeGreaterThanOrEqual(1276);
+  expect(boardBox.height).toBeGreaterThanOrEqual(716);
+  await expect.poll(() => hasPainted3dCanvas(page)).toBe(true);
+  await expect(page.getByText("You", { exact: true })).toBeVisible();
+  await expect(page.getByText("Opponent", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "End Turn" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Minimize match chrome" }).click();
+  await expect(page.getByRole("button", { name: "Restore match chrome" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "End Turn" })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate((key) => localStorage.getItem(key), MATCH_CHROME_STORAGE_KEY))
+    .toBe("true");
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Restore match chrome" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "End Turn" })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.reload();
+  const mobileBoardBox = await board.boundingBox();
+  expect(mobileBoardBox.width).toBeGreaterThanOrEqual(386);
+  expect(mobileBoardBox.height).toBeGreaterThanOrEqual(696);
+  await expect(page.getByLabel("Hand", { exact: true })).toBeVisible();
+});
 
 test("signed-in shared seat links apply saved settings to cursor play", async ({ page }) => {
   await installSharedWebSocket(page);
@@ -224,6 +271,19 @@ async function sharedActions(page) {
       .filter((message) => message.type === "action")
       .map((message) => message.action),
   );
+}
+
+async function hasPainted3dCanvas(page) {
+  return page.locator(".board-3d-shell canvas").evaluate((canvas) => {
+    if (!(canvas instanceof HTMLCanvasElement) || canvas.width === 0 || canvas.height === 0) {
+      return false;
+    }
+
+    const blankCanvas = document.createElement("canvas");
+    blankCanvas.width = canvas.width;
+    blankCanvas.height = canvas.height;
+    return canvas.toDataURL("image/png") !== blankCanvas.toDataURL("image/png");
+  });
 }
 
 function sharedMatchResponse(viewerSide = "player") {

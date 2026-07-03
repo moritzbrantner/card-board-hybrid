@@ -2738,6 +2738,7 @@ function SharedMatchPage({
   const [notice, setNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const [boardAnimation, setBoardAnimation] = useState<BoardAnimationCue | null>(null);
+  const [matchChromeMinimized, setMatchChromeMinimized] = useState(() => readStoredMatchChromeMinimized());
   const socketRef = useRef<WebSocket | null>(null);
   const latestSharedMatchRef = useRef<MatchState | null>(null);
   const animationSequenceRef = useRef(0);
@@ -2829,6 +2830,10 @@ function SharedMatchPage({
     const interval = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(MATCH_CHROME_STORAGE_KEY, matchChromeMinimized ? "true" : "false");
+  }, [matchChromeMinimized]);
 
   useEffect(() => {
     const socket = new WebSocket(sharedMatchWebSocketUrl(matchId, seatToken));
@@ -3403,9 +3408,9 @@ function SharedMatchPage({
           : "Waiting";
 
   return (
-    <main className="app-shell">
-      <section className="table">
-        <header className="top-bar">
+    <main className={`app-shell match-app-shell ${matchChromeMinimized ? "match-chrome-minimized" : ""}`}>
+      <section className="table match-table">
+        <header className="top-bar match-chrome">
           <div>
             <p className="eyebrow">Rune Lanes Multiplayer</p>
             <h1>Round {match.round}</h1>
@@ -3421,12 +3426,33 @@ function SharedMatchPage({
             >
               <House size={18} />
             </button>
-            {canClaimForfeit ? (
-              <button className="primary-button" type="button" onClick={claimForfeit} disabled={busy}>
-                <Sword size={18} />
-                Claim Forfeit
-              </button>
-            ) : null}
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => setMatchChromeMinimized(true)}
+              title="Minimize match chrome"
+              aria-label="Minimize match chrome"
+            >
+              <EyeOff size={18} />
+            </button>
+          </div>
+        </header>
+        <button
+          className="icon-button match-chrome-restore"
+          type="button"
+          onClick={() => setMatchChromeMinimized(false)}
+          title="Restore match chrome"
+          aria-label="Restore match chrome"
+        >
+          <Eye size={18} />
+        </button>
+        <div className="match-action-dock" aria-label="Match actions">
+          {canClaimForfeit ? (
+            <button className="primary-button" type="button" onClick={claimForfeit} disabled={busy}>
+              <Sword size={18} />
+              Claim Forfeit
+            </button>
+          ) : null}
             <button
               className="primary-button"
               type="button"
@@ -3447,8 +3473,7 @@ function SharedMatchPage({
                 Pass Priority
               </button>
             ) : null}
-          </div>
-        </header>
+        </div>
 
         <section className="battlefield">
           <div className="battlefield-hud battlefield-hud-player">
@@ -3586,6 +3611,7 @@ function ReplayPage({
   const [loadState, setLoadState] = useState<ReplayLoadState>({ status: "loading" });
   const [frameIndex, setFrameIndex] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
+  const [matchChromeMinimized, setMatchChromeMinimized] = useState(() => readStoredMatchChromeMinimized());
   const reducedMotion = visualPreferences.effectiveMotion === "reduced";
 
   useEffect(() => {
@@ -3600,6 +3626,10 @@ function ReplayPage({
         }),
       );
   }, [matchId]);
+
+  useEffect(() => {
+    window.localStorage.setItem(MATCH_CHROME_STORAGE_KEY, matchChromeMinimized ? "true" : "false");
+  }, [matchChromeMinimized]);
 
   if (loadState.status === "loading") {
     return <ShellMessage title={`Replay ${matchId}`} message="Loading replay" />;
@@ -3633,9 +3663,11 @@ function ReplayPage({
   });
 
   return (
-    <main className="app-shell replay-shell">
-      <section className="table replay-table">
-        <header className="top-bar">
+    <main
+      className={`app-shell match-app-shell replay-shell ${matchChromeMinimized ? "match-chrome-minimized" : ""}`}
+    >
+      <section className="table match-table replay-table">
+        <header className="top-bar match-chrome">
           <div>
             <p className="eyebrow">Rune Lanes Replay</p>
             <h1>Round {match.round}</h1>
@@ -3659,28 +3691,52 @@ function ReplayPage({
             >
               <Play size={18} />
             </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => setMatchChromeMinimized(true)}
+              title="Minimize match chrome"
+              aria-label="Minimize match chrome"
+            >
+              <EyeOff size={18} />
+            </button>
           </div>
         </header>
+        <button
+          className="icon-button match-chrome-restore"
+          type="button"
+          onClick={() => setMatchChromeMinimized(false)}
+          title="Restore match chrome"
+          aria-label="Restore match chrome"
+        >
+          <Eye size={18} />
+        </button>
 
-        <section className="score-row" aria-label="Replay score">
-          <PlayerBadge player={match.player} />
-          <div className="phase-pill">
-            {replay.visibility === "revealed" ? <Eye size={16} /> : <EyeOff size={16} />}
-            {match.phase === "matchOver" ? `${sideLabel(match.winner)} wins` : "Planning"}
+        <section className="battlefield replay-battlefield">
+          <div className="battlefield-hud battlefield-hud-player">
+            <PlayerBadge player={match.player} />
           </div>
-          <PlayerBadge player={match.opponent} />
-        </section>
+          <div className="battlefield-hud battlefield-hud-phase">
+            <div className="phase-pill">
+              {replay.visibility === "revealed" ? <Eye size={16} /> : <EyeOff size={16} />}
+              {match.phase === "matchOver" ? `${sideLabel(match.winner)} wins` : "Planning"}
+            </div>
+          </div>
+          <div className="battlefield-hud battlefield-hud-opponent">
+            <PlayerBadge player={match.opponent} />
+          </div>
 
-        <Board
-          match={match}
-          animation={boardAnimation}
-          boardVisualMode={boardVisualMode}
-          viewerSide="player"
-          selectedCard={null}
-          selectedPiece={null}
-          disabled={false}
-          readOnly
-        />
+          <Board
+            match={match}
+            animation={boardAnimation}
+            boardVisualMode={boardVisualMode}
+            viewerSide="player"
+            selectedCard={null}
+            selectedPiece={null}
+            disabled={false}
+            readOnly
+          />
+        </section>
 
         <section className="replay-inspector" aria-label="Replay timeline">
           {notice ? <p className="notice">{notice}</p> : null}

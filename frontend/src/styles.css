@@ -2241,11 +2241,21 @@ h1 {
   margin-bottom: 0;
 }
 
+.replay-table .replay-battlefield .board {
+  padding-bottom: 168px;
+}
+
 .replay-inspector {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  left: 18px;
+  z-index: 14;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
   gap: 12px;
   align-items: stretch;
+  pointer-events: none;
 }
 
 .replay-inspector > .notice {
@@ -2258,6 +2268,7 @@ h1 {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
+  pointer-events: auto;
 }
 
 .replay-controls {
