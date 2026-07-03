@@ -16,6 +16,10 @@ _Avoid_: creature, minion, troop
 A card that creates an immediate effect from the caster wizard instead of creating a unit.
 _Avoid_: tactic
 
+**Card interaction**:
+Playing a Card and resolving its card-created effect through the match rules, including target legality, stack entry, and Unit, Spell, or Item effect logic.
+_Avoid_: card handler, play-card plumbing
+
 **Mana**:
 The per-turn resource spent to play cards, set from the tiles that side controls at the beginning of that side's turn.
 _Avoid_: energy
