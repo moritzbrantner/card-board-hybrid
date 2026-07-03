@@ -1250,11 +1250,7 @@ impl MatchState {
                     ReplayEvent::ActionQueued { side, item },
                 );
             }
-            CardKind::Spell {
-                range,
-                priority,
-                effect,
-            } => {
+            CardKind::Spell { .. } => {
                 let ActionTarget::Piece { piece_id } = target else {
                     return Err(MatchError::InvalidTarget);
                 };
@@ -1262,10 +1258,14 @@ impl MatchState {
                     .piece_view(&piece_id)
                     .ok_or(MatchError::PieceNotFound)?;
                 let caster_position = self.player_ref(side).wizard.position;
-                if caster_position.distance(target.position) > i32::from(*range) {
-                    return Err(MatchError::InvalidTarget);
-                }
-                self.validate_spell_target(side, effect, &target)?;
+                let planned_spell_play = card_interactions::plan_spell_play(
+                    &card,
+                    ActionTarget::Piece { piece_id },
+                    side,
+                    caster_position,
+                    &self.player_ref(side).wizard.id,
+                    &target,
+                )?;
                 self.spend_card_resources(side, &card_id, &card)?;
                 self.log.insert(
                     0,
@@ -1273,10 +1273,10 @@ impl MatchState {
                 );
                 let item = self.push_stack_item(
                     side,
-                    *priority,
+                    planned_spell_play.priority,
                     StackAction::CastSpell {
                         card: CardSummary::from(&card),
-                        target_id: target.id.clone(),
+                        target_id: planned_spell_play.target_id.clone(),
                     },
                 );
                 self.record_replay_frame(
@@ -1286,7 +1286,7 @@ impl MatchState {
                         side,
                         card: CardSummary::from(&card),
                         target: ActionTarget::Piece {
-                            piece_id: target.id,
+                            piece_id: planned_spell_play.target_id,
                         },
                     },
                 );
@@ -1334,86 +1334,40 @@ impl MatchState {
         Ok(())
     }
 
-    fn validate_spell_target(
-        &self,
-        side: Side,
-        effect: &SpellEffect,
-        target: &PieceView,
-    ) -> Result<(), MatchError> {
-        match effect {
-            SpellEffect::Heal { .. } | SpellEffect::Buff { .. } if target.side != side => {
-                Err(MatchError::InvalidTarget)
-            }
-            SpellEffect::Damage { .. }
-            | SpellEffect::AreaDamage { .. }
-            | SpellEffect::LineDamage { .. }
-                if target.side == side =>
-            {
-                Err(MatchError::InvalidTarget)
-            }
-            SpellEffect::Draw { .. }
-                if target.side != side || target.id != self.player_ref(side).wizard.id =>
-            {
-                Err(MatchError::InvalidTarget)
-            }
-            SpellEffect::LineDamage { .. }
-                if self
-                    .player_ref(side)
-                    .wizard
-                    .position
-                    .direction_to(target.position)
-                    .is_none() =>
-            {
-                Err(MatchError::InvalidTarget)
-            }
-            SpellEffect::Buff { .. } if self.is_wizard_id(&target.id) => {
-                Err(MatchError::InvalidTarget)
-            }
-            _ => Ok(()),
-        }
-    }
-
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "spell resolution records side, source card, target, and replay context together"
-    )]
-    fn apply_spell(
+    fn apply_resolved_spell(
         &mut self,
         side: Side,
-        effect: &SpellEffect,
-        range: u8,
-        target_id: &str,
+        resolved_spell: card_interactions::ResolvedSpell,
         card_name: &str,
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) {
-        match effect {
-            SpellEffect::Heal { amount } => {
-                self.heal_piece(target_id, *amount);
+        match resolved_spell.effect {
+            card_interactions::ResolvedSpellEffect::Heal { piece_id, amount } => {
+                self.heal_piece(&piece_id, amount);
                 self.log.insert(
                     0,
-                    format!("{} cast {} to heal {}.", side.label(), card_name, target_id),
+                    format!("{} cast {} to heal {}.", side.label(), card_name, piece_id),
                 );
                 self.record_replay_frame(
                     frames,
                     action_index,
                     ReplayEvent::PieceHealed {
                         side,
-                        piece_id: target_id.to_string(),
-                        amount: *amount,
+                        piece_id,
+                        amount,
                     },
                 );
             }
-            SpellEffect::Buff { attack, armor } => {
-                if let Some(unit) = self
-                    .board
-                    .units
-                    .iter_mut()
-                    .find(|unit| unit.id == target_id)
-                {
-                    unit.attack += *attack;
-                    unit.armor += *armor;
-                    unit.max_armor += *armor;
+            card_interactions::ResolvedSpellEffect::Buff {
+                piece_id,
+                attack,
+                armor,
+            } => {
+                if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
+                    unit.attack += attack;
+                    unit.armor += armor;
+                    unit.max_armor += armor;
                     self.log.insert(
                         0,
                         format!("{} cast {} on {}.", side.label(), card_name, unit.name),
@@ -1423,28 +1377,19 @@ impl MatchState {
                         action_index,
                         ReplayEvent::PieceBuffed {
                             side,
-                            piece_id: target_id.to_string(),
-                            attack_delta: *attack,
-                            armor_delta: *armor,
+                            piece_id,
+                            attack_delta: attack,
+                            armor_delta: armor,
                         },
                     );
                 }
             }
-            SpellEffect::Damage { amount } => {
-                self.damage_pieces(
-                    side,
-                    vec![target_id.to_string()],
-                    damage_with_progression(*amount, &self.player_ref(side).progression),
-                    frames,
-                    action_index,
-                );
-                self.log.insert(
-                    0,
-                    format!("{} cast {} at {}.", side.label(), card_name, target_id),
-                );
+            card_interactions::ResolvedSpellEffect::Damage { piece_ids, amount } => {
+                self.damage_pieces(side, piece_ids, amount, frames, action_index);
+                self.log_spell_resolution(side, card_name, resolved_spell.log);
             }
-            SpellEffect::Draw { amount } => {
-                let drawn = self.draw_cards_for_side(side, *amount);
+            card_interactions::ResolvedSpellEffect::Draw { amount } => {
+                let drawn = self.draw_cards_for_side(side, amount);
                 for card in drawn {
                     self.record_replay_frame(
                         frames,
@@ -1456,56 +1401,39 @@ impl MatchState {
                         },
                     );
                 }
-                self.log.insert(
-                    0,
-                    format!("{} cast {} to draw {}.", side.label(), card_name, amount),
-                );
-            }
-            SpellEffect::AreaDamage { amount, radius } => {
-                let Some(target) = self.piece_view(target_id) else {
-                    return;
-                };
-                let targets =
-                    self.enemy_piece_ids_in_area(side, target.position, i32::from(*radius));
-                self.damage_pieces(
-                    side,
-                    targets,
-                    damage_with_progression(*amount, &self.player_ref(side).progression),
-                    frames,
-                    action_index,
-                );
-                self.log.insert(
-                    0,
-                    format!("{} cast {} around {}.", side.label(), card_name, target_id),
-                );
-            }
-            SpellEffect::LineDamage { amount } => {
-                let Some(target) = self.piece_view(target_id) else {
-                    return;
-                };
-                let caster_position = self.player_ref(side).wizard.position;
-                let Some(direction) = caster_position.direction_to(target.position) else {
-                    return;
-                };
-                let targets = self.enemy_piece_ids_on_line(
-                    side,
-                    caster_position,
-                    direction,
-                    i32::from(range),
-                );
-                self.damage_pieces(
-                    side,
-                    targets,
-                    damage_with_progression(*amount, &self.player_ref(side).progression),
-                    frames,
-                    action_index,
-                );
-                self.log.insert(
-                    0,
-                    format!("{} cast {} down a line.", side.label(), card_name),
-                );
+                self.log_spell_resolution(side, card_name, resolved_spell.log);
             }
         }
+    }
+
+    fn log_spell_resolution(
+        &mut self,
+        side: Side,
+        card_name: &str,
+        log: card_interactions::SpellLog,
+    ) {
+        let message = match log {
+            card_interactions::SpellLog::Heal { piece_id } => {
+                format!("{} cast {} to heal {}.", side.label(), card_name, piece_id)
+            }
+            card_interactions::SpellLog::Buff { piece_id } => {
+                format!("{} cast {} on {}.", side.label(), card_name, piece_id)
+            }
+            card_interactions::SpellLog::Damage { piece_id } => {
+                format!("{} cast {} at {}.", side.label(), card_name, piece_id)
+            }
+            card_interactions::SpellLog::Draw { amount } => {
+                format!("{} cast {} to draw {}.", side.label(), card_name, amount)
+            }
+            card_interactions::SpellLog::AreaDamage { piece_id } => {
+                format!("{} cast {} around {}.", side.label(), card_name, piece_id)
+            }
+            card_interactions::SpellLog::LineDamage => {
+                format!("{} cast {} down a line.", side.label(), card_name)
+            }
+        };
+
+        self.log.insert(0, message);
     }
 
     fn push_stack_item(&mut self, side: Side, priority: u8, action: StackAction) -> StackItem {
@@ -1645,7 +1573,7 @@ impl MatchState {
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) {
-        let CardKind::Spell { effect, range, .. } = &card.kind else {
+        let CardKind::Spell { effect, .. } = &card.kind else {
             return;
         };
         let Some(target) = self.piece_view(target_id) else {
@@ -1653,21 +1581,39 @@ impl MatchState {
                 .insert(0, format!("{} had no legal target.", card.name));
             return;
         };
-        if self.validate_spell_target(side, effect, &target).is_err() {
+        let caster_position = self.player_ref(side).wizard.position;
+        let caster_wizard_id = self.player_ref(side).wizard.id.clone();
+        if card_interactions::validate_spell_target(
+            side,
+            effect,
+            caster_position,
+            &caster_wizard_id,
+            &target,
+        )
+        .is_err()
+        {
             self.log
                 .insert(0, format!("{} had no legal target.", card.name));
             return;
         }
 
-        self.apply_spell(
+        let enemy_pieces = self.pieces_for_side(side.opponent());
+        let progression = self.player_ref(side).progression.clone();
+        let Ok(resolved_spell) = card_interactions::resolve_spell(
+            &card,
             side,
-            effect,
-            *range,
-            target_id,
-            &card.name,
-            frames,
-            action_index,
-        );
+            caster_position,
+            &caster_wizard_id,
+            &target,
+            &enemy_pieces,
+            &progression,
+        ) else {
+            self.log
+                .insert(0, format!("{} had no legal target.", card.name));
+            return;
+        };
+
+        self.apply_resolved_spell(side, resolved_spell, &card.name, frames, action_index);
     }
 
     fn resolve_item_card(
@@ -2206,18 +2152,31 @@ impl MatchState {
             let in_range = |piece: &PieceView| {
                 opponent.wizard.position.distance(piece.position) <= i32::from(*range)
             };
+            let caster_position = opponent.wizard.position;
+            let caster_wizard_id = opponent.wizard.id.as_str();
+            let is_legal_spell_target = |piece: &PieceView| {
+                in_range(piece)
+                    && card_interactions::validate_spell_target(
+                        Side::Opponent,
+                        effect,
+                        caster_position,
+                        caster_wizard_id,
+                        piece,
+                    )
+                    .is_ok()
+            };
 
             match effect {
                 SpellEffect::Damage { .. } => {
                     let target = self
                         .pieces_for_side(Side::Player)
                         .into_iter()
-                        .filter(in_range)
+                        .filter(is_legal_spell_target)
                         .find(|piece| self.is_wizard_id(&piece.id))
                         .or_else(|| {
                             self.pieces_for_side(Side::Player)
                                 .into_iter()
-                                .find(in_range)
+                                .find(is_legal_spell_target)
                         });
                     if let Some(target) = target {
                         return Some((card.clone(), target));
@@ -2227,11 +2186,7 @@ impl MatchState {
                     let target = self
                         .pieces_for_side(Side::Player)
                         .into_iter()
-                        .filter(in_range)
-                        .find(|piece| {
-                            self.validate_spell_target(Side::Opponent, effect, piece)
-                                .is_ok()
-                        });
+                        .find(is_legal_spell_target);
                     if let Some(target) = target {
                         return Some((card.clone(), target));
                     }
@@ -2240,7 +2195,7 @@ impl MatchState {
                     let target = self
                         .pieces_for_side(Side::Opponent)
                         .into_iter()
-                        .filter(in_range)
+                        .filter(is_legal_spell_target)
                         .find(|piece| self.piece_is_damaged(&piece.id));
                     if let Some(target) = target {
                         return Some((card.clone(), target));
@@ -2253,14 +2208,17 @@ impl MatchState {
                         .iter()
                         .filter(|unit| unit.side == Side::Opponent)
                         .map(PieceView::from)
-                        .filter(in_range)
+                        .filter(is_legal_spell_target)
                         .max_by_key(|piece| piece.attack);
                     if let Some(target) = target {
                         return Some((card.clone(), target));
                     }
                 }
                 SpellEffect::Draw { .. } => {
-                    if opponent.deck_count + opponent.discard_count > 0 {
+                    let target = PieceView::from(&opponent.wizard);
+                    if opponent.deck_count + opponent.discard_count > 0
+                        && is_legal_spell_target(&target)
+                    {
                         return Some((card.clone(), PieceView::from(&opponent.wizard)));
                     }
                 }
@@ -2485,29 +2443,6 @@ impl MatchState {
     fn draw_cards_for_side(&mut self, side: Side, amount: u8) -> Vec<Card> {
         let player = self.player_mut(side);
         (0..amount).filter_map(|_| player.draw()).collect()
-    }
-
-    fn enemy_piece_ids_in_area(&self, side: Side, center: HexCoord, radius: i32) -> Vec<String> {
-        self.pieces_for_side(side.opponent())
-            .into_iter()
-            .filter(|piece| center.distance(piece.position) <= radius)
-            .map(|piece| piece.id)
-            .collect()
-    }
-
-    fn enemy_piece_ids_on_line(
-        &self,
-        side: Side,
-        origin: HexCoord,
-        direction: HexCoord,
-        range: i32,
-    ) -> Vec<String> {
-        self.pieces_for_side(side.opponent())
-            .into_iter()
-            .filter(|piece| origin.distance(piece.position) <= range)
-            .filter(|piece| origin.direction_to(piece.position) == Some(direction))
-            .map(|piece| piece.id)
-            .collect()
     }
 
     fn heal_piece(&mut self, piece_id: &str, amount: i32) {
@@ -3027,10 +2962,6 @@ fn opening_hand_size(progression: &MatchProgressionLoadout) -> usize {
 fn mana_with_progression(base: u8, delta: i8) -> u8 {
     let value = i16::from(base) + i16::from(delta);
     value.clamp(0, i16::from(MAX_MANA) + i16::from(delta.max(0))) as u8
-}
-
-fn damage_with_progression(amount: i32, progression: &MatchProgressionLoadout) -> i32 {
-    (amount + progression.effects.spell_damage_delta).max(0)
 }
 
 impl From<&Wizard> for PieceView {
