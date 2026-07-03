@@ -72,6 +72,38 @@ test("successful login with no safe next lands on profile", async ({ page }) => 
   await expect(page).toHaveURL(/\/profile$/);
 });
 
+test("/login/ behaves like the canonical login route", async ({
+  page,
+}) => {
+  const authRequests = [];
+  await mockAuthApi(page, authRequests);
+
+  await page.goto("/login/?next=%2Fdecks");
+  await expect(page.getByRole("heading", { name: "Sign In" })).toBeVisible();
+  await page.getByLabel("Email").fill("player@local.dev");
+  await page.getByLabel("Password").fill("pw");
+  await page.getByRole("button", { name: "Sign In" }).click();
+
+  await expect(page).toHaveURL(/\/decks$/);
+  expect(authRequests).toEqual(["/api/auth/login"]);
+});
+
+test("/register/ behaves like the canonical register route", async ({
+  page,
+}) => {
+  const authRequests = [];
+  await mockAuthApi(page, authRequests);
+
+  await page.goto("/register/?next=%2Fmatches");
+  await expect(page.getByRole("heading", { name: "Create Account" })).toBeVisible();
+  await page.getByLabel("Email").fill("new-player@local.dev");
+  await page.getByLabel("Password").fill("pw");
+  await page.getByRole("button", { name: "Create Account" }).click();
+
+  await expect(page).toHaveURL(/\/matches$/);
+  expect(authRequests).toEqual(["/api/auth/register"]);
+});
+
 test("register submits credentials to the existing registration API and opens profile by default", async ({ page }) => {
   const authRequests = [];
   await mockAuthApi(page, authRequests);
@@ -154,6 +186,28 @@ test("signed-in visits to auth routes redirect to profile or a safe next path", 
 
   await page.goto("/register?next=https%3A%2F%2Fevil.test%2Fsteal");
   await expect(page).toHaveURL(/\/profile$/);
+});
+
+test("signing out clears the session and returns to the public match picker", async ({ page }) => {
+  const authRequests = [];
+  await page.addInitScript(
+    ({ key }) => localStorage.setItem(key, "existing-token"),
+    { key: AUTH_TOKEN_STORAGE_KEY },
+  );
+  await mockAuthApi(page, authRequests);
+
+  await page.goto("/profile");
+  await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
+
+  await page.getByTitle("Sign out").click();
+
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Choose Your Wizard" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign In" })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate((key) => localStorage.getItem(key), AUTH_TOKEN_STORAGE_KEY))
+    .toBeNull();
+  expect(authRequests).toEqual(["/api/auth/logout"]);
 });
 
 test("protected route redirects replace the protected URL in browser history", async ({ page }) => {
@@ -239,6 +293,12 @@ async function mockAuthApi(page, authRequests = []) {
 
     if (url.pathname === "/api/auth/me" && request.method() === "GET") {
       await route.fulfill({ json: authUser("player@local.dev") });
+      return;
+    }
+
+    if (url.pathname === "/api/auth/logout" && request.method() === "POST") {
+      authRequests.push(url.pathname);
+      await route.fulfill({ json: { message: "Signed out" } });
       return;
     }
 

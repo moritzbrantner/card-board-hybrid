@@ -34,11 +34,27 @@ The frontend proxies `/api` to `http://localhost:4000`.
 
 ## Routes
 
-- `/` opens the match picker. It can create a new match, open a match by ID, or link to `/catalog/`.
-- `/match/<match-id>` opens the playable Rune Lanes board for a persisted match.
-- `/match/<match-id>/<seat-token>` opens a private shared-match seat link.
-- `/catalog/` opens the backend-driven starter card catalog.
-- `/decks/` opens the signed-in deck library and deck builder.
+- `/` opens the public match picker. Signed-out players can create anonymous
+  solo matches, open a match by ID, create private shared-match seat links, or
+  link to `/catalog/`.
+- `/login` opens the public sign-in route. `/login/` is treated equivalently,
+  and successful sign-in returns to a safe same-origin `next` path or `/profile`.
+- `/register` opens the public account creation route. `/register/` is treated
+  equivalently, and successful registration signs the player in before returning
+  to a safe same-origin `next` path or `/profile`.
+- `/profile` is account-only. Signed-out players are redirected to
+  `/login?next=/profile`.
+- `/decks` is the account-only deck library and deck builder. Signed-out
+  players are redirected to `/login?next=/decks`.
+- `/matches` is the account-only match archive. Signed-out players are
+  redirected to `/login?next=/matches`.
+- `/match/<match-id>` opens the public playable Rune Lanes board for a persisted
+  solo match.
+- `/match/<match-id>/<seat-token>` opens a private shared-match seat link. Seat
+  links are capability URLs and do not require an account.
+- `/matches/<match-id>/replay` opens a public replay route when the backend
+  exposes that replay.
+- `/catalog/` opens the public backend-driven starter card catalog.
 
 ## Deck building
 
