@@ -80,6 +80,10 @@ _Avoid_: online match, lobby match
 A sign-in identity used for profile settings and owned match history.
 _Avoid_: seat
 
+**Account preferences**:
+Account-synced controls and presentation preferences such as theme, motion, animation speed, board scale, and hotkey bindings. Account preferences affect the signed-in player's client experience only; they do not change Profile identity, Wizard progression, match rules, replay data, or private Seat link semantics.
+_Avoid_: profile settings, wizard settings, match settings
+
 **Profile**:
 The player-facing account presentation, including display name, generated avatar, and owned match history.
 _Avoid_: public player page
