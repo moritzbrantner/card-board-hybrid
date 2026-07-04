@@ -1071,7 +1071,12 @@ h1 {
   background:
     radial-gradient(circle at 50% 48%, rgba(88, 183, 161, 0.16), transparent 44%),
     #101312;
+  cursor: grab;
   overflow: hidden;
+}
+
+.board-3d-shell:active {
+  cursor: grabbing;
 }
 
 .board-3d-shell canvas {

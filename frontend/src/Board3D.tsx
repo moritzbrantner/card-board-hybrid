@@ -2,6 +2,8 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber"
 import {
   Component,
   type DragEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -14,6 +16,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
   BOARD_3D_CAMERA,
   BOARD_3D_GROUP_ROTATION_Y,
+  BOARD_3D_TILE_ROTATION_Y,
   axialToBoardPosition,
   projectBoardPositionToViewport,
   type ProjectedBoardPosition,
@@ -26,6 +29,12 @@ import {
 import type { MatchVisualCatalog, UnitVisualIdentity, WizardVisualIdentity } from "./matchVisualIdentity";
 import type { HexCoord, HexTile, Side, Unit, WizardType } from "./types";
 import { BOARD_ANIMATION_DURATION_MS, type BoardAnimationCue, type PieceAnimation } from "./boardAnimations";
+
+const BOARD_CAMERA_MIN_DISTANCE = 5.8;
+const BOARD_CAMERA_MAX_DISTANCE = 14.5;
+const BOARD_CAMERA_MIN_POLAR_ANGLE = Math.PI * 0.22;
+const BOARD_CAMERA_MAX_POLAR_ANGLE = Math.PI * 0.43;
+const CAMERA_DRAG_CLICK_THRESHOLD_PX = 6;
 
 export type Board3DWizard = {
   pieceType: "wizard";
@@ -150,6 +159,55 @@ export function Board3DRenderer({
   const [projectedHitTargets, setProjectedHitTargets] = useState<Map<string, ProjectedBoardPosition>>(
     () => new Map(),
   );
+  const [cameraControlElement, setCameraControlElement] = useState<HTMLDivElement | null>(null);
+  const cameraPointerRef = useRef<{
+    id: number;
+    x: number;
+    y: number;
+    dragged: boolean;
+  } | null>(null);
+
+  const handleCameraPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    cameraPointerRef.current = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      dragged: false,
+    };
+  }, []);
+
+  const handleCameraPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const pointer = cameraPointerRef.current;
+    if (!pointer || pointer.id !== event.pointerId) {
+      return;
+    }
+
+    const moved = Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y);
+    if (moved > CAMERA_DRAG_CLICK_THRESHOLD_PX) {
+      pointer.dragged = true;
+    }
+  }, []);
+
+  const handleCameraPointerEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const pointer = cameraPointerRef.current;
+    if (pointer?.id === event.pointerId && !pointer.dragged) {
+      cameraPointerRef.current = null;
+    }
+  }, []);
+
+  const handleCameraClickCapture = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!cameraPointerRef.current?.dragged) {
+      return;
+    }
+
+    cameraPointerRef.current = null;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
 
   function handleTileClick(coord: HexCoord) {
     if (readOnly || disabled) {
@@ -190,10 +248,16 @@ export function Board3DRenderer({
       onError={onFatalRenderError}
     >
       <div
+        ref={setCameraControlElement}
         className="board-3d-shell"
         data-board-renderer="3d"
         data-board-read-only={readOnly ? "true" : "false"}
         data-board-disabled={disabled ? "true" : "false"}
+        onPointerDownCapture={handleCameraPointerDown}
+        onPointerMoveCapture={handleCameraPointerMove}
+        onPointerUpCapture={handleCameraPointerEnd}
+        onPointerCancelCapture={handleCameraPointerEnd}
+        onClickCapture={handleCameraClickCapture}
       >
         <Canvas
           camera={BOARD_3D_CAMERA}
@@ -240,6 +304,7 @@ export function Board3DRenderer({
               />
             ))}
           </group>
+          <BoardCameraControls controlElement={cameraControlElement} />
           <ProjectedHitTargetSync
             tileInteractions={tileInteractions}
             onPositionsChange={setProjectedHitTargets}
@@ -292,6 +357,120 @@ function ProjectedHitTargetSync({
   });
 
   return null;
+}
+
+function BoardCameraControls({ controlElement }: { controlElement: HTMLElement | null }) {
+  const { camera, gl } = useThree();
+  const orbitRef = useRef(cameraOrbitFromPosition(camera.position));
+
+  useEffect(() => {
+    const element = controlElement ?? gl.domElement;
+    let dragStart: {
+      x: number;
+      y: number;
+      azimuth: number;
+      polar: number;
+    } | null = null;
+
+    function applyOrbit() {
+      const orbit = orbitRef.current;
+      const horizontalDistance = Math.sin(orbit.polar) * orbit.distance;
+      camera.position.set(
+        Math.sin(orbit.azimuth) * horizontalDistance,
+        Math.cos(orbit.polar) * orbit.distance,
+        Math.cos(orbit.azimuth) * horizontalDistance,
+      );
+      camera.lookAt(0, 0, 0);
+      camera.updateMatrixWorld();
+    }
+
+    function handleWheel(event: WheelEvent) {
+      event.preventDefault();
+      const orbit = orbitRef.current;
+      orbit.distance = clamp(
+        orbit.distance * Math.exp(event.deltaY * 0.001),
+        BOARD_CAMERA_MIN_DISTANCE,
+        BOARD_CAMERA_MAX_DISTANCE,
+      );
+      applyOrbit();
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (event.button !== 0) {
+        return;
+      }
+
+      dragStart = {
+        x: event.clientX,
+        y: event.clientY,
+        azimuth: orbitRef.current.azimuth,
+        polar: orbitRef.current.polar,
+      };
+    }
+
+    function handlePointerMove(event: PointerEvent) {
+      if (!dragStart) {
+        return;
+      }
+
+      const orbit = orbitRef.current;
+      orbit.azimuth = dragStart.azimuth - (event.clientX - dragStart.x) * 0.006;
+      orbit.polar = clamp(
+        dragStart.polar + (event.clientY - dragStart.y) * 0.004,
+        BOARD_CAMERA_MIN_POLAR_ANGLE,
+        BOARD_CAMERA_MAX_POLAR_ANGLE,
+      );
+      applyOrbit();
+    }
+
+    function handlePointerEnd() {
+      dragStart = null;
+    }
+
+    applyOrbit();
+    element.addEventListener("wheel", handleWheel, { passive: false });
+    element.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerEnd);
+    window.addEventListener("pointercancel", handlePointerEnd);
+
+    return () => {
+      element.removeEventListener("wheel", handleWheel);
+      element.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerEnd);
+      window.removeEventListener("pointercancel", handlePointerEnd);
+    };
+  }, [camera, controlElement, gl.domElement]);
+
+  useFrame(() => {
+    camera.updateMatrixWorld();
+    gl.domElement.dataset.boardCameraDistance = camera.position.length().toFixed(3);
+    gl.domElement.dataset.boardCameraX = camera.position.x.toFixed(3);
+    gl.domElement.dataset.boardCameraY = camera.position.y.toFixed(3);
+    gl.domElement.dataset.boardCameraZ = camera.position.z.toFixed(3);
+  }, -1);
+
+  return null;
+}
+
+function cameraOrbitFromPosition(position: Vector3) {
+  const distance = clamp(position.length(), BOARD_CAMERA_MIN_DISTANCE, BOARD_CAMERA_MAX_DISTANCE);
+  const polar = clamp(
+    Math.acos(clamp(position.y / distance, -1, 1)),
+    BOARD_CAMERA_MIN_POLAR_ANGLE,
+    BOARD_CAMERA_MAX_POLAR_ANGLE,
+  );
+
+  return {
+    distance,
+    polar,
+    azimuth: Math.atan2(position.x, position.z),
+  };
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function projectedPositionsEqual(
@@ -362,7 +541,7 @@ function HexTileMesh({
   return (
     <mesh
       position={[x, y, z]}
-      rotation={[0, Math.PI / 6, 0]}
+      rotation={[0, BOARD_3D_TILE_ROTATION_Y, 0]}
       receiveShadow
       onClick={handlePointer}
       onContextMenu={handleContextMenu}

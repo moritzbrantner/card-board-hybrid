@@ -275,6 +275,50 @@ test("keeps projected 3D hit targets usable after viewport resize", async ({ pag
   );
 });
 
+test("zooms and turns the 3D board camera with the mouse", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await useStoredBoardVisualMode(page, "3d");
+  const match = playableMatch({
+    playerWizard: { q: 0, r: 1 },
+    opponentWizard: { q: 1, r: 1 },
+  });
+
+  await mockMatchApi(page, async () => matchResponse(match), () => match);
+
+  await page.goto(`/match/${MATCH_ID}`);
+  await expect(page.locator('section[data-board-renderer="3d"]')).toBeVisible();
+  await expect.poll(() => hasPainted3dCanvas(page)).toBe(true);
+
+  const canvasBox = await page.locator(".board-3d-shell canvas").boundingBox();
+  expect(canvasBox).not.toBeNull();
+  const center = {
+    x: Math.round(canvasBox.x + canvasBox.width / 2),
+    y: Math.round(canvasBox.y + canvasBox.height / 2),
+  };
+  await page.mouse.move(center.x, center.y);
+
+  const initialCamera = await cameraMetrics(page);
+  await page.mouse.wheel(0, -700);
+  await expect.poll(() => cameraMetrics(page)).toMatchObject({
+    distance: expect.any(Number),
+  });
+  await expect.poll(async () => (await cameraMetrics(page)).distance).toBeLessThan(
+    initialCamera.distance - 0.1,
+  );
+
+  const zoomedCamera = await cameraMetrics(page);
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 180, center.y, { steps: 8 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => Math.abs((await cameraMetrics(page)).x - zoomedCamera.x))
+    .toBeGreaterThan(0.1);
+
+  await tile(page, "q 0, r 1, occupied by your wizard").click();
+  await expect(tile(page, "q 0, r 0, empty hex")).toHaveAttribute("data-legal", "true");
+});
+
 test("respects disabled state, context menus, visible counts, and replay read-only in 3D mode", async ({
   page,
 }) => {
@@ -452,6 +496,15 @@ async function expectHitTargetInsideCanvas(page, locator) {
   expect(targetCenter.x).toBeLessThanOrEqual(Math.ceil(canvasBox.x + canvasBox.width));
   expect(targetCenter.y).toBeGreaterThanOrEqual(Math.floor(canvasBox.y));
   expect(targetCenter.y).toBeLessThanOrEqual(Math.ceil(canvasBox.y + canvasBox.height));
+}
+
+async function cameraMetrics(page) {
+  return page.locator(".board-3d-shell canvas").evaluate((canvas) => ({
+    distance: Number(canvas.dataset.boardCameraDistance),
+    x: Number(canvas.dataset.boardCameraX),
+    y: Number(canvas.dataset.boardCameraY),
+    z: Number(canvas.dataset.boardCameraZ),
+  }));
 }
 
 async function useStoredBoardVisualMode(page, mode) {

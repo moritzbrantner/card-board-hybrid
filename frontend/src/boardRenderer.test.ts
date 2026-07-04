@@ -3,6 +3,7 @@ import { PerspectiveCamera } from "three";
 import {
   BOARD_3D_CAMERA,
   BOARD_3D_GROUP_ROTATION_Y,
+  BOARD_3D_TILE_ROTATION_Y,
   axialToBoardPosition,
   canCreateWebGLContext,
   isBoardRendererInteractive,
@@ -61,6 +62,7 @@ describe("board renderer boundary", () => {
     expect(axialToBoardPosition({ q: 0, r: 0 })).toEqual([0, 0, 0]);
     expect(axialToBoardPosition({ q: 1, r: 0 })[0]).toBeCloseTo(Math.sqrt(3));
     expect(axialToBoardPosition({ q: 0, r: 1 })).toEqual([Math.sqrt(3) / 2, 0, 1.5]);
+    expect(BOARD_3D_TILE_ROTATION_Y).toBe(0);
   });
 
   it("projects 3D hex centers through the shared board camera and orientation", () => {
