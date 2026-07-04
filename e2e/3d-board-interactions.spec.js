@@ -459,7 +459,7 @@ test("keeps reduced-motion first-time visitors on the 2D board", async ({ page }
   await expect(page.locator(".piece-token[class*='piece-anim-']")).toHaveCount(0);
 });
 
-test("shows marker fallback notice when configured 3D models fail to load", async ({ page }) => {
+test("shows procedural fallback notice when configured 3D models fail to load", async ({ page }) => {
   await useStoredBoardVisualMode(page, "3d");
   const match = playableMatch({
     playerHero: { q: 0, r: 1 },
@@ -470,8 +470,29 @@ test("shows marker fallback notice when configured 3D models fail to load", asyn
 
   await page.goto(`/match/${MATCH_ID}`);
   await expect(page.locator('section[data-board-renderer="3d"]')).toBeVisible();
-  await expect(page.getByRole("status").filter({ hasText: "fallback markers are shown" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "procedural miniatures are shown" })).toBeVisible();
   await expect(tile(page, "q 0, r 1, occupied by your hero")).toBeVisible();
+});
+
+test("uses procedural miniatures without an asset failure notice when no 3D model is configured", async ({
+  page,
+}) => {
+  await useStoredBoardVisualMode(page, "3d");
+  const match = playableMatch({
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
+    playerHeroType: "pyromancer",
+    opponentHeroType: "warden",
+    units: [ashScout({ q: 0, r: 0 })],
+  });
+
+  await mockMatchApi(page, async () => matchResponse(match), () => match);
+
+  await page.goto(`/match/${MATCH_ID}`);
+  await expect(page.locator('section[data-board-renderer="3d"]')).toBeVisible();
+  await expect.poll(() => hasPainted3dCanvas(page)).toBe(true);
+  await expect(page.getByRole("status").filter({ hasText: "procedural miniatures are shown" })).toHaveCount(0);
+  await expect(tile(page, "q 0, r 0, occupied by your unit")).toContainText("1/2 AP 2");
 });
 
 function tile(page, name) {
@@ -596,6 +617,8 @@ function playableMatch({
   phase = "planning",
   playerHero,
   opponentHero,
+  playerHeroType = "runekeeper",
+  opponentHeroType = "pyromancer",
   hand = [],
   units = [],
   prioritySide = null,
@@ -614,7 +637,7 @@ function playableMatch({
       hero: {
         id: "player-hero",
         side: "player",
-        heroType: "runekeeper",
+        heroType: playerHeroType,
         hp: 20,
         maxHp: 20,
         attack: 1,
@@ -637,7 +660,7 @@ function playableMatch({
       hero: {
         id: "opponent-hero",
         side: "opponent",
-        heroType: "pyromancer",
+        heroType: opponentHeroType,
         hp: 20,
         maxHp: 20,
         attack: 1,

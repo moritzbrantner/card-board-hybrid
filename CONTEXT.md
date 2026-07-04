@@ -156,6 +156,14 @@ _Avoid_: skin, cosmetic data, asset lookup
 A player presentation preference that chooses between the complete 2D board and the enhanced 3D board. It is stored on the account profile or locally for anonymous and seat-link play, and never changes match state, replay data, legality, or shared-match protocol semantics.
 _Avoid_: board state, match mode, rules mode
 
+**Board model asset**:
+A presentation-only 3D asset used by Board visual mode to render a Hero or Unit. It is not match state, replay data, card rules, or catalog legality.
+_Avoid_: model, skin, piece data
+
+**Procedural miniature**:
+A code-generated 3D fallback representation for a Hero or Unit when no Board model asset is configured or when that asset cannot load.
+_Avoid_: marker, placeholder, token
+
 **Seat**:
 One side-specific player slot in a shared match, either Player or Opponent.
 _Avoid_: account, user

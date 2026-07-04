@@ -33,6 +33,47 @@ const selectedUnitMatch = storyMatch({
   ],
 });
 
+const proceduralMiniaturesMatch = storyMatch({
+  units: [
+    storyUnit({ q: -1, r: 1 }, {
+      id: "story-ash-hound",
+      name: "Ash Hound",
+      templateId: "ash-hound",
+      attack: 2,
+      armor: 1,
+      maxArmor: 1,
+      apRemaining: 3,
+      maxAp: 3,
+    }),
+    storyUnit({ q: 0, r: 0 }, {
+      id: "story-stoneguard",
+      name: "Stoneguard",
+      templateId: "stoneguard",
+      attack: 1,
+      armor: 4,
+      maxArmor: 4,
+    }),
+    storyUnit({ q: 1, r: -1 }, {
+      id: "story-flame-weaver",
+      side: "opponent",
+      name: "Flame Weaver",
+      templateId: "flame-weaver",
+      attack: 3,
+      armor: 2,
+      maxArmor: 2,
+    }),
+    storyUnit({ q: 1, r: 0 }, {
+      id: "story-vanguard-golem",
+      side: "opponent",
+      name: "Vanguard Golem",
+      templateId: "vanguard-golem",
+      attack: 2,
+      armor: 5,
+      maxArmor: 5,
+    }),
+  ],
+});
+
 const meta = {
   title: "Board/Board",
   component: Board,
@@ -76,6 +117,13 @@ export const PendingPriority: Story = {
       actionStack: [pendingAttackStack],
       prioritySide: "player",
     }),
+  },
+};
+
+export const ThreeDProceduralMiniatures: Story = {
+  args: {
+    match: proceduralMiniaturesMatch,
+    boardVisualMode: "3d",
   },
 };
 

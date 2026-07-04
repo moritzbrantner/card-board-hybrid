@@ -2,7 +2,7 @@ import { Canvas } from "@react-three/fiber";
 import { Suspense, useEffect, useState } from "react";
 import { Box3, Object3D, Vector3 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { BOARD_MODEL_MANIFEST, type BoardModelManifest } from "./board3dModelManifest";
+import { BOARD_PIECE_VISUAL_MANIFEST, type BoardPieceVisualManifest } from "./board3dModelManifest";
 import type { HeroType } from "./types";
 
 type HeroPreview3DProps = {
@@ -42,8 +42,8 @@ export function HeroPreview3D({ heroType, label }: HeroPreview3DProps) {
 }
 
 function HeroModelOrFallback({ heroType }: { heroType: HeroType }) {
-  const manifest: BoardModelManifest = BOARD_MODEL_MANIFEST;
-  const entry = manifest.heroes[heroType];
+  const manifest: BoardPieceVisualManifest = BOARD_PIECE_VISUAL_MANIFEST;
+  const entry = manifest.heroes[heroType]?.modelAsset;
   const [model, setModel] = useState<Object3D | null>(null);
   const [failed, setFailed] = useState(false);
 

@@ -1,37 +1,68 @@
 import { describe, expect, it } from "vitest";
-import { resolveBoardModel, type BoardModelManifest } from "./board3dModelManifest";
+import {
+  resolveBoardPieceVisual,
+  type BoardPieceVisualManifest,
+  type ProceduralMiniatureRecipe,
+} from "./board3dModelManifest";
+import type { HeroVisualIdentity, UnitVisualIdentity } from "./matchVisualIdentity";
 import type { Unit, Hero } from "./types";
 
 const manifest = {
   heroes: {
-    runekeeper: { kind: "gltf", path: "/models/heroes/runekeeper.glb", scale: 0.8 },
+    runekeeper: {
+      modelAsset: { kind: "gltf", path: "/models/heroes/runekeeper.glb", scale: 0.8 },
+      procedural: recipe("caster"),
+    },
   },
   units: {
-    "ember-squire": { kind: "gltf", path: "/models/units/ember-squire.glb", scale: 0.7 },
+    "ember-squire": {
+      modelAsset: { kind: "gltf", path: "/models/units/ember-squire.glb", scale: 0.7 },
+      procedural: recipe("humanoid"),
+    },
+    "ash-hound": {
+      procedural: recipe("beast"),
+    },
   },
-} satisfies BoardModelManifest;
+} satisfies BoardPieceVisualManifest;
 
 describe("3D board model manifest", () => {
-  it("resolves known Hero and Unit model entries", () => {
-    expect(resolveBoardModel(makeHero("runekeeper"), manifest)).toEqual({
-      status: "available",
-      entry: manifest.heroes.runekeeper,
+  it("resolves configured Board model assets for known Heroes and Units", () => {
+    expect(resolveBoardPieceVisual(makeHero("runekeeper"), heroVisual("runekeeper"), manifest)).toEqual({
+      source: "model",
+      modelAsset: manifest.heroes.runekeeper.modelAsset,
+      procedural: manifest.heroes.runekeeper.procedural,
     });
-    expect(resolveBoardModel(makeUnit("ember-squire"), manifest)).toEqual({
-      status: "available",
-      entry: manifest.units["ember-squire"],
+    expect(resolveBoardPieceVisual(makeUnit("ember-squire"), unitVisual("ember-squire"), manifest)).toEqual({
+      source: "model",
+      modelAsset: manifest.units["ember-squire"].modelAsset,
+      procedural: manifest.units["ember-squire"].procedural,
     });
   });
 
-  it("returns explicit fallback state for missing model assets", () => {
-    expect(resolveBoardModel(makeHero("pyromancer"), manifest)).toEqual({
-      status: "fallback",
-      reason: "missing-manifest",
+  it("uses procedural miniatures when a known piece has no configured Board model asset", () => {
+    expect(resolveBoardPieceVisual(makeUnit("ash-hound"), unitVisual("ash-hound"), manifest)).toEqual({
+      source: "procedural",
+      procedural: manifest.units["ash-hound"].procedural,
+      reason: "missing-asset",
     });
-    expect(resolveBoardModel(makeUnit(undefined), manifest)).toEqual({
-      status: "fallback",
-      reason: "missing-manifest",
+  });
+
+  it("resolves legacy Units through the visual identity templateId", () => {
+    expect(resolveBoardPieceVisual(makeUnit(undefined), unitVisual("ember-squire"), manifest)).toEqual({
+      source: "model",
+      modelAsset: manifest.units["ember-squire"].modelAsset,
+      procedural: manifest.units["ember-squire"].procedural,
     });
+  });
+
+  it("returns an explicit unknown procedural state for unidentified Units", () => {
+    const resolved = resolveBoardPieceVisual(makeUnit(undefined), unitVisual(null), manifest);
+
+    expect(resolved).toMatchObject({
+      source: "procedural",
+      reason: "unknown-template",
+    });
+    expect(resolved.procedural.family).toBe("humanoid");
   });
 });
 
@@ -50,6 +81,49 @@ function makeHero(heroType: Hero["heroType"]): Hero & { pieceType: "hero"; name:
     apRemaining: 2,
     maxAp: 2,
     hasAttacked: false,
+  };
+}
+
+function unitVisual(templateId: string | null): UnitVisualIdentity {
+  return {
+    status: templateId ? "resolved" : "unknown",
+    templateId,
+    name: templateId ?? "Unknown Unit",
+    rarity: templateId ? "basic" : "unknown",
+    portraitPath: null,
+    portraitAlt: "Unit portrait unavailable",
+    fallbackLabel: "UNI",
+    baseStats: null,
+  };
+}
+
+function heroVisual(heroType: Hero["heroType"]): HeroVisualIdentity {
+  return {
+    status: "resolved",
+    heroType,
+    name: heroType,
+    portraitPath: `/hero-art/${heroType}.svg`,
+    portraitAlt: `${heroType} portrait`,
+    accentClass: heroType,
+    fallbackLabel: heroType.slice(0, 3).toUpperCase(),
+  };
+}
+
+function recipe(family: ProceduralMiniatureRecipe["family"]): ProceduralMiniatureRecipe {
+  return {
+    family,
+    scale: 1,
+    palette: {
+      primary: "#777777",
+      secondary: "#333333",
+      accent: "#d9b84f",
+    },
+    silhouette: {
+      body: "medium",
+      weapon: "sword",
+      shield: "none",
+      motion: "grounded",
+    },
   };
 }
 

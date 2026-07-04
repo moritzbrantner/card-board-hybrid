@@ -447,7 +447,7 @@ export function Board({
       >
         {assetFailureCount > 0 ? (
           <div className="board-renderer-notice" role="status">
-            Some 3D models are unavailable, so fallback markers are shown.
+            Some 3D models are unavailable, so procedural miniatures are shown.
           </div>
         ) : null}
         <Board3DRenderer
