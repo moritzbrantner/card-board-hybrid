@@ -31,7 +31,7 @@ test("AI deck selection remains visible with system and legal account deck recip
   expect(matchRequests).toEqual([
     {
       wizardType: "runekeeper",
-      playerDeckId: 102,
+      playerDeck: { source: "account", deckId: 102 },
       aiOpponent: { source: "account", deckId: 101, wizardType: "chronomancer" },
     },
   ]);
@@ -49,29 +49,23 @@ test("signed-in players choose account deck recipes for solo match creation", as
 
   await page.goto("/");
 
-  const deckSelector = page.getByLabel("Your Deck Recipe");
-  await expect(deckSelector).toHaveValue("102");
-  await expect(deckSelector).toContainText("Tournament Legal");
-  await expect(deckSelector).toContainText("Needs More Basics");
-  await expect(deckSelector).not.toContainText("Starter");
-  await expect(deckSelector).not.toContainText("Balanced Starter");
+  await expect(page.getByRole("button", { name: /Default Legal/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: /Tournament Legal/ })).toBeEnabled();
+  await expect(page.getByRole("button", { name: /Needs More Basics/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Needs More Basics/ })).toContainText(
+    "Draft deck cannot start a match",
+  );
+  await expect(page.getByRole("button", { name: /Balanced Starter/ })).toBeVisible();
 
-  const draftOption = deckSelector.getByRole("option", { name: /Needs More Basics/ });
-  await expect(draftOption).toHaveAttribute("disabled", "");
-  await expect(draftOption).toContainText("Draft - cannot start a match");
-
-  await deckSelector.selectOption("101");
-  await page.getByLabel("Wizard type").getByRole("button", { name: /Pyromancer/ }).click();
-  await page.getByRole("button", { name: /Spark Stone/ }).click();
+  await page.getByRole("button", { name: /Tournament Legal/ }).click();
   await page.getByRole("button", { name: "New Solo Match" }).click();
 
   await expect(page).toHaveURL(new RegExp(`/match/${MATCH_ID}$`));
   expect(matchRequests).toEqual([
     {
       wizardType: "pyromancer",
-      playerDeckId: 101,
+      playerDeck: { source: "account", deckId: 101 },
       aiOpponent: { source: "system", systemDeckId: "balanced-starter" },
-      runeIds: ["spark-stone"],
     },
   ]);
 });
@@ -90,25 +84,20 @@ test("signed-in players without legal deck recipes create solo matches through t
 
   await page.goto("/");
 
-  const deckSelector = page.getByLabel("Your Deck Recipe");
-  await expect(deckSelector).toContainText("Needs More Basics");
-  await expect(deckSelector).not.toContainText("Starter");
-  await expect(deckSelector).not.toContainText("Balanced Starter");
-  await expect(page.getByText("Create or repair a deck recipe before choosing a custom player deck.")).toBeVisible();
-  await expect(
-    page.getByLabel("Deck selection").getByRole("button", { name: "Decks" }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /Needs More Basics/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Needs More Basics/ })).toContainText(
+    "Draft deck cannot start a match",
+  );
+  await expect(page.getByRole("button", { name: /Balanced Starter/ })).toHaveAttribute("aria-pressed", "true");
 
-  await page.getByLabel("Wizard type").getByRole("button", { name: /Pyromancer/ }).click();
-  await page.getByRole("button", { name: /Spark Stone/ }).click();
   await page.getByRole("button", { name: "New Solo Match" }).click();
 
   await expect(page).toHaveURL(new RegExp(`/match/${MATCH_ID}$`));
   expect(matchRequests).toEqual([
     {
-      wizardType: "pyromancer",
+      wizardType: "runekeeper",
+      playerDeck: { source: "system", systemDeckId: "balanced-starter" },
       aiOpponent: { source: "system", systemDeckId: "balanced-starter" },
-      runeIds: ["spark-stone"],
     },
   ]);
 });
@@ -121,17 +110,17 @@ test("anonymous players create solo matches without account deck controls or vis
 
   await page.goto("/");
 
-  await expect(page.getByLabel("Your Deck Recipe")).toHaveCount(0);
+  await expect(page.getByLabel("Custom deck loadouts")).toHaveCount(0);
   await expect(page.getByText("Sign in to use your deck recipes")).toHaveCount(0);
   await expect(page.getByText("No account deck recipes")).toHaveCount(0);
 
-  await page.getByLabel("Wizard type").getByRole("button", { name: /Chronomancer/ }).click();
   await page.getByRole("button", { name: "New Solo Match" }).click();
 
   await expect(page).toHaveURL(new RegExp(`/match/${MATCH_ID}$`));
   expect(matchRequests).toEqual([
     {
-      wizardType: "chronomancer",
+      wizardType: "runekeeper",
+      playerDeck: { source: "system", systemDeckId: "balanced-starter" },
       aiOpponent: { source: "system", systemDeckId: "balanced-starter" },
     },
   ]);
@@ -148,19 +137,20 @@ test("home screen creates a shared match from the multiplayer action", async ({ 
 
   await page.goto("/");
 
-  await page.getByLabel("Wizard type").getByRole("button", { name: /Chronomancer/ }).click();
-  await page.getByRole("button", { name: /Spark Stone/ }).click();
   await page.getByRole("button", { name: "New Multiplayer Match" }).click();
 
   await expect(page).toHaveURL(new RegExp(`/match/${SHARED_MATCH_ID}/player-seat$`));
-  expect(sharedMatchRequests).toEqual([{ wizardType: "chronomancer" }]);
+  expect(sharedMatchRequests).toEqual([{ wizardType: "runekeeper" }]);
   expect(matchRequests).toEqual([]);
   expect(
     await page.evaluate((matchId) => sessionStorage.getItem(`rune-lanes-wizard:${matchId}`), SHARED_MATCH_ID),
-  ).toBe("chronomancer");
+  ).toBe("runekeeper");
   expect(
     await page.evaluate((matchId) => sessionStorage.getItem(`rune-lanes-runes:${matchId}`), SHARED_MATCH_ID),
-  ).toBe(JSON.stringify(["spark-stone"]));
+  ).toBe(JSON.stringify([]));
+  expect(
+    await page.evaluate((matchId) => sessionStorage.getItem(`rune-lanes-deck-choice:${matchId}`), SHARED_MATCH_ID),
+  ).toBe(JSON.stringify({ source: "account", deckId: 102 }));
 });
 
 async function mockHomeApi(page, matchRequests, options = {}) {
@@ -308,9 +298,12 @@ function deckRules() {
 }
 
 function deckRecipe(id, name, isDefault, legal) {
+  const wizardType = id === 101 ? "pyromancer" : "runekeeper";
   return {
     id,
     name,
+    wizardType,
+    runeIds: [],
     isDefault,
     cards: [],
     legality: {
