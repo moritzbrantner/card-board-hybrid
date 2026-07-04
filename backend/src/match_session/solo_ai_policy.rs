@@ -92,58 +92,46 @@ impl SoloAiPolicy {
             .iter()
             .filter(|card| card.cost <= view.opponent_mana)
         {
-            let CardKind::Spell { range, effect, .. } = &card.kind else {
+            let CardKind::Spell { effect, .. } = &card.kind else {
                 continue;
             };
 
-            let in_range = |piece: &PieceView| {
-                view.opponent_wizard.position.distance(piece.position) <= i32::from(*range)
-            };
-            let caster_position = view.opponent_wizard.position;
-            let caster_wizard_id = view.opponent_wizard.id.as_str();
-            let is_legal_spell_target = |piece: &PieceView| {
-                in_range(piece)
-                    && card_interactions::validate_spell_target(
-                        Side::Opponent,
-                        effect,
-                        caster_position,
-                        caster_wizard_id,
-                        piece,
-                    )
-                    .is_ok()
-            };
-
             let target = match effect {
-                SpellEffect::Damage { .. } => view
-                    .player_pieces
-                    .iter()
-                    .filter(|piece| is_legal_spell_target(piece))
-                    .find(|piece| piece.id == view.player_wizard.id)
-                    .or_else(|| {
-                        view.player_pieces
-                            .iter()
-                            .find(|piece| is_legal_spell_target(piece))
-                    }),
-                SpellEffect::AreaDamage { .. } | SpellEffect::LineDamage { .. } => view
-                    .player_pieces
-                    .iter()
-                    .find(|piece| is_legal_spell_target(piece)),
-                SpellEffect::Heal { .. } => view
-                    .opponent_pieces
-                    .iter()
-                    .filter(|piece| is_legal_spell_target(piece))
-                    .find(|piece| view.damaged_piece_ids.contains(&piece.id)),
-                SpellEffect::Buff { .. } => view
-                    .opponent_units
-                    .iter()
-                    .filter(|piece| is_legal_spell_target(piece))
-                    .max_by_key(|piece| piece.attack),
+                SpellEffect::Damage { .. } => {
+                    let legal_targets = legal_spell_targets_for_ai(card, view, &view.player_pieces);
+                    legal_targets
+                        .iter()
+                        .copied()
+                        .find(|piece| piece.id == view.player_wizard.id)
+                        .or_else(|| legal_targets.into_iter().next())
+                }
+                SpellEffect::AreaDamage { .. } | SpellEffect::LineDamage { .. } => {
+                    legal_spell_targets_for_ai(card, view, &view.player_pieces)
+                        .into_iter()
+                        .next()
+                }
+                SpellEffect::Heal { .. } => {
+                    legal_spell_targets_for_ai(card, view, &view.opponent_pieces)
+                        .into_iter()
+                        .find(|piece| view.damaged_piece_ids.contains(&piece.id))
+                }
+                SpellEffect::Buff { .. } => {
+                    legal_spell_targets_for_ai(card, view, &view.opponent_units)
+                        .into_iter()
+                        .max_by_key(|piece| piece.attack)
+                }
                 SpellEffect::Draw { .. } => {
-                    let target = &view.opponent_wizard;
                     if view.opponent_deck_count + view.opponent_discard_count > 0
-                        && is_legal_spell_target(target)
+                        && legal_spell_targets_for_ai(
+                            card,
+                            view,
+                            std::slice::from_ref(&view.opponent_wizard),
+                        )
+                        .into_iter()
+                        .next()
+                        .is_some()
                     {
-                        Some(target)
+                        Some(&view.opponent_wizard)
                     } else {
                         None
                     }
@@ -220,6 +208,20 @@ impl SoloAiPolicy {
             .filter(|neighbor| !view.occupied_hexes.contains(neighbor))
             .collect()
     }
+}
+
+fn legal_spell_targets_for_ai<'a>(
+    card: &Card,
+    view: &SoloAiView,
+    candidates: &'a [PieceView],
+) -> Vec<&'a PieceView> {
+    card_interactions::legal_spell_targets(
+        card,
+        Side::Opponent,
+        view.opponent_wizard.position,
+        &view.opponent_wizard.id,
+        candidates.iter(),
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -497,6 +499,39 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn selected_spell_target_is_legal_through_card_interaction_query() {
+        let mut view = base_view();
+        let player_unit = piece("player-unit", Side::Player, hex(0, 2));
+        view.player_pieces.push(player_unit.clone());
+        view.player_units.push(player_unit);
+        view.occupied_hexes.insert(hex(0, 2));
+        let damage_spell = spell_card("damage", 1, SpellEffect::Damage { amount: 1 });
+        view.opponent_hand = vec![damage_spell.clone()];
+        view.opponent_mana = 1;
+
+        let SoloAiDecision::TakeAction(SoloAiActionIntent::PlayCard {
+            target: ActionTarget::Piece { piece_id },
+            ..
+        }) = policy_decision(view.clone())
+        else {
+            panic!("damage spell should choose a piece target");
+        };
+
+        let legal_target_ids: HashSet<_> = card_interactions::legal_spell_targets(
+            &damage_spell,
+            Side::Opponent,
+            view.opponent_wizard.position,
+            &view.opponent_wizard.id,
+            view.player_pieces.iter(),
+        )
+        .into_iter()
+        .map(|piece| piece.id.clone())
+        .collect();
+
+        assert!(legal_target_ids.contains(&piece_id));
     }
 
     #[test]
