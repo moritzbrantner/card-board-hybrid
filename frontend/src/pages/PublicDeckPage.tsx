@@ -92,9 +92,7 @@ export function PublicDeckPage({
             <h1>{deck.name}</h1>
           </div>
           <div className="actions">
-            {currentUser ? (
-              <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
-            ) : null}
+            <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
             <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Match picker">
               <House size={18} />
             </button>

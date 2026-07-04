@@ -72,6 +72,8 @@ export function MatchPage({
   onNavigate,
   currentUser,
   onSignOut,
+  allowSignOut,
+  loginNextPath,
   visualPreferences,
 }: {
   matchId: string;
@@ -577,7 +579,13 @@ export function MatchPage({
             <p className="match-id">Match {matchId}</p>
           </div>
           <div className="actions">
-            <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+            <AccountActions
+              currentUser={currentUser}
+              onNavigate={onNavigate}
+              onSignOut={onSignOut}
+              allowSignOut={allowSignOut}
+              loginNextPath={loginNextPath}
+            />
             <button
               className="icon-button"
               type="button"

@@ -1,4 +1,4 @@
-import { History, House, LogOut, Play, RotateCcw, Save, Sparkles } from "lucide-react";
+import { History, House, Play, RotateCcw, Save, Sparkles } from "lucide-react";
 import { useEffect, useState, type CSSProperties } from "react";
 import {
   loadProfileMatches,
@@ -19,6 +19,7 @@ import type {
   WizardSkillTree,
   WizardType,
 } from "./types";
+import { AccountActions } from "./components/common";
 import { WIZARD_OPTIONS } from "./wizards";
 
 type ProfilePageProps = {
@@ -142,9 +143,12 @@ export function ProfilePage({
             <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Match picker">
               <House size={18} />
             </button>
-            <button className="icon-button" type="button" onClick={onSignOut} title="Sign out">
-              <LogOut size={18} />
-            </button>
+            <AccountActions
+              currentUser={currentUser}
+              onNavigate={onNavigate}
+              onSignOut={onSignOut}
+              activeAccountRoute="profile"
+            />
           </div>
         </header>
 

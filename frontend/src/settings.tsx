@@ -1,4 +1,4 @@
-import { House, Keyboard, LogOut, RefreshCcw, RotateCcw, Save } from "lucide-react";
+import { House, Keyboard, RefreshCcw, RotateCcw, Save } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   defaultHotkeyMap,
@@ -13,12 +13,14 @@ import { accountPreferencesSavePayload } from "./preferences";
 import type {
   AccountPreferences,
   AnimationSpeed,
+  AuthUser,
   BoardScale,
   BoardVisualMode,
   HotkeyCommandId,
   MotionPreference,
   PreferenceTheme,
 } from "./types";
+import { AccountActions } from "./components/common";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 type SettingsState =
@@ -28,7 +30,7 @@ type SettingsState =
 
 type SettingsPageProps = {
   preferencesState: SettingsState;
-  isSignedIn: boolean;
+  currentUser: AuthUser | null;
   onNavigate: (to: string) => void;
   onSave: (preferences: ReturnType<typeof accountPreferencesSavePayload>) => Promise<void>;
   onRefresh: () => Promise<void>;
@@ -67,12 +69,13 @@ const BOARD_VISUAL_MODE_OPTIONS: Array<[BoardVisualMode, string]> = [
 
 export function SettingsPage({
   preferencesState,
-  isSignedIn,
+  currentUser,
   onNavigate,
   onSave,
   onRefresh,
   onSignOut,
 }: SettingsPageProps) {
+  const isSignedIn = Boolean(currentUser);
   const preferences = preferencesState.preferences;
   const [theme, setTheme] = useState<PreferenceTheme>(preferences.theme);
   const [motion, setMotion] = useState<MotionPreference>(preferences.motion);
@@ -183,10 +186,13 @@ export function SettingsPage({
             <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Match picker">
               <House size={18} />
             </button>
-            {isSignedIn ? (
-              <button className="icon-button" type="button" onClick={onSignOut} title="Sign out">
-                <LogOut size={18} />
-              </button>
+            {currentUser ? (
+              <AccountActions
+                currentUser={currentUser}
+                onNavigate={onNavigate}
+                onSignOut={onSignOut}
+                activeAccountRoute="settings"
+              />
             ) : null}
           </div>
         </header>

@@ -395,6 +395,66 @@ button {
   min-width: 0;
 }
 
+.account-menu-root {
+  position: relative;
+}
+
+.account-menu-trigger {
+  max-width: min(320px, 46vw);
+}
+
+.account-menu-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  min-width: 190px;
+  border: 1px solid rgba(247, 243, 234, 0.16);
+  border-radius: 8px;
+  padding: 6px;
+  background: rgba(21, 24, 23, 0.96);
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(12px);
+}
+
+.account-menu-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  min-height: 38px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #fffaf0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+}
+
+.account-menu-item:hover,
+.account-menu-item:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.account-menu-item:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+.account-menu-item:disabled:hover {
+  background: transparent;
+}
+
 .account-actions > span {
   max-width: min(240px, 32vw);
   overflow: hidden;

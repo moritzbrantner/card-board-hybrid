@@ -178,7 +178,7 @@ export function App() {
     return (
       <SettingsPage
         preferencesState={preferences.state}
-        isSignedIn={Boolean(currentUser)}
+        currentUser={currentUser}
         onNavigate={navigate}
         onSave={preferences.save}
         onRefresh={preferences.refresh}
@@ -228,6 +228,8 @@ export function App() {
         onNavigate={navigate}
         currentUser={currentUser}
         onSignOut={handleSignOut}
+        allowSignOut={false}
+        loginNextPath={path}
         visualPreferences={visualPreferences}
       />
     );
@@ -243,6 +245,8 @@ export function App() {
         onNavigate={navigate}
         currentUser={currentUser}
         onSignOut={handleSignOut}
+        allowSignOut={false}
+        loginNextPath={path}
         visualPreferences={visualPreferences}
       />
     );
@@ -257,6 +261,8 @@ export function App() {
         onNavigate={navigate}
         currentUser={currentUser}
         onSignOut={handleSignOut}
+        allowSignOut={false}
+        loginNextPath={path}
         visualPreferences={visualPreferences}
       />
     );

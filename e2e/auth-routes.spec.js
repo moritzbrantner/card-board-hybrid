@@ -198,8 +198,10 @@ test("signing out clears the session and returns to the public match picker", as
 
   await page.goto("/profile");
   await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
+  await expect(page.getByTitle("Sign out")).toHaveCount(0);
 
-  await page.getByTitle("Sign out").click();
+  await page.getByRole("button", { name: /Account menu for Rune Player/ }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
 
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole("heading", { name: "Choose Your Loadout" })).toBeVisible();
@@ -208,6 +210,93 @@ test("signing out clears the session and returns to the public match picker", as
     .poll(() => page.evaluate((key) => localStorage.getItem(key), AUTH_TOKEN_STORAGE_KEY))
     .toBeNull();
   expect(authRequests).toEqual(["/api/auth/logout"]);
+});
+
+test("signed-in home account menu opens profile, settings, and sign out actions", async ({ page }) => {
+  await page.addInitScript(
+    ({ key }) => localStorage.setItem(key, "existing-token"),
+    { key: AUTH_TOKEN_STORAGE_KEY },
+  );
+  await mockAuthApi(page);
+
+  await page.goto("/");
+
+  const accountMenu = page.getByRole("button", { name: /Account menu for Rune Player/ });
+  await expect(accountMenu).toBeVisible();
+  await expect(page.getByText("Rune Player")).toBeVisible();
+  await expect(page.getByText("Lv. 1")).toBeVisible();
+
+  await accountMenu.click();
+  await expect(page.getByRole("menuitem", { name: "Profile" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
+
+  await page.getByRole("menuitem", { name: "Profile" }).click();
+  await expect(page).toHaveURL(/\/profile$/);
+
+  await page.getByRole("button", { name: /Account menu for Rune Player/ }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+});
+
+test("profile and settings mark the current account menu item disabled", async ({ page }) => {
+  await page.addInitScript(
+    ({ key }) => localStorage.setItem(key, "existing-token"),
+    { key: AUTH_TOKEN_STORAGE_KEY },
+  );
+  await mockAuthApi(page);
+
+  await page.goto("/profile");
+  await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
+
+  await page.getByRole("button", { name: /Account menu for Rune Player/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Profile" })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: "Settings" })).toBeEnabled();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeEnabled();
+
+  await page.goto("/settings");
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+
+  await page.getByRole("button", { name: /Account menu for Rune Player/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Profile" })).toBeEnabled();
+  await expect(page.getByRole("menuitem", { name: "Settings" })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeEnabled();
+});
+
+test("match-related account menu omits sign out for signed-in players", async ({ page }) => {
+  await page.addInitScript(
+    ({ key }) => localStorage.setItem(key, "existing-token"),
+    { key: AUTH_TOKEN_STORAGE_KEY },
+  );
+  await mockAuthApi(page);
+
+  await page.goto("/match/menu-match");
+  await expect(page.getByRole("heading", { name: "Round 1" })).toBeVisible();
+
+  await page.getByRole("button", { name: /Account menu for Rune Player/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Profile" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toHaveCount(0);
+});
+
+test("signed-out match sign in returns to the same match route", async ({ page }) => {
+  const authRequests = [];
+  await mockAuthApi(page, authRequests);
+
+  await page.goto("/match/menu-match");
+  await expect(page.getByRole("heading", { name: "Round 1" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Sign In" }).click();
+  await expect(page).toHaveURL(/\/login\?/);
+  expect(new URL(page.url()).searchParams.get("next")).toBe("/match/menu-match");
+
+  await page.getByLabel("Email").fill("player@local.dev");
+  await page.getByLabel("Password").fill("pw");
+  await page.getByRole("button", { name: "Sign In" }).click();
+
+  await expect(page).toHaveURL(/\/match\/menu-match$/);
+  await expect(page.getByRole("heading", { name: "Round 1" })).toBeVisible();
+  expect(authRequests).toEqual(["/api/auth/login"]);
 });
 
 test("protected route redirects replace the protected URL in browser history", async ({ page }) => {
@@ -309,8 +398,28 @@ async function mockAuthApi(page, authRequests = []) {
       return;
     }
 
+    if (url.pathname === "/api/progression") {
+      await route.fulfill({ json: progression() });
+      return;
+    }
+
+    if (url.pathname === "/api/preferences" && request.method() === "GET") {
+      await route.fulfill({ json: preferences() });
+      return;
+    }
+
+    if (url.pathname === "/api/preferences" && request.method() === "PATCH") {
+      await route.fulfill({ json: { ...request.postDataJSON(), updatedAt: 20 } });
+      return;
+    }
+
     if (url.pathname === "/api/matches" && request.method() === "GET") {
       await route.fulfill({ json: { matches: [] } });
+      return;
+    }
+
+    if (url.pathname === "/api/matches/menu-match" && request.method() === "GET") {
+      await route.fulfill({ json: matchResponse("menu-match", playableMatch()) });
       return;
     }
 
@@ -428,6 +537,31 @@ function authUser(email) {
   };
 }
 
+function preferences() {
+  return {
+    theme: "system",
+    motion: "system",
+    animationSpeed: "normal",
+    boardScale: "normal",
+    boardVisualMode: "2d",
+    hotkeys: [],
+    updatedAt: 10,
+  };
+}
+
+function progression() {
+  return {
+    account: authUser("player@local.dev").progressionSummary,
+    wizards: [],
+    runes: [],
+    skillTrees: [],
+    loadouts: [
+      { wizardType: "runekeeper", runeIds: [] },
+      { wizardType: "pyromancer", runeIds: [] },
+    ],
+  };
+}
+
 function deckRules() {
   return {
     maxDecksPerAccount: 12,
@@ -438,4 +572,74 @@ function deckRules() {
     advancedTotalLimit: 12,
     rareTotalLimit: 6,
   };
+}
+
+function matchResponse(matchId, matchState) {
+  return { matchId, matchState, replayFrames: [] };
+}
+
+function playableMatch() {
+  return {
+    mode: "solo",
+    round: 1,
+    phase: "planning",
+    activeSide: "player",
+    prioritySide: null,
+    player: participant("player"),
+    opponent: participant("opponent"),
+    board: { radius: 3, tiles: radiusThreeTiles(), units: [], droppedItems: [] },
+    actionStack: [],
+    log: [],
+    winner: null,
+  };
+}
+
+function participant(side) {
+  return {
+    side,
+    mana: 5,
+    maxMana: 5,
+    wizard: {
+      id: `${side}-wizard`,
+      side,
+      wizardType: side === "player" ? "runekeeper" : "pyromancer",
+      hp: 20,
+      maxHp: 20,
+      attack: 1,
+      position: side === "player" ? { q: 0, r: 3 } : { q: 0, r: -3 },
+      apRemaining: side === "player" ? 3 : 0,
+      maxAp: 3,
+      hasAttacked: false,
+    },
+    hand: [],
+    handCount: 0,
+    deckCount: 40,
+    discardCount: 0,
+    progression: {
+      runeIds: [],
+      skillIds: [],
+      effects: {
+        maxHpDelta: 0,
+        attackDelta: 0,
+        maxApDelta: 0,
+        manaDelta: 0,
+        openingHandDelta: 0,
+        summonedUnitArmorDelta: 0,
+        firstSummonedUnitArmorDelta: 0,
+        spellDamageDelta: 0,
+      },
+    },
+  };
+}
+
+function radiusThreeTiles() {
+  const tiles = [];
+  for (let q = -3; q <= 3; q += 1) {
+    const minR = Math.max(-3, -q - 3);
+    const maxR = Math.min(3, -q + 3);
+    for (let r = minR; r <= maxR; r += 1) {
+      tiles.push({ coord: { q, r } });
+    }
+  }
+  return tiles;
 }

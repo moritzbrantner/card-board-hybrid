@@ -81,6 +81,9 @@ export type AccountProps = {
   currentUser: AuthUser | null;
   onSignOut: () => void;
   onNavigate: (to: string) => void;
+  allowSignOut?: boolean;
+  loginNextPath?: string;
+  activeAccountRoute?: "profile" | "settings" | null;
 };
 
 export type AppliedVisualPreferences = {

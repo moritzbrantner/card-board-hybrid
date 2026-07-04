@@ -13,6 +13,8 @@ export function ReplayPage({
   onNavigate,
   currentUser,
   onSignOut,
+  allowSignOut,
+  loginNextPath,
   visualPreferences,
 }: {
   matchId: string;
@@ -80,7 +82,13 @@ export function ReplayPage({
             <p className="match-id">Match {matchId}</p>
           </div>
           <div className="actions">
-            <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+            <AccountActions
+              currentUser={currentUser}
+              onNavigate={onNavigate}
+              onSignOut={onSignOut}
+              allowSignOut={allowSignOut}
+              loginNextPath={loginNextPath}
+            />
             <button
               className="icon-button"
               type="button"
