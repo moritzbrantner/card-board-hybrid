@@ -40,6 +40,14 @@ _Avoid_: cell, square
 The relationship between two neighboring hexes that share an edge.
 _Avoid_: bordering tile
 
+**Attack range**:
+The maximum hex distance at which a Hero or Unit can attack an enemy piece. Range 1 means adjacent combat.
+_Avoid_: reach, weapon range
+
+**Hero passive**:
+A built-in Hero identity rule active in a match without spending cards, runes, or skill points.
+_Avoid_: base skill, innate perk
+
 **Radius-3 arena**:
 The 37-hex board used by the first hex version of Rune Lanes.
 _Avoid_: lane board

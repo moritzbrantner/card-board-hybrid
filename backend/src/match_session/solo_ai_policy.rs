@@ -13,7 +13,7 @@ impl Default for SoloAiPolicy {
     fn default() -> Self {
         Self {
             rules: vec![
-                SoloAiRuleId::AdjacentAttack,
+                SoloAiRuleId::InRangeAttack,
                 SoloAiRuleId::UsefulSpell,
                 SoloAiRuleId::HighestCostUnitSummon,
                 SoloAiRuleId::MoveTowardPlayerHero,
@@ -40,14 +40,14 @@ impl SoloAiPolicy {
 
     fn evaluate_rule(&self, rule: SoloAiRuleId, view: &SoloAiView) -> Option<SoloAiActionIntent> {
         match rule {
-            SoloAiRuleId::AdjacentAttack => self.adjacent_attack(view),
+            SoloAiRuleId::InRangeAttack => self.in_range_attack(view),
             SoloAiRuleId::UsefulSpell => self.useful_spell(view),
             SoloAiRuleId::HighestCostUnitSummon => self.highest_cost_unit_summon(view),
             SoloAiRuleId::MoveTowardPlayerHero => self.move_toward_player_hero(view),
         }
     }
 
-    fn adjacent_attack(&self, view: &SoloAiView) -> Option<SoloAiActionIntent> {
+    fn in_range_attack(&self, view: &SoloAiView) -> Option<SoloAiActionIntent> {
         let mut attackers = view.opponent_pieces.clone();
         attackers.sort_by_key(|piece| {
             if piece.id == view.opponent_hero.id {
@@ -61,7 +61,7 @@ impl SoloAiPolicy {
             if attacker.ap_remaining == 0 || attacker.has_attacked {
                 continue;
             }
-            if attacker.position.is_adjacent(view.player_hero.position) {
+            if piece_can_attack(&attacker, &view.player_hero) {
                 return Some(SoloAiActionIntent::Attack {
                     attacker_id: attacker.id,
                     target_id: view.player_hero.id.clone(),
@@ -70,7 +70,7 @@ impl SoloAiPolicy {
             if let Some(target) = view
                 .player_units
                 .iter()
-                .find(|unit| attacker.position.is_adjacent(unit.position))
+                .find(|unit| piece_can_attack(&attacker, unit))
             {
                 return Some(SoloAiActionIntent::Attack {
                     attacker_id: attacker.id,
@@ -177,6 +177,12 @@ impl SoloAiPolicy {
             .opponent_pieces
             .iter()
             .filter(|piece| piece.ap_remaining > 0)
+            .filter(|piece| {
+                !view
+                    .player_pieces
+                    .iter()
+                    .any(|target| piece_can_attack(piece, target))
+            })
             .filter_map(|piece| {
                 self.empty_neighbors(view, piece.position)
                     .into_iter()
@@ -265,10 +271,15 @@ pub(super) enum SoloAiActionIntent {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SoloAiRuleId {
-    AdjacentAttack,
+    InRangeAttack,
     UsefulSpell,
     HighestCostUnitSummon,
     MoveTowardPlayerHero,
+}
+
+fn piece_can_attack(attacker: &PieceView, target: &PieceView) -> bool {
+    let distance = attacker.position.distance(target.position);
+    distance >= 1 && distance <= i32::from(attacker.attack_range)
 }
 
 #[cfg(test)]
@@ -316,6 +327,7 @@ mod tests {
             side,
             position,
             attack: 1,
+            attack_range: 1,
             ap_remaining: 1,
             has_attacked: false,
         }
@@ -366,7 +378,7 @@ mod tests {
         assert_eq!(
             SoloAiPolicy::default().rule_order(),
             &[
-                SoloAiRuleId::AdjacentAttack,
+                SoloAiRuleId::InRangeAttack,
                 SoloAiRuleId::UsefulSpell,
                 SoloAiRuleId::HighestCostUnitSummon,
                 SoloAiRuleId::MoveTowardPlayerHero,

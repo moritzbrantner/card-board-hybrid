@@ -136,6 +136,7 @@ function hero(id, side, position) {
     hp: side === "player" ? 20 : 18,
     maxHp: side === "player" ? 20 : 18,
     attack: side === "player" ? 1 : 2,
+    attackRange: 1,
     position,
     apRemaining: 3,
     maxAp: 3,

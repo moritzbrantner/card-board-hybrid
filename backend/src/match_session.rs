@@ -135,6 +135,11 @@ pub enum ReplayEvent {
         unit_id: String,
         name: String,
     },
+    ManaGained {
+        side: Side,
+        amount: u8,
+        source: ReplayManaSource,
+    },
     ItemEquipped {
         side: Side,
         unit_id: String,
@@ -157,6 +162,16 @@ pub enum ReplayEvent {
     MatchEnded {
         winner: Side,
     },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ReplayManaSource {
+    BarbarianKill { hero_id: String, unit_id: String },
 }
 
 #[derive(Clone, Debug)]
@@ -302,6 +317,8 @@ pub struct Hero {
     pub hp: i32,
     pub max_hp: i32,
     pub attack: i32,
+    #[serde(default = "default_attack_range")]
+    pub attack_range: u8,
     pub position: HexCoord,
     pub ap_remaining: u8,
     pub max_ap: u8,
@@ -326,6 +343,7 @@ struct HeroProfile {
     max_hp: i32,
     attack: i32,
     max_ap: u8,
+    attack_range: u8,
 }
 
 impl HeroType {
@@ -335,41 +353,49 @@ impl HeroType {
                 max_hp: 20,
                 attack: 1,
                 max_ap: 3,
+                attack_range: default_attack_range(),
             },
             Self::Pyromancer => HeroProfile {
                 max_hp: 18,
                 attack: 2,
                 max_ap: 3,
+                attack_range: default_attack_range(),
             },
             Self::Chronomancer => HeroProfile {
                 max_hp: 16,
                 attack: 1,
                 max_ap: 4,
+                attack_range: default_attack_range(),
             },
             Self::Warden => HeroProfile {
                 max_hp: 24,
                 attack: 1,
                 max_ap: 2,
+                attack_range: default_attack_range(),
             },
             Self::Battlemage => HeroProfile {
                 max_hp: 20,
                 attack: 2,
                 max_ap: 2,
+                attack_range: default_attack_range(),
             },
             Self::Barbarian => HeroProfile {
                 max_hp: 22,
                 attack: 3,
                 max_ap: 2,
+                attack_range: default_attack_range(),
             },
             Self::Archer => HeroProfile {
                 max_hp: 16,
                 attack: 2,
                 max_ap: 4,
+                attack_range: 2,
             },
             Self::Builder => HeroProfile {
                 max_hp: 24,
                 attack: 1,
                 max_ap: 2,
+                attack_range: default_attack_range(),
             },
         }
     }
@@ -407,6 +433,8 @@ pub struct Unit {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub template_id: Option<String>,
     pub attack: i32,
+    #[serde(default = "default_attack_range")]
+    pub attack_range: u8,
     pub armor: i32,
     pub max_armor: i32,
     pub position: HexCoord,
@@ -618,8 +646,15 @@ struct PieceView {
     side: Side,
     position: HexCoord,
     attack: i32,
+    attack_range: u8,
     ap_remaining: u8,
     has_attacked: bool,
+}
+
+#[derive(Clone, Debug)]
+struct DestroyedUnit {
+    side: Side,
+    unit_id: String,
 }
 
 impl fmt::Display for MatchError {
@@ -1878,7 +1913,7 @@ impl MatchState {
         if attacker.has_attacked {
             return Err(MatchError::AlreadyAttacked);
         }
-        if !attacker.position.is_adjacent(target.position) {
+        if !piece_can_attack(&attacker, &target) {
             return Err(MatchError::NotAdjacent);
         }
 
@@ -1988,17 +2023,21 @@ impl MatchState {
             return;
         };
 
-        if attacker.side != side
-            || target.side == side
-            || !attacker.position.is_adjacent(target.position)
-        {
+        if attacker.side != side || target.side == side || !piece_can_attack(&attacker, &target) {
             self.log
                 .insert(0, format!("Attack by {} had no legal target.", attacker_id));
             return;
         }
 
+        let counter_damage_to_attacker = if piece_can_attack(&target, &attacker) {
+            target.attack
+        } else {
+            0
+        };
         self.damage_piece(target_id, attacker.attack);
-        self.damage_piece(attacker_id, target.attack);
+        if counter_damage_to_attacker > 0 {
+            self.damage_piece(attacker_id, counter_damage_to_attacker);
+        }
         self.record_replay_frame(
             frames,
             action_index,
@@ -2007,10 +2046,20 @@ impl MatchState {
                 attacker_id: attacker_id.to_string(),
                 target_id: target_id.to_string(),
                 damage_to_target: attacker.attack,
-                counter_damage_to_attacker: target.attack,
+                counter_damage_to_attacker,
             },
         );
-        self.remove_dead_units(frames, action_index);
+        let destroyed = self.remove_dead_units(frames, action_index);
+        self.apply_barbarian_combat_mana(
+            &attacker,
+            &target,
+            target_id,
+            attacker_id,
+            counter_damage_to_attacker,
+            &destroyed,
+            frames,
+            action_index,
+        );
         self.log.insert(
             0,
             format!(
@@ -2317,8 +2366,7 @@ impl MatchState {
             return;
         }
         if self.opponent.hero.id == piece_id {
-            self.opponent.hero.hp =
-                (self.opponent.hero.hp + amount).min(self.opponent.hero.max_hp);
+            self.opponent.hero.hp = (self.opponent.hero.hp + amount).min(self.opponent.hero.max_hp);
             return;
         }
         if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
@@ -2344,7 +2392,7 @@ impl MatchState {
         &mut self,
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
-    ) {
+    ) -> Vec<DestroyedUnit> {
         let destroyed: Vec<_> = self
             .board
             .units
@@ -2361,6 +2409,7 @@ impl MatchState {
             })
             .collect();
         self.board.units.retain(|unit| unit.armor > 0);
+        let mut destroyed_units = Vec::new();
         for (side, unit_id, name, position, items) in destroyed {
             self.record_replay_frame(
                 frames,
@@ -2371,6 +2420,10 @@ impl MatchState {
                     name,
                 },
             );
+            destroyed_units.push(DestroyedUnit {
+                side,
+                unit_id: unit_id.clone(),
+            });
             for item in items {
                 let dropped_id = format!("dropped-{}", item.id);
                 self.board.dropped_items.push(DroppedItem {
@@ -2391,6 +2444,68 @@ impl MatchState {
                 );
             }
         }
+        destroyed_units
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "combat attribution needs both sides of the resolved attack"
+    )]
+    fn apply_barbarian_combat_mana(
+        &mut self,
+        attacker: &PieceView,
+        target: &PieceView,
+        target_id: &str,
+        attacker_id: &str,
+        counter_damage_to_attacker: i32,
+        destroyed: &[DestroyedUnit],
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        for destroyed_unit in destroyed {
+            if destroyed_unit.unit_id == target_id {
+                self.apply_barbarian_kill_mana(attacker, destroyed_unit, frames, action_index);
+            }
+            if counter_damage_to_attacker > 0 && destroyed_unit.unit_id == attacker_id {
+                self.apply_barbarian_kill_mana(target, destroyed_unit, frames, action_index);
+            }
+        }
+    }
+
+    fn apply_barbarian_kill_mana(
+        &mut self,
+        killer: &PieceView,
+        destroyed_unit: &DestroyedUnit,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        if destroyed_unit.side == killer.side || !self.is_barbarian_hero(&killer.id) {
+            return;
+        }
+
+        let amount = 2;
+        let player = self.player_mut(killer.side);
+        player.mana = player.mana.saturating_add(amount);
+        self.log
+            .insert(0, format!("Barbarian gained {amount} mana from the kill."));
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::ManaGained {
+                side: killer.side,
+                amount,
+                source: ReplayManaSource::BarbarianKill {
+                    hero_id: killer.id.clone(),
+                    unit_id: destroyed_unit.unit_id.clone(),
+                },
+            },
+        );
+    }
+
+    fn is_barbarian_hero(&self, piece_id: &str) -> bool {
+        self.player.hero.id == piece_id && self.player.hero.hero_type == HeroType::Barbarian
+            || self.opponent.hero.id == piece_id
+                && self.opponent.hero.hero_type == HeroType::Barbarian
     }
 
     fn pick_up_dropped_items_at(
@@ -2574,6 +2689,10 @@ fn default_next_stack_item_id() -> u32 {
 }
 
 fn default_next_item_id() -> u32 {
+    1
+}
+
+fn default_attack_range() -> u8 {
     1
 }
 
@@ -2800,6 +2919,7 @@ impl Hero {
             hp: max_hp,
             max_hp,
             attack,
+            attack_range: profile.attack_range,
             position,
             ap_remaining: max_ap,
             max_ap,
@@ -2817,6 +2937,11 @@ fn mana_with_progression(base: u8, delta: i8) -> u8 {
     value.clamp(0, i16::from(MAX_MANA) + i16::from(delta.max(0))) as u8
 }
 
+fn piece_can_attack(attacker: &PieceView, target: &PieceView) -> bool {
+    let distance = attacker.position.distance(target.position);
+    distance >= 1 && distance <= i32::from(attacker.attack_range)
+}
+
 impl From<&Hero> for PieceView {
     fn from(hero: &Hero) -> Self {
         Self {
@@ -2824,6 +2949,7 @@ impl From<&Hero> for PieceView {
             side: hero.side,
             position: hero.position,
             attack: hero.attack,
+            attack_range: hero.attack_range,
             ap_remaining: hero.ap_remaining,
             has_attacked: hero.has_attacked,
         }
@@ -2837,6 +2963,7 @@ impl From<&Unit> for PieceView {
             side: unit.side,
             position: unit.position,
             attack: unit.attack,
+            attack_range: unit.attack_range,
             ap_remaining: unit.ap_remaining,
             has_attacked: unit.has_attacked,
         }
@@ -2935,6 +3062,31 @@ mod tests {
             .iter()
             .find(|unit| unit.id == unit_id)
             .map(|unit| unit.armor)
+    }
+
+    fn board_unit(
+        id: &str,
+        side: Side,
+        position: HexCoord,
+        attack: i32,
+        attack_range: u8,
+        armor: i32,
+    ) -> Unit {
+        Unit {
+            id: id.to_string(),
+            side,
+            name: id.to_string(),
+            template_id: Some(id.to_string()),
+            attack,
+            attack_range,
+            armor,
+            max_armor: armor,
+            position,
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+            items: Vec::new(),
+        }
     }
 
     fn card_play_event_names(frames: &[RecordedReplayFrame]) -> Vec<&'static str> {
@@ -3085,6 +3237,7 @@ mod tests {
             name: "Stoneguard".to_string(),
             template_id: Some("stoneguard".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 2,
             max_armor: 4,
             position: hex(0, 2),
@@ -3189,6 +3342,55 @@ mod tests {
     }
 
     #[test]
+    fn attack_range_serializes_for_heroes_and_units() {
+        let mut game = MatchState::new_with_seed_and_player_hero_type(7, HeroType::Archer);
+        game.board
+            .units
+            .push(board_unit("player-unit", Side::Player, hex(0, 2), 1, 1, 2));
+
+        let value = serde_json::to_value(&game).expect("match should serialize");
+
+        assert_eq!(value["player"]["hero"]["attackRange"], 2);
+        assert_eq!(value["opponent"]["hero"]["attackRange"], 1);
+        assert_eq!(value["board"]["units"][0]["attackRange"], 1);
+    }
+
+    #[test]
+    fn attack_range_defaults_when_old_snapshots_do_not_include_it() {
+        let hero: Hero = serde_json::from_value(json!({
+            "id": "player-hero",
+            "side": "player",
+            "heroType": "runekeeper",
+            "hp": 20,
+            "maxHp": 20,
+            "attack": 1,
+            "position": { "q": 0, "r": 3 },
+            "apRemaining": 3,
+            "maxAp": 3,
+            "hasAttacked": false
+        }))
+        .expect("old hero snapshot should deserialize");
+        let unit: Unit = serde_json::from_value(json!({
+            "id": "unit",
+            "side": "player",
+            "name": "Unit",
+            "templateId": "unit",
+            "attack": 1,
+            "armor": 2,
+            "maxArmor": 2,
+            "position": { "q": 0, "r": 2 },
+            "apRemaining": 2,
+            "maxAp": 2,
+            "hasAttacked": false,
+            "items": []
+        }))
+        .expect("old unit snapshot should deserialize");
+
+        assert_eq!(hero.attack_range, 1);
+        assert_eq!(unit.attack_range, 1);
+    }
+
+    #[test]
     fn starter_deck_has_the_expected_rarity_counts() {
         let game = MatchState::new_with_seed(7);
         let all_cards: Vec<_> = game
@@ -3277,6 +3479,7 @@ mod tests {
             name: "Blocking Unit".to_string(),
             template_id: Some("blocking-unit".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 1,
             max_armor: 1,
             position: hex(0, 2),
@@ -3331,6 +3534,7 @@ mod tests {
             name: "Rune Bruiser".to_string(),
             template_id: Some("rune-bruiser".to_string()),
             attack: 2,
+            attack_range: 1,
             armor: 2,
             max_armor: 2,
             position: hex(0, 0),
@@ -3345,6 +3549,7 @@ mod tests {
             name: "Stoneguard".to_string(),
             template_id: Some("stoneguard".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 4,
             max_armor: 4,
             position: hex(1, 0),
@@ -3385,6 +3590,232 @@ mod tests {
     }
 
     #[test]
+    fn archer_attacks_at_range_two_without_melee_counterdamage() {
+        let mut game = MatchState::new_with_seed_and_player_hero_type(7, HeroType::Archer);
+        game.board.units.push(board_unit(
+            "opponent-unit",
+            Side::Opponent,
+            hex(0, 1),
+            5,
+            1,
+            4,
+        ));
+
+        let frames = game
+            .apply_action_recording(
+                MatchActionRequest::Attack {
+                    attacker_id: "player-hero".to_string(),
+                    target_id: "opponent-unit".to_string(),
+                },
+                50,
+            )
+            .expect("archer should attack at range two");
+
+        assert_eq!(game.player.hero.hp, game.player.hero.max_hp);
+        assert_eq!(unit_armor(&game, "opponent-unit"), Some(2));
+        assert!(frames.iter().any(|frame| matches!(
+            frame.event,
+            ReplayEvent::PieceAttacked {
+                counter_damage_to_attacker: 0,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn melee_pieces_cannot_attack_at_range_two() {
+        let mut game = MatchState::new_with_seed(7);
+        game.board.units.push(board_unit(
+            "opponent-unit",
+            Side::Opponent,
+            hex(0, 1),
+            1,
+            1,
+            2,
+        ));
+
+        let result = game.apply_action(MatchActionRequest::Attack {
+            attacker_id: "player-hero".to_string(),
+            target_id: "opponent-unit".to_string(),
+        });
+
+        assert_eq!(result, Err(MatchError::NotAdjacent));
+    }
+
+    #[test]
+    fn range_two_targets_counterdamage_at_range_two() {
+        let mut game = MatchState::new_with_seed_and_player_hero_type(7, HeroType::Archer);
+        game.board.units.push(board_unit(
+            "opponent-unit",
+            Side::Opponent,
+            hex(0, 1),
+            3,
+            2,
+            4,
+        ));
+
+        game.apply_action(MatchActionRequest::Attack {
+            attacker_id: "player-hero".to_string(),
+            target_id: "opponent-unit".to_string(),
+        })
+        .expect("range two target should be attackable");
+
+        assert_eq!(game.player.hero.hp, game.player.hero.max_hp - 3);
+    }
+
+    #[test]
+    fn barbarian_hero_gains_mana_over_cap_when_attack_kills_unit() {
+        let mut game = MatchState::new_with_seed_and_player_hero_type(7, HeroType::Barbarian);
+        game.player.mana = 8;
+        game.player.max_mana = 8;
+        game.board.units.push(board_unit(
+            "opponent-unit",
+            Side::Opponent,
+            hex(0, 2),
+            0,
+            1,
+            3,
+        ));
+
+        let frames = game
+            .apply_action_recording(
+                MatchActionRequest::Attack {
+                    attacker_id: "player-hero".to_string(),
+                    target_id: "opponent-unit".to_string(),
+                },
+                51,
+            )
+            .expect("barbarian should kill adjacent unit");
+
+        assert_eq!(game.player.mana, 10);
+        assert_eq!(game.player.max_mana, 8);
+        let destroyed_index = frames
+            .iter()
+            .position(|frame| matches!(frame.event, ReplayEvent::UnitDestroyed { .. }))
+            .expect("kill should destroy a unit");
+        let mana_index = frames
+            .iter()
+            .position(|frame| matches!(frame.event, ReplayEvent::ManaGained { .. }))
+            .expect("barbarian kill should gain mana");
+        assert!(destroyed_index < mana_index);
+        assert!(matches!(
+            &frames[mana_index].event,
+            ReplayEvent::ManaGained {
+                side: Side::Player,
+                amount: 2,
+                source: ReplayManaSource::BarbarianKill { hero_id, unit_id },
+            } if hero_id == "player-hero" && unit_id == "opponent-unit"
+        ));
+    }
+
+    #[test]
+    fn barbarian_hero_gains_mana_when_counterdamage_kills_unit() {
+        let mut game = MatchState::new_with_seed_hero_types_and_mode(
+            7,
+            HeroType::Runekeeper,
+            HeroType::Barbarian,
+            MatchMode::Solo,
+        );
+        game.board
+            .units
+            .push(board_unit("player-unit", Side::Player, hex(0, -2), 0, 1, 3));
+        let starting_mana = game.opponent.mana;
+
+        let frames = game
+            .apply_action_recording(
+                MatchActionRequest::Attack {
+                    attacker_id: "player-unit".to_string(),
+                    target_id: "opponent-hero".to_string(),
+                },
+                52,
+            )
+            .expect("unit should attack adjacent barbarian");
+
+        assert_eq!(game.opponent.mana, starting_mana + 2);
+        assert!(frames.iter().any(|frame| matches!(
+            &frame.event,
+            ReplayEvent::ManaGained {
+                side: Side::Opponent,
+                source: ReplayManaSource::BarbarianKill { hero_id, unit_id },
+                ..
+            } if hero_id == "opponent-hero" && unit_id == "player-unit"
+        )));
+    }
+
+    #[test]
+    fn barbarian_controlled_unit_kill_does_not_gain_mana() {
+        let mut game = MatchState::new_with_seed_and_player_hero_type(7, HeroType::Barbarian);
+        game.player.mana = 4;
+        game.board
+            .units
+            .push(board_unit("player-unit", Side::Player, hex(0, 2), 3, 1, 4));
+        game.board.units.push(board_unit(
+            "opponent-unit",
+            Side::Opponent,
+            hex(0, 1),
+            0,
+            1,
+            3,
+        ));
+
+        let frames = game
+            .apply_action_recording(
+                MatchActionRequest::Attack {
+                    attacker_id: "player-unit".to_string(),
+                    target_id: "opponent-unit".to_string(),
+                },
+                53,
+            )
+            .expect("barbarian-controlled unit should kill enemy unit");
+
+        assert_eq!(game.player.mana, 4);
+        assert!(
+            !frames
+                .iter()
+                .any(|frame| matches!(frame.event, ReplayEvent::ManaGained { .. }))
+        );
+    }
+
+    #[test]
+    fn barbarian_spell_kill_does_not_gain_mana() {
+        let mut game = MatchState::new_with_seed_and_player_hero_type(7, HeroType::Barbarian);
+        game.player.mana = 8;
+        game.player.hero.ap_remaining = 3;
+        game.board.units.push(board_unit(
+            "opponent-unit",
+            Side::Opponent,
+            hex(0, 2),
+            0,
+            1,
+            2,
+        ));
+        let bolt = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "starfire-bolt")
+            .expect("damage spell exists");
+        let bolt_id = put_card_in_hand(&mut game, bolt);
+
+        let frames = game
+            .apply_action_recording(
+                MatchActionRequest::PlayCard {
+                    card_id: bolt_id,
+                    target: ActionTarget::Piece {
+                        piece_id: "opponent-unit".to_string(),
+                    },
+                },
+                54,
+            )
+            .expect("spell should kill enemy unit");
+
+        assert_eq!(game.player.mana, 3);
+        assert!(
+            !frames
+                .iter()
+                .any(|frame| matches!(frame.event, ReplayEvent::ManaGained { .. }))
+        );
+    }
+
+    #[test]
     fn spells_heal_buff_and_damage_with_caps() {
         let mut game = MatchState::new_with_seed(7);
         game.player.mana = 8;
@@ -3395,6 +3826,7 @@ mod tests {
             name: "Stoneguard".to_string(),
             template_id: Some("stoneguard".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 2,
             max_armor: 4,
             position: hex(0, 2),
@@ -3409,6 +3841,7 @@ mod tests {
             name: "Swift Familiar".to_string(),
             template_id: Some("swift-familiar".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 4,
             max_armor: 4,
             position: hex(0, 0),
@@ -3513,6 +3946,7 @@ mod tests {
             name: "Stoneguard".to_string(),
             template_id: Some("stoneguard".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 1,
             max_armor: 4,
             position: hex(0, 2),
@@ -3615,6 +4049,7 @@ mod tests {
             name: "Far Guard".to_string(),
             template_id: Some("stoneguard".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 1,
             max_armor: 4,
             position: hex(0, 0),
@@ -3629,6 +4064,7 @@ mod tests {
             name: "Ash Hound".to_string(),
             template_id: Some("ash-hound".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 3,
             max_armor: 3,
             position: hex(0, 2),
@@ -3674,6 +4110,7 @@ mod tests {
             name: "Rune Bruiser".to_string(),
             template_id: Some("rune-bruiser".to_string()),
             attack: 3,
+            attack_range: 1,
             armor: 3,
             max_armor: 3,
             position: hex(1, 1),
@@ -3688,6 +4125,7 @@ mod tests {
             name: "Swift Familiar".to_string(),
             template_id: Some("swift-familiar".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 1,
             max_armor: 1,
             position: hex(-1, 2),
@@ -3702,6 +4140,7 @@ mod tests {
             name: "Ash Hound".to_string(),
             template_id: Some("ash-hound".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 3,
             max_armor: 3,
             position: hex(0, 2),
@@ -3853,6 +4292,7 @@ mod tests {
             name: "Stoneguard".to_string(),
             template_id: Some("stoneguard".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 4,
             max_armor: 4,
             position: hex(0, 1),
@@ -3867,6 +4307,7 @@ mod tests {
             name: "Rune Bruiser".to_string(),
             template_id: Some("rune-bruiser".to_string()),
             attack: 2,
+            attack_range: 1,
             armor: 3,
             max_armor: 3,
             position: hex(1, 0),
@@ -3881,6 +4322,7 @@ mod tests {
             name: "Ember Squire".to_string(),
             template_id: Some("ember-squire".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 2,
             max_armor: 2,
             position: hex(-1, 2),
@@ -3927,6 +4369,7 @@ mod tests {
             name: "Stoneguard".to_string(),
             template_id: Some("stoneguard".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 4,
             max_armor: 4,
             position: hex(0, 1),
@@ -3941,6 +4384,7 @@ mod tests {
             name: "Rune Bruiser".to_string(),
             template_id: Some("rune-bruiser".to_string()),
             attack: 2,
+            attack_range: 1,
             armor: 3,
             max_armor: 3,
             position: hex(0, 0),
@@ -3955,6 +4399,7 @@ mod tests {
             name: "Swift Familiar".to_string(),
             template_id: Some("swift-familiar".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 3,
             max_armor: 3,
             position: hex(1, 0),
@@ -4001,6 +4446,7 @@ mod tests {
             name: "Swift Familiar".to_string(),
             template_id: Some("swift-familiar".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 3,
             max_armor: 3,
             position: hex(1, 1),
@@ -4149,6 +4595,7 @@ mod tests {
             name: "Stoneguard".to_string(),
             template_id: Some("stoneguard".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 1,
             max_armor: 4,
             position: hex(0, 2),
@@ -4163,6 +4610,7 @@ mod tests {
             name: "Stoneguard".to_string(),
             template_id: Some("stoneguard".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 2,
             max_armor: 6,
             position: hex(0, -2),
@@ -4247,6 +4695,7 @@ mod tests {
             name: "Stoneguard".to_string(),
             template_id: Some("stoneguard".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 1,
             max_armor: 5,
             position: hex(0, 2),
@@ -4299,6 +4748,7 @@ mod tests {
             name: "Stoneguard".to_string(),
             template_id: Some("stoneguard".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 4,
             max_armor: 4,
             position: hex(0, 0),
@@ -4400,6 +4850,7 @@ mod tests {
             name: "Stoneguard".to_string(),
             template_id: Some("stoneguard".to_string()),
             attack: 1,
+            attack_range: 1,
             armor: 4,
             max_armor: 4,
             position: hex(0, 0),
@@ -4455,6 +4906,7 @@ mod tests {
             name: "Iron Colossus".to_string(),
             template_id: Some("iron-colossus".to_string()),
             attack: 20,
+            attack_range: 1,
             armor: 6,
             max_armor: 6,
             position: hex(0, -2),

@@ -133,11 +133,12 @@ export function tileAt(match: MatchState, coord: HexCoord) {
 }
 
 export function pieceStatLabel(piece: BoardPiece) {
+  const rangeLabel = piece.attackRange > 1 ? ` R${piece.attackRange}` : "";
   if (piece.pieceType === "hero") {
-    return `${piece.attack}/${piece.hp} AP ${piece.apRemaining}`;
+    return `${piece.attack}/${piece.hp} AP ${piece.apRemaining}${rangeLabel}`;
   }
 
-  return `${piece.attack}/${piece.armor} AP ${piece.apRemaining}`;
+  return `${piece.attack}/${piece.armor} AP ${piece.apRemaining}${rangeLabel}`;
 }
 
 export function pieceById(match: MatchState, pieceId: string): BoardPiece | null {
@@ -338,7 +339,8 @@ export function isLegalAttack(
     target.side !== viewerSide &&
     attacker.apRemaining > 0 &&
     !attacker.hasAttacked &&
-    distance(attacker.position, target.position) === 1
+    distance(attacker.position, target.position) >= 1 &&
+    distance(attacker.position, target.position) <= attacker.attackRange
   );
 }
 

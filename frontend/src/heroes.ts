@@ -69,7 +69,7 @@ export const HERO_OPTIONS = [
     hp: 22,
     attack: 3,
     ap: 2,
-    text: "Heavy melee pressure with limited actions.",
+    text: "Heavy melee pressure that gains mana when the hero destroys units.",
     token: "Bar",
   },
   {
@@ -79,7 +79,7 @@ export const HERO_OPTIONS = [
     hp: 16,
     attack: 2,
     ap: 4,
-    text: "Fast positioning with precise pressure.",
+    text: "Fast positioning with range-2 hero attacks.",
     token: "Arc",
   },
   {

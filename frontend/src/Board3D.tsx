@@ -45,6 +45,7 @@ export type Board3DHero = {
   hp: number;
   maxHp: number;
   attack: number;
+  attackRange: number;
   position: HexCoord;
   apRemaining: number;
   maxAp: number;
@@ -58,6 +59,7 @@ export type Board3DUnit = {
   name: string;
   templateId?: string;
   attack: number;
+  attackRange: number;
   armor: number;
   maxArmor: number;
   position: HexCoord;

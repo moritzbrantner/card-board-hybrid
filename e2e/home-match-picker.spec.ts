@@ -404,6 +404,7 @@ function participant(side) {
       hp: 20,
       maxHp: 20,
       attack: 1,
+      attackRange: 1,
       position: side === "player" ? { q: 0, r: 3 } : { q: 0, r: -3 },
       apRemaining: side === "player" ? 3 : 0,
       maxAp: 3,

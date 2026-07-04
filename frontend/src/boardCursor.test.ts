@@ -111,6 +111,7 @@ function participant(side: Side, position: { q: number; r: number }): MatchPlaye
       hp: 20,
       maxHp: 20,
       attack: 1,
+      attackRange: 1,
       position,
       apRemaining: 3,
       maxAp: 3,

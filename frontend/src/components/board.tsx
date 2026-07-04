@@ -200,6 +200,7 @@ export function UnitCardModal({
 
           <div className="detail-stat-row live-stat-row">
             <DetailStat label="Attack" value={unit.attack} />
+            {unit.attackRange > 1 ? <DetailStat label="Range" value={unit.attackRange} /> : null}
             <DetailStat label="Armor" value={`${unit.armor}/${unit.maxArmor}`} />
             <DetailStat label="AP" value={`${unit.apRemaining}/${unit.maxAp}`} />
             <DetailStat label="Attacked" value={unit.hasAttacked ? "Yes" : "No"} />

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::card_catalog::card_template_by_id;
 use crate::deck_recipe_legality::{self, DeckRecipeLegalityError, normalize_requested_cards};
-use crate::match_session::{Card, Side, HeroType};
+use crate::match_session::{Card, HeroType, Side};
 
 pub const DECK_LIMIT_PER_ACCOUNT: usize = 30;
 pub use crate::deck_recipe_legality::{
@@ -360,11 +360,7 @@ impl<'a> DeckLibrary<'a> {
             )
             VALUES (?1, ?2, 1, ?3, '[]', unixepoch(), unixepoch())
             ",
-            params![
-                user_id,
-                starter.name,
-                hero_type_to_db(HeroType::Runekeeper)
-            ],
+            params![user_id, starter.name, hero_type_to_db(HeroType::Runekeeper)],
         )?;
         let deck_id = transaction.last_insert_rowid();
         replace_deck_cards(&transaction, deck_id, &starter.cards)?;

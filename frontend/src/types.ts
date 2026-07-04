@@ -337,6 +337,7 @@ export type Hero = {
   hp: number;
   maxHp: number;
   attack: number;
+  attackRange: number;
   position: HexCoord;
   apRemaining: number;
   maxAp: number;
@@ -359,6 +360,7 @@ export type Unit = {
   name: string;
   templateId?: string;
   attack: number;
+  attackRange: number;
   armor: number;
   maxArmor: number;
   position: HexCoord;
@@ -691,6 +693,16 @@ export type ReplayEvent =
       side: Side;
       unitId: string;
       name: string;
+    }
+  | {
+      type: "manaGained";
+      side: Side;
+      amount: number;
+      source: {
+        type: "barbarianKill";
+        heroId: string;
+        unitId: string;
+      };
     }
   | {
       type: "itemEquipped";

@@ -239,6 +239,7 @@ fn unit(spec: UnitSpec) -> Unit {
         name: spec.name.to_string(),
         template_id: Some(spec.template_id.to_string()),
         attack: spec.attack,
+        attack_range: 1,
         armor: spec.armor,
         max_armor: spec.armor,
         position: spec.position,

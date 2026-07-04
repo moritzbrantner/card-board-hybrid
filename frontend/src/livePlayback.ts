@@ -23,6 +23,7 @@ function isOpponentVisibleEvent(event: ReplayEvent) {
     event.type === "pieceHealed" ||
     event.type === "pieceBuffed" ||
     event.type === "pieceDamaged" ||
-    event.type === "unitDestroyed"
+    event.type === "unitDestroyed" ||
+    event.type === "manaGained"
   );
 }

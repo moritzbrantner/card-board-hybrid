@@ -140,6 +140,8 @@ export function eventTitle(event: ReplayEvent) {
       return `${event.pieceId} damaged`;
     case "unitDestroyed":
       return `${event.name} destroyed`;
+    case "manaGained":
+      return `${sideLabel(event.side)} gained mana`;
     case "itemEquipped":
       return `${event.name} equipped`;
     case "itemDropped":
@@ -183,6 +185,11 @@ export function eventDetail(event: ReplayEvent) {
       return `${event.pieceId} took ${event.amount} damage.`;
     case "unitDestroyed":
       return `${event.name} left the board.`;
+    case "manaGained":
+      switch (event.source.type) {
+        case "barbarianKill":
+          return `${event.source.heroId} gained ${event.amount} mana from destroying ${event.source.unitId}.`;
+      }
     case "itemEquipped":
       return `${sideLabel(event.side)} equipped ${event.name} to ${event.unitId}.`;
     case "itemDropped":

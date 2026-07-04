@@ -2,7 +2,7 @@
 
 Rune Lanes is a small vertical slice for a card game / board game hybrid.
 
-Players control heroes on a radius-3 hex arena. Cards cost mana and hero action points to summon units or cast spells; units then spend their own action points to move across adjacent hexes and attack neighboring enemies.
+Players control heroes on a radius-3 hex arena. Cards cost mana and hero action points to summon units or cast spells; units then spend their own action points to move across adjacent hexes and attack enemies within their attack range.
 
 ## Stack
 

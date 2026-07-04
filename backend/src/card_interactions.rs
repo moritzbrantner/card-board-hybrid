@@ -143,9 +143,7 @@ pub(crate) fn legal_spell_targets<'a>(
 ) -> Vec<&'a PieceView> {
     candidates
         .into_iter()
-        .filter(|target| {
-            spell_target_is_legal(card, side, caster_position, caster_hero_id, target)
-        })
+        .filter(|target| spell_target_is_legal(card, side, caster_position, caster_hero_id, target))
         .collect()
 }
 
@@ -378,6 +376,7 @@ pub(crate) fn summon_unit_from_card(
         name: card.name.clone(),
         template_id: Some(card.template_id.clone()),
         attack: *attack,
+        attack_range: 1,
         armor,
         max_armor: armor,
         position: coord,

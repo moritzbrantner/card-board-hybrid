@@ -32,8 +32,8 @@ use identity::{
 };
 use match_access::{Actor, MatchAccess};
 use match_session::{
-    MatchActionRequest, MatchMode, MatchState, RecordedReplayFrame, ReplayEvent, ReplayVisibility,
-    Side, HeroType,
+    HeroType, MatchActionRequest, MatchMode, MatchState, RecordedReplayFrame, ReplayEvent,
+    ReplayVisibility, Side,
 };
 use match_store::{
     CreatedSharedMatch, MatchStoreError, SharedMatchStatus, SqliteMatchStore, StoredMatch,
@@ -1978,10 +1978,7 @@ fn resolve_solo_ai_choice(
             };
             (system_deck.hero_type, snapshot)
         }
-        Some(AiOpponentRequest::Account {
-            deck_id,
-            hero_type,
-        }) => {
+        Some(AiOpponentRequest::Account { deck_id, hero_type }) => {
             let snapshot = resolve_required_account_deck_choice(store, user_id, deck_id)?;
             (hero_type, snapshot)
         }
@@ -3728,11 +3725,19 @@ mod tests {
         let connection = store.connection_mut();
 
         let preferred_hero_type: String = connection
-            .query_row("SELECT preferred_hero_type FROM users WHERE id = 1", [], |row| row.get(0))
+            .query_row(
+                "SELECT preferred_hero_type FROM users WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
             .expect("preferred hero should migrate");
         assert_eq!(preferred_hero_type, "pyromancer");
         let deck_hero_type: String = connection
-            .query_row("SELECT hero_type FROM deck_recipes WHERE id = 10", [], |row| row.get(0))
+            .query_row(
+                "SELECT hero_type FROM deck_recipes WHERE id = 10",
+                [],
+                |row| row.get(0),
+            )
             .expect("deck hero should migrate");
         assert_eq!(deck_hero_type, "chronomancer");
         let mastery_xp: i64 = connection
@@ -3744,7 +3749,9 @@ mod tests {
             .expect("hero mastery should migrate");
         assert_eq!(mastery_xp, 300);
         let unlocked_count: i64 = connection
-            .query_row("SELECT COUNT(*) FROM hero_skill_unlocks", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM hero_skill_unlocks", [], |row| {
+                row.get(0)
+            })
             .expect("hero skill unlocks should migrate");
         assert_eq!(unlocked_count, 1);
         let rune_ids_json: String = connection
@@ -3772,7 +3779,9 @@ mod tests {
             "match_seats",
         ] {
             let count: i64 = connection
-                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
                 .expect("table should be queryable");
             assert_eq!(count, 0, "{table} should be discarded");
         }

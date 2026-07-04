@@ -293,6 +293,7 @@ function participant(side, activeSide, position, hand) {
       hp: 20,
       maxHp: 20,
       attack: 1,
+      attackRange: 1,
       position,
       apRemaining: activeSide === side ? 3 : 0,
       maxAp: 3,

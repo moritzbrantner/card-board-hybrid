@@ -13,8 +13,8 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use crate::deck_library::{self, DeckLibraryError, DeckRecipeSnapshot};
 use crate::identity;
 use crate::match_session::{
-    Card, MatchActionRequest, MatchProgressionLoadout, MatchState, RecordedReplayFrame,
-    ReplayEvent, Side, HeroType,
+    Card, HeroType, MatchActionRequest, MatchProgressionLoadout, MatchState, RecordedReplayFrame,
+    ReplayEvent, Side,
 };
 use crate::progression;
 

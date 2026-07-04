@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::match_session::{
-    MatchProgressionEffects, MatchProgressionLoadout, MatchState, Side, HeroType,
+    HeroType, MatchProgressionEffects, MatchProgressionLoadout, MatchState, Side,
 };
 
 const COMPLETION_XP: i64 = 100;
@@ -278,9 +278,7 @@ impl<'a> ProgressionModule<'a> {
         };
         let rune_ids = match requested_rune_ids {
             Some(rune_ids) => rune_ids,
-            None => self
-                .saved_rune_ids(user_id, hero_type)?
-                .unwrap_or_default(),
+            None => self.saved_rune_ids(user_id, hero_type)?.unwrap_or_default(),
         };
         self.validate_rune_ids(user_id, &rune_ids)?;
         let skill_ids = self.active_skill_ids(user_id, hero_type)?;
@@ -356,10 +354,9 @@ impl<'a> ProgressionModule<'a> {
             ORDER BY unlocked_at ASC, node_id ASC
             ",
         )?;
-        let rows = statement
-            .query_map(params![user_id, hero_type_to_db(hero_type)], |row| {
-                row.get::<_, String>(0)
-            })?;
+        let rows = statement.query_map(params![user_id, hero_type_to_db(hero_type)], |row| {
+            row.get::<_, String>(0)
+        })?;
         let mut node_ids = Vec::new();
         for row in rows {
             node_ids.push(row?);
@@ -382,9 +379,7 @@ impl<'a> ProgressionModule<'a> {
         for hero_type in hero_types() {
             loadouts.push(SavedRuneLoadout {
                 hero_type,
-                rune_ids: self
-                    .saved_rune_ids(user_id, hero_type)?
-                    .unwrap_or_default(),
+                rune_ids: self.saved_rune_ids(user_id, hero_type)?.unwrap_or_default(),
             });
         }
         Ok(loadouts)
@@ -517,7 +512,12 @@ pub fn migrate(connection: &Connection) -> Result<(), ProgressionError> {
         )?;
     }
     if column_exists(connection, "match_xp_awards", "wizard_type")? {
-        add_column_if_missing(connection, "match_xp_awards", "hero_type", "TEXT NOT NULL DEFAULT 'runekeeper'")?;
+        add_column_if_missing(
+            connection,
+            "match_xp_awards",
+            "hero_type",
+            "TEXT NOT NULL DEFAULT 'runekeeper'",
+        )?;
         connection.execute(
             "
             UPDATE match_xp_awards
@@ -528,7 +528,12 @@ pub fn migrate(connection: &Connection) -> Result<(), ProgressionError> {
         drop_column_if_exists(connection, "match_xp_awards", "wizard_type")?;
     }
     if column_exists(connection, "match_xp_awards", "wizard_xp")? {
-        add_column_if_missing(connection, "match_xp_awards", "hero_xp", "INTEGER NOT NULL DEFAULT 0")?;
+        add_column_if_missing(
+            connection,
+            "match_xp_awards",
+            "hero_xp",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
         connection.execute(
             "
             UPDATE match_xp_awards
@@ -1013,31 +1018,157 @@ fn skill_nodes(hero_type: HeroType) -> Vec<SkillNodeDefinition> {
             ),
         ],
         HeroType::Barbarian => vec![
-            skill("barbarian-fury-path", "Fury Path", "The root of Barbarian mastery.", true, None),
-            skill("barbarian-brutal-stamina", "Brutal Stamina", "Hero starts with +2 max HP.", false, Some("barbarian-fury-path")),
-            skill("barbarian-weapon-practice", "Weapon Practice", "Hero starts with +1 attack.", false, Some("barbarian-fury-path")),
-            skill("barbarian-battle-hunger", "Battle Hunger", "Gain +1 mana from controlled hexes.", false, Some("barbarian-weapon-practice")),
-            skill("barbarian-warband-hide", "Warband Hide", "Summoned units enter with +1 armor.", false, Some("barbarian-brutal-stamina")),
-            skill("barbarian-opening-rage", "Opening Rage", "Draw +1 opening hand card.", false, Some("barbarian-brutal-stamina")),
-            skill("barbarian-deep-cuts", "Deep Cuts", "Damaging spells deal +1 damage.", false, Some("barbarian-weapon-practice")),
+            skill(
+                "barbarian-fury-path",
+                "Fury Path",
+                "The root of Barbarian mastery.",
+                true,
+                None,
+            ),
+            skill(
+                "barbarian-brutal-stamina",
+                "Brutal Stamina",
+                "Hero starts with +2 max HP.",
+                false,
+                Some("barbarian-fury-path"),
+            ),
+            skill(
+                "barbarian-weapon-practice",
+                "Weapon Practice",
+                "Hero starts with +1 attack.",
+                false,
+                Some("barbarian-fury-path"),
+            ),
+            skill(
+                "barbarian-battle-hunger",
+                "Battle Hunger",
+                "Gain +1 mana from controlled hexes.",
+                false,
+                Some("barbarian-weapon-practice"),
+            ),
+            skill(
+                "barbarian-warband-hide",
+                "Warband Hide",
+                "Summoned units enter with +1 armor.",
+                false,
+                Some("barbarian-brutal-stamina"),
+            ),
+            skill(
+                "barbarian-opening-rage",
+                "Opening Rage",
+                "Draw +1 opening hand card.",
+                false,
+                Some("barbarian-brutal-stamina"),
+            ),
+            skill(
+                "barbarian-deep-cuts",
+                "Deep Cuts",
+                "Damaging spells deal +1 damage.",
+                false,
+                Some("barbarian-weapon-practice"),
+            ),
         ],
         HeroType::Archer => vec![
-            skill("archer-long-watch", "Long Watch", "The root of Archer mastery.", true, None),
-            skill("archer-fleet-footing", "Fleet Footing", "Hero starts with +1 max AP.", false, Some("archer-long-watch")),
-            skill("archer-keen-shot", "Keen Shot", "Damaging spells deal +1 damage.", false, Some("archer-long-watch")),
-            skill("archer-scout-cache", "Scout Cache", "Draw +1 opening hand card.", false, Some("archer-fleet-footing")),
-            skill("archer-trail-rations", "Trail Rations", "Gain +1 mana from controlled hexes.", false, Some("archer-keen-shot")),
-            skill("archer-screening-line", "Screening Line", "First summoned unit each match enters with +1 armor.", false, Some("archer-fleet-footing")),
-            skill("archer-light-armor", "Light Armor", "Hero starts with +1 max HP.", false, Some("archer-keen-shot")),
+            skill(
+                "archer-long-watch",
+                "Long Watch",
+                "The root of Archer mastery.",
+                true,
+                None,
+            ),
+            skill(
+                "archer-fleet-footing",
+                "Fleet Footing",
+                "Hero starts with +1 max AP.",
+                false,
+                Some("archer-long-watch"),
+            ),
+            skill(
+                "archer-keen-shot",
+                "Keen Shot",
+                "Damaging spells deal +1 damage.",
+                false,
+                Some("archer-long-watch"),
+            ),
+            skill(
+                "archer-scout-cache",
+                "Scout Cache",
+                "Draw +1 opening hand card.",
+                false,
+                Some("archer-fleet-footing"),
+            ),
+            skill(
+                "archer-trail-rations",
+                "Trail Rations",
+                "Gain +1 mana from controlled hexes.",
+                false,
+                Some("archer-keen-shot"),
+            ),
+            skill(
+                "archer-screening-line",
+                "Screening Line",
+                "First summoned unit each match enters with +1 armor.",
+                false,
+                Some("archer-fleet-footing"),
+            ),
+            skill(
+                "archer-light-armor",
+                "Light Armor",
+                "Hero starts with +1 max HP.",
+                false,
+                Some("archer-keen-shot"),
+            ),
         ],
         HeroType::Builder => vec![
-            skill("builder-foundation-plan", "Foundation Plan", "The root of Builder mastery.", true, None),
-            skill("builder-reinforced-frame", "Reinforced Frame", "Hero starts with +2 max HP.", false, Some("builder-foundation-plan")),
-            skill("builder-supply-cache", "Supply Cache", "Gain +1 mana from controlled hexes.", false, Some("builder-foundation-plan")),
-            skill("builder-work-crew-drill", "Work Crew Drill", "Summoned units enter with +1 armor.", false, Some("builder-reinforced-frame")),
-            skill("builder-first-wall", "First Wall", "First summoned unit each match enters with +1 armor.", false, Some("builder-reinforced-frame")),
-            skill("builder-field-manual", "Field Manual", "Draw +1 opening hand card.", false, Some("builder-supply-cache")),
-            skill("builder-tool-ready", "Tool Ready", "Hero starts with +1 max AP.", false, Some("builder-supply-cache")),
+            skill(
+                "builder-foundation-plan",
+                "Foundation Plan",
+                "The root of Builder mastery.",
+                true,
+                None,
+            ),
+            skill(
+                "builder-reinforced-frame",
+                "Reinforced Frame",
+                "Hero starts with +2 max HP.",
+                false,
+                Some("builder-foundation-plan"),
+            ),
+            skill(
+                "builder-supply-cache",
+                "Supply Cache",
+                "Gain +1 mana from controlled hexes.",
+                false,
+                Some("builder-foundation-plan"),
+            ),
+            skill(
+                "builder-work-crew-drill",
+                "Work Crew Drill",
+                "Summoned units enter with +1 armor.",
+                false,
+                Some("builder-reinforced-frame"),
+            ),
+            skill(
+                "builder-first-wall",
+                "First Wall",
+                "First summoned unit each match enters with +1 armor.",
+                false,
+                Some("builder-reinforced-frame"),
+            ),
+            skill(
+                "builder-field-manual",
+                "Field Manual",
+                "Draw +1 opening hand card.",
+                false,
+                Some("builder-supply-cache"),
+            ),
+            skill(
+                "builder-tool-ready",
+                "Tool Ready",
+                "Hero starts with +1 max AP.",
+                false,
+                Some("builder-supply-cache"),
+            ),
         ],
     }
 }
