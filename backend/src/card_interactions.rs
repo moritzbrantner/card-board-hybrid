@@ -86,12 +86,7 @@ pub(crate) fn plan_spell_play(
     caster_wizard_id: &str,
     target_piece: &PieceView,
 ) -> Result<PlannedSpellPlay, MatchError> {
-    let CardKind::Spell {
-        range,
-        priority,
-        effect,
-    } = &card.kind
-    else {
+    let CardKind::Spell { priority, .. } = &card.kind else {
         return Err(MatchError::InvalidTarget);
     };
 
@@ -103,17 +98,9 @@ pub(crate) fn plan_spell_play(
         return Err(MatchError::PieceNotFound);
     }
 
-    if caster_position.distance(target_piece.position) > i32::from(*range) {
+    if !spell_target_is_legal(card, side, caster_position, caster_wizard_id, target_piece) {
         return Err(MatchError::InvalidTarget);
     }
-
-    validate_spell_target(
-        side,
-        effect,
-        caster_position,
-        caster_wizard_id,
-        target_piece,
-    )?;
 
     Ok(PlannedSpellPlay {
         priority: *priority,
@@ -145,6 +132,36 @@ pub(crate) fn plan_item_play(
     Ok(PlannedItemPlay {
         unit_id: target_unit.id.clone(),
     })
+}
+
+pub(crate) fn legal_spell_targets<'a>(
+    card: &Card,
+    side: Side,
+    caster_position: HexCoord,
+    caster_wizard_id: &str,
+    candidates: impl IntoIterator<Item = &'a PieceView>,
+) -> Vec<&'a PieceView> {
+    candidates
+        .into_iter()
+        .filter(|target| {
+            spell_target_is_legal(card, side, caster_position, caster_wizard_id, target)
+        })
+        .collect()
+}
+
+fn spell_target_is_legal(
+    card: &Card,
+    side: Side,
+    caster_position: HexCoord,
+    caster_wizard_id: &str,
+    target: &PieceView,
+) -> bool {
+    let CardKind::Spell { range, effect, .. } = &card.kind else {
+        return false;
+    };
+
+    caster_position.distance(target.position) <= i32::from(*range)
+        && validate_spell_target(side, effect, caster_position, caster_wizard_id, target).is_ok()
 }
 
 pub(crate) fn validate_spell_target(
