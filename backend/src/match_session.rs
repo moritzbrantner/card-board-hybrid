@@ -1205,7 +1205,7 @@ impl MatchState {
                     ReplayEvent::ActionQueued { side, item },
                 );
             }
-            CardKind::Item { range, .. } => {
+            CardKind::Item { .. } => {
                 let ActionTarget::Piece { piece_id } = target else {
                     return Err(MatchError::InvalidTarget);
                 };
@@ -1217,11 +1217,13 @@ impl MatchState {
                     .cloned()
                     .ok_or(MatchError::PieceNotFound)?;
                 let caster_position = self.player_ref(side).wizard.position;
-                if target.side != side
-                    || caster_position.distance(target.position) > i32::from(*range)
-                {
-                    return Err(MatchError::InvalidTarget);
-                }
+                let planned_item_play = card_interactions::plan_item_play(
+                    &card,
+                    ActionTarget::Piece { piece_id },
+                    side,
+                    caster_position,
+                    &target,
+                )?;
 
                 self.spend_card_resources(side, &card_id, &card)?;
                 self.log.insert(
@@ -1233,7 +1235,7 @@ impl MatchState {
                     0,
                     StackAction::EquipItem {
                         card: CardSummary::from(&card),
-                        unit_id: target.id.clone(),
+                        unit_id: planned_item_play.unit_id.clone(),
                     },
                 );
                 self.record_replay_frame(
@@ -1243,7 +1245,7 @@ impl MatchState {
                         side,
                         card: CardSummary::from(&card),
                         target: ActionTarget::Piece {
-                            piece_id: target.id,
+                            piece_id: planned_item_play.unit_id,
                         },
                     },
                 );
@@ -1627,13 +1629,6 @@ impl MatchState {
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) {
-        let CardKind::Item {
-            passive, active, ..
-        } = &card.kind
-        else {
-            return;
-        };
-
         let item_id = self.next_item_id(side);
         let Some(unit_index) = self
             .board
@@ -1647,18 +1642,13 @@ impl MatchState {
         };
 
         let unit = &mut self.board.units[unit_index];
-        apply_item_passive(unit, passive);
-        unit.items.push(CarriedItem {
-            id: item_id.clone(),
-            template_id: card.template_id.clone(),
-            name: card.name.clone(),
-            passive: passive.clone(),
-            active: active.clone(),
-            active_used_this_turn: false,
-        });
+        let card_name = card.name.clone();
+        if card_interactions::equip_item_from_card(card, item_id.clone(), unit).is_err() {
+            return;
+        }
         self.log.insert(
             0,
-            format!("{} equipped {} to {}.", side.label(), card.name, unit.name),
+            format!("{} equipped {} to {}.", side.label(), card_name, unit.name),
         );
         self.record_replay_frame(
             frames,
@@ -1667,7 +1657,7 @@ impl MatchState {
                 side,
                 unit_id: unit_id.to_string(),
                 item_id,
-                name: card.name,
+                name: card_name,
             },
         );
     }
@@ -1680,21 +1670,11 @@ impl MatchState {
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) {
-        let Some((item_name, active)) = self
+        let Some(unit) = self
             .board
             .units
             .iter()
             .find(|unit| unit.id == unit_id && unit.side == side)
-            .and_then(|unit| {
-                unit.items
-                    .iter()
-                    .find(|item| item.id == item_id)
-                    .and_then(|item| {
-                        item.active
-                            .clone()
-                            .map(|active| (item.name.clone(), active))
-                    })
-            })
         else {
             self.log.insert(
                 0,
@@ -1703,23 +1683,39 @@ impl MatchState {
             return;
         };
 
-        match active {
-            ItemActiveEffect::HealCarrier { amount } => {
-                self.heal_piece(unit_id, amount);
+        let Ok(resolved_item_activation) =
+            card_interactions::resolve_item_activation(unit, item_id)
+        else {
+            self.log.insert(
+                0,
+                format!("Item activation by {} had no legal item.", unit_id),
+            );
+            return;
+        };
+
+        match resolved_item_activation.effect {
+            card_interactions::ResolvedItemActiveEffect::HealCarrier { unit_id, amount } => {
+                self.heal_piece(&unit_id, amount);
                 self.record_replay_frame(
                     frames,
                     action_index,
                     ReplayEvent::PieceHealed {
                         side,
-                        piece_id: unit_id.to_string(),
+                        piece_id: unit_id,
                         amount,
                     },
                 );
             }
         }
 
-        self.log
-            .insert(0, format!("{} activated {}.", side.label(), item_name));
+        self.log.insert(
+            0,
+            format!(
+                "{} activated {}.",
+                side.label(),
+                resolved_item_activation.item_name
+            ),
+        );
         self.record_replay_frame(
             frames,
             action_index,
@@ -1727,7 +1723,7 @@ impl MatchState {
                 side,
                 unit_id: unit_id.to_string(),
                 item_id: item_id.to_string(),
-                name: item_name,
+                name: resolved_item_activation.item_name,
             },
         );
     }
@@ -2408,7 +2404,7 @@ impl MatchState {
             let item_name = item.name.clone();
             {
                 let unit = &mut self.board.units[unit_index];
-                apply_item_passive(unit, &item.passive);
+                card_interactions::apply_item_passive(unit, &item.passive);
                 unit.items.push(item);
             }
             self.log
@@ -2848,29 +2844,6 @@ impl Side {
         match self {
             Self::Player => "p",
             Self::Opponent => "o",
-        }
-    }
-}
-
-fn apply_item_passive(unit: &mut Unit, passive: &ItemPassiveEffect) {
-    match passive {
-        ItemPassiveEffect::StatBonus {
-            attack,
-            armor,
-            max_ap,
-        } => {
-            unit.attack += *attack;
-            unit.armor += *armor;
-            unit.max_armor += *armor;
-            if *max_ap >= 0 {
-                let amount = *max_ap as u8;
-                unit.ap_remaining = unit.ap_remaining.saturating_add(amount);
-                unit.max_ap = unit.max_ap.saturating_add(amount);
-            } else {
-                let amount = max_ap.unsigned_abs();
-                unit.ap_remaining = unit.ap_remaining.saturating_sub(amount);
-                unit.max_ap = unit.max_ap.saturating_sub(amount);
-            }
         }
     }
 }
@@ -3591,6 +3564,67 @@ mod tests {
                 .iter()
                 .any(|frame| matches!(frame.event, ReplayEvent::ItemDropped { .. }))
         );
+    }
+
+    #[test]
+    fn item_cards_only_target_allied_units_in_range() {
+        let mut game = MatchState::new_with_seed(7);
+        game.player.mana = 8;
+        game.player.wizard.ap_remaining = 3;
+        game.board.units.push(Unit {
+            id: "ally-out-of-range".to_string(),
+            side: Side::Player,
+            name: "Far Guard".to_string(),
+            template_id: Some("stoneguard".to_string()),
+            attack: 1,
+            armor: 1,
+            max_armor: 4,
+            position: hex(0, 0),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+            items: Vec::new(),
+        });
+        game.board.units.push(Unit {
+            id: "enemy-in-range".to_string(),
+            side: Side::Opponent,
+            name: "Ash Hound".to_string(),
+            template_id: Some("ash-hound".to_string()),
+            attack: 1,
+            armor: 3,
+            max_armor: 3,
+            position: hex(0, 2),
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+            items: Vec::new(),
+        });
+        let flask = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "ember-flask")
+            .expect("item exists");
+        let flask_id = put_card_in_hand(&mut game, flask);
+        let initial_mana = game.player.mana;
+        let initial_wizard_ap = game.player.wizard.ap_remaining;
+
+        let enemy_result = game.apply_action(MatchActionRequest::PlayCard {
+            card_id: flask_id.clone(),
+            target: ActionTarget::Piece {
+                piece_id: "enemy-in-range".to_string(),
+            },
+        });
+        let range_result = game.apply_action(MatchActionRequest::PlayCard {
+            card_id: flask_id,
+            target: ActionTarget::Piece {
+                piece_id: "ally-out-of-range".to_string(),
+            },
+        });
+
+        assert_eq!(enemy_result, Err(MatchError::InvalidTarget));
+        assert_eq!(range_result, Err(MatchError::InvalidTarget));
+        assert_eq!(game.player.mana, initial_mana);
+        assert_eq!(game.player.wizard.ap_remaining, initial_wizard_ap);
+        assert!(game.board.units.iter().all(|unit| unit.items.is_empty()));
     }
 
     #[test]

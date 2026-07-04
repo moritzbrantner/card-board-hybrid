@@ -51,9 +51,13 @@ test("settings load, save, apply, and persist visual preferences", async ({ page
     },
   });
 
+  const preferencesLoaded = waitForPreferencesLoad(page);
   await page.goto("/settings");
+  await preferencesLoaded;
 
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.getByText("Loading settings.")).toBeHidden();
+  await expect(page.getByLabel("Theme")).toBeEnabled();
   await expect(page.getByLabel("Theme")).toHaveValue("system");
   await expect(page.getByLabel("Board visual mode")).toHaveValue("2d");
 
@@ -214,6 +218,13 @@ async function mockSettingsApi(page, handlers = {}) {
     }
 
     await route.fulfill({ status: 404, json: { message: "Not found" } });
+  });
+}
+
+function waitForPreferencesLoad(page) {
+  return page.waitForResponse((response) => {
+    const request = response.request();
+    return new URL(response.url()).pathname === "/api/preferences" && request.method() === "GET";
   });
 }
 

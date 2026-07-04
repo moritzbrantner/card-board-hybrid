@@ -1,6 +1,6 @@
 use super::{
-    ActionTarget, Card, CardKind, CardSummary, HexBoard, HexCoord, MatchError,
-    MatchProgressionLoadout, PieceView, Side, SpellEffect, Unit,
+    ActionTarget, Card, CardKind, CardSummary, CarriedItem, HexBoard, HexCoord, ItemActiveEffect,
+    ItemPassiveEffect, MatchError, MatchProgressionLoadout, PieceView, Side, SpellEffect, Unit,
 };
 
 pub(crate) struct PlannedUnitPlay {
@@ -10,6 +10,10 @@ pub(crate) struct PlannedUnitPlay {
 pub(crate) struct PlannedSpellPlay {
     pub(crate) priority: u8,
     pub(crate) target_id: String,
+}
+
+pub(crate) struct PlannedItemPlay {
+    pub(crate) unit_id: String,
 }
 
 pub(crate) enum ResolvedSpellEffect {
@@ -43,6 +47,15 @@ pub(crate) enum SpellLog {
 pub(crate) struct ResolvedSpell {
     pub(crate) effect: ResolvedSpellEffect,
     pub(crate) log: SpellLog,
+}
+
+pub(crate) enum ResolvedItemActiveEffect {
+    HealCarrier { unit_id: String, amount: i32 },
+}
+
+pub(crate) struct ResolvedItemActivation {
+    pub(crate) item_name: String,
+    pub(crate) effect: ResolvedItemActiveEffect,
 }
 
 pub(crate) fn plan_unit_play(
@@ -108,6 +121,32 @@ pub(crate) fn plan_spell_play(
     })
 }
 
+pub(crate) fn plan_item_play(
+    card: &Card,
+    target: ActionTarget,
+    side: Side,
+    caster_position: HexCoord,
+    target_unit: &Unit,
+) -> Result<PlannedItemPlay, MatchError> {
+    let CardKind::Item { range, .. } = &card.kind else {
+        return Err(MatchError::InvalidTarget);
+    };
+
+    let ActionTarget::Piece { piece_id } = target else {
+        return Err(MatchError::InvalidTarget);
+    };
+
+    if piece_id != target_unit.id {
+        return Err(MatchError::PieceNotFound);
+    }
+
+    validate_item_target(side, caster_position, *range, target_unit)?;
+
+    Ok(PlannedItemPlay {
+        unit_id: target_unit.id.clone(),
+    })
+}
+
 pub(crate) fn validate_spell_target(
     side: Side,
     effect: &SpellEffect,
@@ -137,6 +176,19 @@ pub(crate) fn validate_spell_target(
         SpellEffect::Buff { .. } if target.id == caster_wizard_id => Err(MatchError::InvalidTarget),
         _ => Ok(()),
     }
+}
+
+pub(crate) fn validate_item_target(
+    side: Side,
+    caster_position: HexCoord,
+    range: u8,
+    target: &Unit,
+) -> Result<(), MatchError> {
+    if target.side != side || caster_position.distance(target.position) > i32::from(range) {
+        return Err(MatchError::InvalidTarget);
+    }
+
+    Ok(())
 }
 
 pub(crate) fn resolve_spell(
@@ -223,6 +275,55 @@ pub(crate) fn resolve_spell(
     Ok(resolved)
 }
 
+pub(crate) fn equip_item_from_card(
+    card: CardSummary,
+    item_id: String,
+    unit: &mut Unit,
+) -> Result<(), MatchError> {
+    let CardKind::Item {
+        passive, active, ..
+    } = card.kind
+    else {
+        return Err(MatchError::InvalidTarget);
+    };
+
+    apply_item_passive(unit, &passive);
+    unit.items.push(CarriedItem {
+        id: item_id,
+        template_id: card.template_id,
+        name: card.name,
+        passive,
+        active,
+        active_used_this_turn: false,
+    });
+
+    Ok(())
+}
+
+pub(crate) fn resolve_item_activation(
+    unit: &Unit,
+    item_id: &str,
+) -> Result<ResolvedItemActivation, MatchError> {
+    let item = unit
+        .items
+        .iter()
+        .find(|item| item.id == item_id)
+        .ok_or(MatchError::ItemNotFound)?;
+    let active = item.active.clone().ok_or(MatchError::InvalidTarget)?;
+
+    let effect = match active {
+        ItemActiveEffect::HealCarrier { amount } => ResolvedItemActiveEffect::HealCarrier {
+            unit_id: unit.id.clone(),
+            amount,
+        },
+    };
+
+    Ok(ResolvedItemActivation {
+        item_name: item.name.clone(),
+        effect,
+    })
+}
+
 pub(crate) fn can_resolve_unit_play(
     coord: HexCoord,
     caster_position: HexCoord,
@@ -268,6 +369,29 @@ pub(crate) fn summon_unit_from_card(
         has_attacked: false,
         items: Vec::new(),
     })
+}
+
+pub(crate) fn apply_item_passive(unit: &mut Unit, passive: &ItemPassiveEffect) {
+    match passive {
+        ItemPassiveEffect::StatBonus {
+            attack,
+            armor,
+            max_ap,
+        } => {
+            unit.attack += *attack;
+            unit.armor += *armor;
+            unit.max_armor += *armor;
+            if *max_ap >= 0 {
+                let amount = *max_ap as u8;
+                unit.ap_remaining = unit.ap_remaining.saturating_add(amount);
+                unit.max_ap = unit.max_ap.saturating_add(amount);
+            } else {
+                let amount = max_ap.unsigned_abs();
+                unit.ap_remaining = unit.ap_remaining.saturating_sub(amount);
+                unit.max_ap = unit.max_ap.saturating_sub(amount);
+            }
+        }
+    }
 }
 
 fn validate_unit_target(
