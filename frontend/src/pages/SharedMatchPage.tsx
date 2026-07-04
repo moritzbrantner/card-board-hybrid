@@ -680,8 +680,8 @@ export function SharedMatchPage({
         title={`Match ${matchId}`}
         message={loadState.message}
         actions={
-          <button className="primary-button" type="button" onClick={() => onNavigate("/")}>
-            Open match picker
+          <button className="primary-button" type="button" onClick={() => onNavigate("/play")}>
+            Open play
           </button>
         }
       />
@@ -855,7 +855,7 @@ export function SharedMatchPage({
               className="icon-button"
               type="button"
               onClick={() => onNavigate("/")}
-              title="Match picker"
+              title="Dashboard"
             >
               <House size={18} />
             </button>

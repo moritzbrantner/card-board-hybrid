@@ -1,4 +1,4 @@
-import { House, Layers, LibraryBig, LogIn, LogOut, History, Settings as SettingsIcon, User, WandSparkles } from "lucide-react";
+import { Gauge, House, Layers, LibraryBig, LogIn, LogOut, History, Settings as SettingsIcon, User, WandSparkles } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { AccountProps } from "../appTypes";
 import { avatarSymbolLabel } from "../labels";
@@ -137,6 +137,10 @@ export function TopNav({ currentUser, onNavigate, onSignOut, ...accountActionPro
       </button>
       <div className="top-nav-links">
         <button className="secondary-link" type="button" onClick={() => onNavigate("/")}>
+          <Gauge size={18} />
+          Dashboard
+        </button>
+        <button className="secondary-link" type="button" onClick={() => onNavigate("/play")}>
           <House size={18} />
           Play
         </button>

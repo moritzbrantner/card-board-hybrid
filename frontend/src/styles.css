@@ -203,6 +203,188 @@ button {
   margin: 0 auto;
 }
 
+.dashboard-shell {
+  display: grid;
+  align-content: start;
+  gap: 24px;
+}
+
+.dashboard-layout {
+  display: grid;
+  gap: 18px;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+}
+
+.dashboard-hero {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(88, 183, 161, 0.13), transparent 58%),
+    rgba(28, 33, 32, 0.74);
+}
+
+.dashboard-hero h1,
+.dashboard-hero p {
+  margin: 0;
+}
+
+.dashboard-hero p:not(.eyebrow) {
+  max-width: 620px;
+  color: var(--muted);
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.dashboard-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.dashboard-panel {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+  min-height: 260px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--panel);
+}
+
+.dashboard-panel-wide {
+  grid-column: 1 / -1;
+}
+
+.dashboard-panel-heading,
+.dashboard-feature-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.dashboard-panel-heading {
+  justify-content: flex-start;
+  color: #fffaf0;
+}
+
+.dashboard-panel-heading h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.dashboard-feature-row > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dashboard-feature-row span,
+.dashboard-stat span,
+.dashboard-muted-line {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.dashboard-feature-row strong {
+  color: #fffaf0;
+  font-size: 1.18rem;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 10px;
+}
+
+.dashboard-stat {
+  display: grid;
+  gap: 4px;
+  min-height: 72px;
+  border: 1px solid rgba(247, 243, 234, 0.12);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dashboard-stat strong {
+  align-self: end;
+  color: #fffaf0;
+  font-size: 1.35rem;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-muted-line {
+  margin: 0;
+  line-height: 1.35;
+  text-transform: none;
+}
+
+.dashboard-match-list {
+  display: grid;
+  gap: 10px;
+}
+
+.dashboard-match-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 76px;
+  border: 1px solid rgba(247, 243, 234, 0.12);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.dashboard-match-row > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dashboard-match-row strong {
+  color: #fffaf0;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-match-row span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.dashboard-match-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dashboard-open-match {
+  width: min(620px, 100%);
+}
+
 .home-heading {
   display: grid;
   gap: 2px;
@@ -341,6 +523,31 @@ button {
 
 .home-actions {
   justify-content: center;
+}
+
+.play-layout {
+  width: min(980px, 100%);
+}
+
+.play-quickstart-panel {
+  gap: 14px;
+}
+
+.advanced-setup-toggle {
+  justify-self: center;
+}
+
+.advanced-setup-toggle svg {
+  transition: transform 160ms ease;
+}
+
+.advanced-setup-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.advanced-play-setup {
+  display: grid;
+  gap: 18px;
 }
 
 .match-picker {
@@ -3660,6 +3867,22 @@ h1 {
 
   .top-nav-links {
     justify-content: start;
+  }
+
+  .dashboard-hero,
+  .dashboard-match-row {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-hero-actions,
+  .dashboard-match-actions {
+    justify-content: flex-start;
   }
 
   .account-actions {

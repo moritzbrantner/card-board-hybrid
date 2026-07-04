@@ -183,7 +183,7 @@ export function SettingsPage({
             <h1>Settings</h1>
           </div>
           <div className="actions">
-            <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Match picker">
+            <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Dashboard">
               <House size={18} />
             </button>
             {currentUser ? (

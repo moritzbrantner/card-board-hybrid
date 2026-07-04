@@ -76,6 +76,10 @@ _Avoid_: AI-only deck
 The pre-match choice for one side, combining a Wizard, a deck recipe or system deck recipe, and a rune loadout.
 _Avoid_: build, preset
 
+**Player dashboard**:
+The root account-oriented surface that summarizes player status and routes into play, deck, profile, and match-history workflows.
+_Avoid_: match picker, landing page
+
 **Solo match**:
 A match where one human controls Player and the backend AI controls Opponent.
 _Avoid_: offline match

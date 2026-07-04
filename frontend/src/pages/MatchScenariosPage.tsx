@@ -91,9 +91,9 @@ export function MatchScenariosView({
         title="Match Scenarios"
         message={loadState.message}
         actions={
-          <button className="primary-button" type="button" onClick={() => onNavigate("/")}>
+          <button className="primary-button" type="button" onClick={() => onNavigate("/play")}>
             <House size={18} />
-            Match picker
+            Play
           </button>
         }
       />
@@ -110,7 +110,7 @@ export function MatchScenariosView({
             <h1>Match Scenarios</h1>
           </div>
           <div className="actions">
-            <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Match picker">
+            <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Dashboard">
               <House size={18} />
             </button>
           </div>

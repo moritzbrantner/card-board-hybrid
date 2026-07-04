@@ -14,7 +14,8 @@ test("AI deck selection remains visible with system and legal account deck recip
   );
   await mockHomeApi(page, matchRequests);
 
-  await page.goto("/");
+  await page.goto("/play");
+  await openAdvancedSetup(page);
 
   const aiDeckSelector = page.getByLabel("AI Deck");
   await expect(aiDeckSelector).toBeVisible();
@@ -47,7 +48,8 @@ test("signed-in players choose account deck recipes for solo match creation", as
   );
   await mockHomeApi(page, matchRequests);
 
-  await page.goto("/");
+  await page.goto("/play");
+  await openAdvancedSetup(page);
 
   await expect(page.getByRole("button", { name: /Default Legal/ })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: /Tournament Legal/ })).toBeEnabled();
@@ -82,7 +84,8 @@ test("signed-in players without legal deck recipes create solo matches through t
     decks: [deckRecipe(103, "Needs More Basics", false, false)],
   });
 
-  await page.goto("/");
+  await page.goto("/play");
+  await openAdvancedSetup(page);
 
   await expect(page.getByRole("button", { name: /Needs More Basics/ })).toBeDisabled();
   await expect(page.getByRole("button", { name: /Needs More Basics/ })).toContainText(
@@ -108,7 +111,7 @@ test("anonymous players create solo matches without account deck controls or vis
   const matchRequests = [];
   await mockHomeApi(page, matchRequests, { signedIn: false });
 
-  await page.goto("/");
+  await page.goto("/play");
 
   await expect(page.getByLabel("Custom deck loadouts")).toHaveCount(0);
   await expect(page.getByText("Sign in to use your deck recipes")).toHaveCount(0);
@@ -135,7 +138,7 @@ test("home screen creates a shared match from the multiplayer action", async ({ 
   );
   await mockHomeApi(page, matchRequests, { sharedMatchRequests });
 
-  await page.goto("/");
+  await page.goto("/play");
 
   await page.getByRole("button", { name: "New Multiplayer Match" }).click();
 
@@ -251,6 +254,10 @@ async function mockHomeApi(page, matchRequests, options = {}) {
 
     await route.fulfill({ status: 404, json: { message: "Not found" } });
   });
+}
+
+async function openAdvancedSetup(page) {
+  await page.getByRole("button", { name: "Advanced setup" }).click();
 }
 
 function authUser() {

@@ -1,4 +1,4 @@
-import { Layers, Plus, Users } from "lucide-react";
+import { ChevronDown, Layers, Plus, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import {
@@ -23,7 +23,7 @@ import { defaultRuneIdsForWizard, wizardTypeLabel } from "../labels";
 import type { ProgressionResponse, WizardType } from "../types";
 import { WIZARD_OPTIONS } from "../wizards";
 
-export function MatchPicker({
+export function PlayPage({
   onNavigate,
   currentUser,
   onSignOut,
@@ -44,6 +44,7 @@ export function MatchPicker({
   const [selectedAiDeck, setSelectedAiDeck] = useState<string>("system:balanced-starter");
   const [selectedAiWizardType, setSelectedAiWizardType] = useState<WizardType>("runekeeper");
   const [selectedRuneIds, setSelectedRuneIds] = useState<string[]>([]);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -269,85 +270,19 @@ export function MatchPicker({
   return (
     <main className="app-shell home-shell">
       <TopNav currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
-      <section className="home-layout" aria-label="Match loadout selector">
+      <section className="home-layout play-layout" aria-label="Play setup">
         <header className="home-heading">
           <p className="eyebrow">Rune Lanes</p>
-          <h1>Choose Your Loadout</h1>
+          <h1>Play</h1>
         </header>
 
-        <section className="loadout-stage" aria-label="Preconfigured loadouts">
-          <div className="loadout-section-heading">
-            <div>
-              <span>Preconfigured</span>
-              <strong>System loadouts</strong>
-            </div>
-          </div>
-          <div className="loadout-grid">
-            {systemDeckLoadState.status === "loading" ? (
-              <p className="notice">Loading system loadouts</p>
-            ) : null}
-            {systemDecks.map((deck) => {
-              const loadout = systemDeckToLoadout(deck);
-              return (
-                <LoadoutCard
-                  key={loadout.id}
-                  loadout={loadout}
-                  selected={selectedLoadout?.id === loadout.id}
-                  progression={progressionLoadState?.status === "ready" ? progressionLoadState.progression : null}
-                  onSelect={handleSelectLoadout}
-                  busy={busy}
-                />
-              );
-            })}
-          </div>
-        </section>
-
-        {currentUser ? (
-          <section className="loadout-stage" aria-label="Custom deck loadouts">
-            <div className="loadout-section-heading">
-              <div>
-                <span>Custom</span>
-                <strong>Your deck recipes</strong>
-              </div>
-              <button className="secondary-link" type="button" onClick={() => onNavigate("/decks")}>
-                <Layers size={18} />
-                Manage
-              </button>
-            </div>
-            <div className="loadout-grid">
-              {deckLoadState?.status === "loading" ? <p className="notice">Loading deck library</p> : null}
-              {accountDecks.map((deck) => {
-                const loadout = accountDeckToLoadout(deck);
-                return (
-                  <LoadoutCard
-                    key={loadout.id}
-                    loadout={loadout}
-                    selected={selectedLoadout?.id === loadout.id}
-                    progression={progressionLoadState?.status === "ready" ? progressionLoadState.progression : null}
-                    onSelect={handleSelectLoadout}
-                    busy={busy}
-                  />
-                );
-              })}
-            </div>
-          </section>
-        ) : null}
-
-        <section className="home-setup-panel" aria-label="Match setup">
+        <section className="home-setup-panel play-quickstart-panel" aria-label="Quick start">
           {selectedLoadout ? (
             <div className="selected-loadout-summary">
               <span>Selected</span>
               <strong>{selectedLoadout.name}</strong>
               <small>{wizardTypeLabel(selectedLoadout.wizardType)} · {selectedLoadout.cardCount} cards</small>
             </div>
-          ) : null}
-          {progressionLoadState?.status === "ready" && selectedLoadout ? (
-            <RuneSelector
-              progression={progressionLoadState.progression}
-              wizardType={selectedLoadout.wizardType}
-              selectedRuneIds={selectedRuneIds}
-              onChange={(runeIds) => void handleRuneChange(runeIds)}
-            />
           ) : null}
           {!currentUser ? (
             <p className="notice">Sign in to equip runes, use custom deck recipes, and earn mastery.</p>
@@ -359,65 +294,147 @@ export function MatchPicker({
           {systemDeckLoadState.status === "error" ? (
             <p className="notice">{systemDeckLoadState.message}</p>
           ) : null}
-          <div className="setup-deck-selectors" aria-label="AI opponent selection">
-            <label>
-            AI Deck
-            <select
-              value={selectedAiDeck}
-              onChange={(event) => setSelectedAiDeck(event.target.value)}
-              disabled={busy || systemDeckLoadState.status === "loading"}
+          <div className="picker-actions home-actions">
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void handleCreateMatch()}
+              disabled={busy || !selectedLoadout}
             >
-              {systemDecks.map((deck) => (
-                <option key={deck.id} value={`system:${deck.id}`}>
-                  {deck.name}
-                </option>
-              ))}
-              {legalAccountDecks.map((deck) => (
-                <option key={deck.id} value={`account:${deck.id}`}>
-                  {deck.name}
-                </option>
-              ))}
-            </select>
-            </label>
-            {selectedAiDeckIsAccount ? (
-              <label>
-              AI Wizard
-              <select
-                value={selectedAiWizardType}
-                onChange={(event) => setSelectedAiWizardType(event.target.value as WizardType)}
-                disabled={busy}
-              >
-                {WIZARD_OPTIONS.map((wizard) => (
-                  <option key={wizard.id} value={wizard.id}>
-                    {wizard.name}
-                  </option>
-                ))}
-              </select>
-              </label>
-            ) : null}
+              <Plus size={18} />
+              New Solo Match
+            </button>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void handleCreateSharedMatch()}
+              disabled={busy || !selectedLoadout}
+            >
+              <Users size={18} />
+              New Multiplayer Match
+            </button>
           </div>
+          <button
+            className="secondary-link advanced-setup-toggle"
+            type="button"
+            aria-expanded={advancedOpen}
+            aria-controls="advanced-play-setup"
+            onClick={() => setAdvancedOpen((open) => !open)}
+          >
+            <ChevronDown size={18} aria-hidden="true" />
+            Advanced setup
+          </button>
         </section>
 
-        <div className="picker-actions home-actions">
-          <button
-            className="primary-button"
-            type="button"
-            onClick={() => void handleCreateMatch()}
-            disabled={busy || !selectedLoadout}
-          >
-            <Plus size={18} />
-            New Solo Match
-          </button>
-          <button
-            className="primary-button"
-            type="button"
-            onClick={() => void handleCreateSharedMatch()}
-            disabled={busy || !selectedLoadout}
-          >
-            <Users size={18} />
-            New Multiplayer Match
-          </button>
-        </div>
+        {advancedOpen ? (
+          <section id="advanced-play-setup" className="advanced-play-setup" aria-label="Advanced setup">
+            <section className="loadout-stage" aria-label="Preconfigured loadouts">
+              <div className="loadout-section-heading">
+                <div>
+                  <span>Preconfigured</span>
+                  <strong>System loadouts</strong>
+                </div>
+              </div>
+              <div className="loadout-grid">
+                {systemDeckLoadState.status === "loading" ? (
+                  <p className="notice">Loading system loadouts</p>
+                ) : null}
+                {systemDecks.map((deck) => {
+                  const loadout = systemDeckToLoadout(deck);
+                  return (
+                    <LoadoutCard
+                      key={loadout.id}
+                      loadout={loadout}
+                      selected={selectedLoadout?.id === loadout.id}
+                      progression={progressionLoadState?.status === "ready" ? progressionLoadState.progression : null}
+                      onSelect={handleSelectLoadout}
+                      busy={busy}
+                    />
+                  );
+                })}
+              </div>
+            </section>
+
+            {currentUser ? (
+              <section className="loadout-stage" aria-label="Custom deck loadouts">
+                <div className="loadout-section-heading">
+                  <div>
+                    <span>Custom</span>
+                    <strong>Your deck recipes</strong>
+                  </div>
+                  <button className="secondary-link" type="button" onClick={() => onNavigate("/decks")}>
+                    <Layers size={18} />
+                    Manage
+                  </button>
+                </div>
+                <div className="loadout-grid">
+                  {deckLoadState?.status === "loading" ? <p className="notice">Loading deck library</p> : null}
+                  {accountDecks.map((deck) => {
+                    const loadout = accountDeckToLoadout(deck);
+                    return (
+                      <LoadoutCard
+                        key={loadout.id}
+                        loadout={loadout}
+                        selected={selectedLoadout?.id === loadout.id}
+                        progression={progressionLoadState?.status === "ready" ? progressionLoadState.progression : null}
+                        onSelect={handleSelectLoadout}
+                        busy={busy}
+                      />
+                    );
+                  })}
+                </div>
+              </section>
+            ) : null}
+
+            <section className="home-setup-panel" aria-label="Match setup">
+              {progressionLoadState?.status === "ready" && selectedLoadout ? (
+                <RuneSelector
+                  progression={progressionLoadState.progression}
+                  wizardType={selectedLoadout.wizardType}
+                  selectedRuneIds={selectedRuneIds}
+                  onChange={(runeIds) => void handleRuneChange(runeIds)}
+                />
+              ) : null}
+              <div className="setup-deck-selectors" aria-label="AI opponent selection">
+                <label>
+                AI Deck
+                <select
+                  value={selectedAiDeck}
+                  onChange={(event) => setSelectedAiDeck(event.target.value)}
+                  disabled={busy || systemDeckLoadState.status === "loading"}
+                >
+                  {systemDecks.map((deck) => (
+                    <option key={deck.id} value={`system:${deck.id}`}>
+                      {deck.name}
+                    </option>
+                  ))}
+                  {legalAccountDecks.map((deck) => (
+                    <option key={deck.id} value={`account:${deck.id}`}>
+                      {deck.name}
+                    </option>
+                  ))}
+                </select>
+                </label>
+                {selectedAiDeckIsAccount ? (
+                  <label>
+                  AI Wizard
+                  <select
+                    value={selectedAiWizardType}
+                    onChange={(event) => setSelectedAiWizardType(event.target.value as WizardType)}
+                    disabled={busy}
+                  >
+                    {WIZARD_OPTIONS.map((wizard) => (
+                      <option key={wizard.id} value={wizard.id}>
+                        {wizard.name}
+                      </option>
+                    ))}
+                  </select>
+                  </label>
+                ) : null}
+              </div>
+            </section>
+          </section>
+        ) : null}
         <form className="open-match-form" onSubmit={handleOpenMatch}>
           <label htmlFor="match-id">Open Match by ID</label>
           <div>
@@ -438,6 +455,8 @@ export function MatchPicker({
     </main>
   );
 }
+
+export const MatchPicker = PlayPage;
 
 function runeIdsForHomeLoadout(loadout: HomeLoadout, progression: ProgressionResponse | null) {
   if (loadout.kind === "system" && progression) {

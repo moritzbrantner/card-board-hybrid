@@ -20,10 +20,11 @@ import {
 } from "./routes";
 import { AuthPage } from "./pages/AuthPage";
 import { CatalogPage } from "./pages/CatalogPage";
+import { DashboardPage } from "./pages/DashboardPage";
 import { DecksPage } from "./pages/DecksPage";
 import { MatchArchivePage } from "./pages/MatchArchivePage";
 import { MatchPage } from "./pages/MatchPage";
-import { MatchPicker } from "./pages/MatchPicker";
+import { PlayPage } from "./pages/MatchPicker";
 import { MatchScenariosPage } from "./pages/MatchScenariosPage";
 import { PublicDeckPage } from "./pages/PublicDeckPage";
 import { ReplayPage } from "./pages/ReplayPage";
@@ -203,7 +204,11 @@ export function App() {
   }
 
   if (path === "/" || path === "") {
-    return <MatchPicker onNavigate={navigate} currentUser={currentUser} onSignOut={handleSignOut} />;
+    return <DashboardPage onNavigate={navigate} currentUser={currentUser} onSignOut={handleSignOut} />;
+  }
+
+  if (normalizedPath === "/play") {
+    return <PlayPage onNavigate={navigate} currentUser={currentUser} onSignOut={handleSignOut} />;
   }
 
   if (import.meta.env.DEV && normalizedPath === "/dev/scenarios") {
@@ -285,7 +290,7 @@ export function App() {
       message="Route not found"
       actions={
         <button className="primary-button" type="button" onClick={() => navigate("/")}>
-          Open match picker
+          Open dashboard
         </button>
       }
     />

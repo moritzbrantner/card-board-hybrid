@@ -188,7 +188,7 @@ test("signed-in visits to auth routes redirect to profile or a safe next path", 
   await expect(page).toHaveURL(/\/profile$/);
 });
 
-test("signing out clears the session and returns to the public match picker", async ({ page }) => {
+test("signing out clears the session and returns to the public dashboard", async ({ page }) => {
   const authRequests = [];
   await page.addInitScript(
     ({ key }) => localStorage.setItem(key, "existing-token"),
@@ -204,7 +204,7 @@ test("signing out clears the session and returns to the public match picker", as
   await page.getByRole("menuitem", { name: "Sign out" }).click();
 
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("heading", { name: "Choose Your Loadout" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign In" })).toBeVisible();
   await expect
     .poll(() => page.evaluate((key) => localStorage.getItem(key), AUTH_TOKEN_STORAGE_KEY))
@@ -212,7 +212,41 @@ test("signing out clears the session and returns to the public match picker", as
   expect(authRequests).toEqual(["/api/auth/logout"]);
 });
 
-test("signed-in home account menu opens profile, settings, and sign out actions", async ({ page }) => {
+test("signed-in dashboard shows account, match, and deck summaries", async ({ page }) => {
+  await page.addInitScript(
+    ({ key }) => localStorage.setItem(key, "existing-token"),
+    { key: AUTH_TOKEN_STORAGE_KEY },
+  );
+  await mockAuthApi(page);
+
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
+  await expect(page.getByText("Welcome back, Rune Player.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Account Progression" })).toBeVisible();
+  await expect(page.getByText("Next level in 60 XP")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Preferred Wizard" })).toBeVisible();
+  await expect(page.getByText("Runekeeper")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Deck Library" })).toBeVisible();
+  await expect(page.getByText("Default: Default Legal")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent Matches" })).toBeVisible();
+  await expect(page.getByText("dashboard-match")).toBeVisible();
+
+  await page.getByRole("button", { name: "Play" }).first().click();
+  await expect(page).toHaveURL(/\/play$/);
+});
+
+test("dashboard opens a match by ID", async ({ page }) => {
+  await mockAuthApi(page);
+
+  await page.goto("/");
+  await page.getByLabel("Open Match by ID").fill("manual-match");
+  await page.getByRole("button", { name: "Open" }).click();
+
+  await expect(page).toHaveURL(/\/match\/manual-match$/);
+});
+
+test("signed-in dashboard account menu opens profile, settings, and sign out actions", async ({ page }) => {
   await page.addInitScript(
     ({ key }) => localStorage.setItem(key, "existing-token"),
     { key: AUTH_TOKEN_STORAGE_KEY },
@@ -223,8 +257,8 @@ test("signed-in home account menu opens profile, settings, and sign out actions"
 
   const accountMenu = page.getByRole("button", { name: /Account menu for Rune Player/ });
   await expect(accountMenu).toBeVisible();
-  await expect(page.getByText("Rune Player")).toBeVisible();
-  await expect(page.getByText("Lv. 1")).toBeVisible();
+  await expect(accountMenu).toContainText("Rune Player");
+  await expect(accountMenu).toContainText("Lv. 2");
 
   await accountMenu.click();
   await expect(page.getByRole("menuitem", { name: "Profile" })).toBeVisible();
@@ -304,7 +338,7 @@ test("protected route redirects replace the protected URL in browser history", a
 
   for (const protectedPath of ["/profile", "/decks", "/matches"]) {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Choose Your Loadout" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
 
     await page.goto(protectedPath);
 
@@ -314,12 +348,13 @@ test("protected route redirects replace the protected URL in browser history", a
     await page.goBack();
 
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("heading", { name: "Choose Your Loadout" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
   }
 });
 
 for (const { path, heading } of [
-  { path: "/", heading: "Choose Your Loadout" },
+  { path: "/", heading: "Player Dashboard" },
+  { path: "/play", heading: "Play" },
   { path: "/catalog", heading: "Card Catalog" },
   { path: "/settings", heading: "Settings" },
   { path: "/@rune-player/decks/10", heading: "Arcane Draft" },
@@ -394,7 +429,21 @@ async function mockAuthApi(page, authRequests = []) {
     }
 
     if (url.pathname === "/api/profile/matches") {
-      await route.fulfill({ json: { matches: [] } });
+      await route.fulfill({
+        json: {
+          matches: [
+            {
+              matchId: "dashboard-match",
+              createdAt: 20,
+              updatedAt: 40,
+              round: 3,
+              phase: "planning",
+              winner: null,
+              frameCount: 7,
+            },
+          ],
+        },
+      });
       return;
     }
 
@@ -479,7 +528,15 @@ async function mockAuthApi(page, authRequests = []) {
     }
 
     if (url.pathname === "/api/decks") {
-      await route.fulfill({ json: { rules: deckRules(), decks: [] } });
+      await route.fulfill({
+        json: {
+          rules: deckRules(),
+          decks: [
+            deckRecipe(101, "Default Legal", true, true),
+            deckRecipe(102, "Needs More Basics", false, false),
+          ],
+        },
+      });
       return;
     }
 
@@ -526,12 +583,12 @@ function authUser(email) {
     preferredWizardType: "runekeeper",
     boardVisualMode: "2d",
     progressionSummary: {
-      totalXp: 0,
-      level: 1,
+      totalXp: 140,
+      level: 2,
       currentLevelXp: 0,
-      nextLevelXp: 100,
-      xpIntoLevel: 0,
-      xpToNextLevel: 100,
+      nextLevelXp: 200,
+      xpIntoLevel: 140,
+      xpToNextLevel: 60,
       runeSlots: 1,
     },
   };
@@ -552,13 +609,48 @@ function preferences() {
 function progression() {
   return {
     account: authUser("player@local.dev").progressionSummary,
-    wizards: [],
+    wizards: [
+      {
+        wizardType: "runekeeper",
+        xp: 75,
+        level: 2,
+        currentLevelXp: 0,
+        nextLevelXp: 100,
+        xpIntoLevel: 75,
+        xpToNextLevel: 25,
+        totalSkillPoints: 1,
+        spentSkillPoints: 0,
+        availableSkillPoints: 1,
+        unlockedSkillIds: [],
+      },
+    ],
     runes: [],
     skillTrees: [],
     loadouts: [
       { wizardType: "runekeeper", runeIds: [] },
       { wizardType: "pyromancer", runeIds: [] },
     ],
+  };
+}
+
+function deckRecipe(id, name, isDefault, legal) {
+  return {
+    id,
+    name,
+    isDefault,
+    wizardType: "runekeeper",
+    runeIds: [],
+    cards: [],
+    legality: {
+      legal,
+      totalCards: legal ? 30 : 12,
+      basicCards: legal ? 30 : 12,
+      advancedCards: 0,
+      rareCards: 0,
+      messages: legal ? [] : ["Deck recipe needs at least 30 cards."],
+    },
+    createdAt: 1,
+    updatedAt: 1,
   };
 }
 
