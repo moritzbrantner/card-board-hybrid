@@ -4,6 +4,9 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { ComponentType, ReactElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import * as boardStories from "./board.stories";
+import { Board } from "./board";
+import { storyMatch } from "./board.fixtures";
+import { createMatchVisualCatalog } from "../matchVisualIdentity";
 
 afterEach(() => cleanup());
 
@@ -24,6 +27,23 @@ describe("board stories", () => {
 
     renderStory(boardStories.default, boardStories.StackAndPiles);
     expect(document.body).toHaveTextContent("Stack");
+  });
+
+  it("applies 2d tutorial highlights to matching hexes", () => {
+    render(
+      <Board
+        match={storyMatch()}
+        boardVisualMode="2d"
+        viewerSide="player"
+        visualCatalog={createMatchVisualCatalog([])}
+        selectedCard={null}
+        selectedPiece={null}
+        disabled={false}
+        tutorialHighlights={[{ kind: "coord", coord: { q: 0, r: 1 }, tone: "primary" }]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /q 0, r 1/i })).toHaveClass("tutorial-highlight");
   });
 });
 

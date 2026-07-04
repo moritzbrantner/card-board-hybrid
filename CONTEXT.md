@@ -219,3 +219,15 @@ _Avoid_: debug mode
 **Match scenario**:
 An authored local-development starting match state loaded into the Rust rules engine to exercise a specific interaction or board condition. A match scenario creates a normal playable match instance, but is not a player-facing mode, replay format, deck recipe, or production feature.
 _Avoid_: fixture, sandbox match, test deck
+
+**Tutorial mode**:
+A player-facing guided learning flow made from scripted tutorial scenes. Tutorial mode teaches mechanics without creating a persisted match, replay, archive entry, or progression.
+_Avoid_: onboarding match, practice match, match scenario
+
+**Tutorial scene**:
+An authored client-side board, hand, stack, and objective state used by Tutorial mode to demonstrate one or more mechanics.
+_Avoid_: fixture, dev scenario, sandbox match
+
+**Tutorial step**:
+One teaching beat inside a tutorial scene, consisting of a paused concept introduction, highlighted elements, and an expected interaction that can advance the tutorial.
+_Avoid_: tooltip, prompt

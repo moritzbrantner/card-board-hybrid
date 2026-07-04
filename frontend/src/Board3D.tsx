@@ -31,6 +31,7 @@ import {
 import type { MatchVisualCatalog, UnitVisualIdentity, HeroVisualIdentity } from "./matchVisualIdentity";
 import type { HexCoord, HexTile, Side, Unit, HeroType } from "./types";
 import { BOARD_ANIMATION_DURATION_MS, type BoardAnimationCue, type PieceAnimation } from "./boardAnimations";
+import type { TutorialHighlightTone } from "./tutorial/tutorialHighlights";
 
 const BOARD_CAMERA_MIN_DISTANCE = 5.8;
 const BOARD_CAMERA_MAX_DISTANCE = 14.5;
@@ -81,6 +82,7 @@ export type Board3DTileInteraction = {
   isLegal: boolean;
   isSelected: boolean;
   isFocused?: boolean;
+  tutorialHighlightTone?: TutorialHighlightTone;
   hasManaSource?: boolean;
   hasPiece: boolean;
   pieceSide?: Side;
@@ -520,6 +522,10 @@ function HexTileMesh({
   const [x, y, z] = axialToBoardPosition(coord, 1);
   const color = interaction?.isSelected
     ? "#f5ecd2"
+    : interaction?.tutorialHighlightTone === "danger"
+      ? "#6b2f2f"
+      : interaction?.tutorialHighlightTone
+        ? "#66582a"
     : interaction?.isLegal
       ? "#6f6331"
       : interaction?.hasPiece
@@ -527,7 +533,14 @@ function HexTileMesh({
         : interaction?.hasManaSource
           ? "#403b25"
           : "#293733";
-  const emissive = interaction?.isLegal ? "#3d3311" : "#000000";
+  const emissive = interaction?.tutorialHighlightTone
+    ? interaction.tutorialHighlightTone === "danger"
+      ? "#4f1515"
+      : "#4a3d12"
+    : interaction?.isLegal
+      ? "#3d3311"
+      : "#000000";
+  const emissiveIntensity = interaction?.tutorialHighlightTone ? 0.62 : interaction?.isLegal ? 0.42 : 0;
 
   function handlePointer(event: ThreeEvent<PointerEvent>) {
     event.stopPropagation();
@@ -558,7 +571,7 @@ function HexTileMesh({
       <meshStandardMaterial
         color={color}
         emissive={emissive}
-        emissiveIntensity={interaction?.isLegal ? 0.42 : 0}
+        emissiveIntensity={emissiveIntensity}
         roughness={0.78}
         metalness={0.08}
       />
@@ -1140,6 +1153,8 @@ function Board3DHitTarget({
     interaction.isLegal ? "legal" : "",
     interaction.isSelected ? "selected-piece" : "",
     interaction.isFocused ? "keyboard-focused" : "",
+    interaction.tutorialHighlightTone ? "tutorial-highlight" : "",
+    interaction.tutorialHighlightTone ? `tutorial-highlight-${interaction.tutorialHighlightTone}` : "",
   ]
     .filter(Boolean)
     .join(" ");

@@ -1,4 +1,4 @@
-import { ChevronDown, Layers, Plus, Users } from "lucide-react";
+import { BookOpen, ChevronDown, Layers, Plus, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import {
@@ -312,6 +312,15 @@ export function PlayPage({
             >
               <Users size={18} />
               New Multiplayer Match
+            </button>
+            <button
+              className="secondary-link"
+              type="button"
+              onClick={() => onNavigate("/tutorial")}
+              disabled={busy}
+            >
+              <BookOpen size={18} />
+              Tutorial
             </button>
           </div>
           <button

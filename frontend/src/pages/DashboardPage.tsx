@@ -112,6 +112,10 @@ export function DashboardPage({
                 <Play size={18} />
                 Play
               </button>
+              <button className="secondary-link" type="button" onClick={() => onNavigate("/tutorial")}>
+                <BookOpen size={18} />
+                Tutorial
+              </button>
             </header>
 
             <section className="dashboard-grid" aria-label="Account summary">
@@ -166,6 +170,10 @@ function SignedOutDashboard({ onNavigate }: { onNavigate: (to: string) => void }
         <button className="secondary-link" type="button" onClick={() => onNavigate("/catalog/")}>
           <BookOpen size={18} />
           Catalog
+        </button>
+        <button className="secondary-link" type="button" onClick={() => onNavigate("/tutorial")}>
+          <BookOpen size={18} />
+          Tutorial
         </button>
         <button className="secondary-link" type="button" onClick={() => onNavigate("/register")}>
           <UserRound size={18} />

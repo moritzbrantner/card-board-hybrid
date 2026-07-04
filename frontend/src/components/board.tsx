@@ -37,6 +37,8 @@ import type {
   Side,
   StackItem,
 } from "../types";
+import type { BoardTutorialHighlight, TutorialHighlightTone } from "../tutorial/tutorialHighlights";
+import { sameTutorialCoord } from "../tutorial/tutorialHighlights";
 import { DetailStat } from "./common";
 import {
   coordKey,
@@ -338,6 +340,7 @@ export function Board({
   onTileDrop,
   onUnitContextMenu,
   onFocusedUnitChange,
+  tutorialHighlights = [],
 }: {
   match: MatchState;
   animation?: BoardAnimationCue | null;
@@ -353,6 +356,7 @@ export function Board({
   onTileDrop?: (tile: HexTile, cardId: string) => void;
   onUnitContextMenu?: (unit: BoardUnit, position: { x: number; y: number }) => void;
   onFocusedUnitChange?: (pieceId: string | null) => void;
+  tutorialHighlights?: BoardTutorialHighlight[];
 }) {
   const [webglFailed, setWebglFailed] = useState(
     () => boardVisualMode === "3d" && !canCreateWebGLContext(),
@@ -390,6 +394,7 @@ export function Board({
             (piece && isLegalAttack(match, viewerSide, selectedPiece, piece)))));
     const isSelected = piece?.id === selectedPiece?.id;
     const isFocused = focusedCoord ? sameCoord(tile.coord, focusedCoord) : false;
+    const tutorialHighlightTone = tutorialHighlightForTile(tile.coord, piece?.id ?? null, tutorialHighlights);
 
     return {
       coord: tile.coord,
@@ -398,6 +403,7 @@ export function Board({
       isLegal: Boolean(isLegal),
       isSelected,
       isFocused,
+      tutorialHighlightTone,
       hasManaSource,
       hasPiece: Boolean(piece),
       pieceSide: piece?.side,
@@ -507,13 +513,14 @@ export function Board({
               const isLegal = interaction?.isLegal ?? false;
               const isSelected = piece?.id === selectedPiece?.id;
               const isFocused = focusedCoord ? sameCoord(tile.coord, focusedCoord) : false;
+              const tutorialHighlightTone = tutorialHighlightForTile(tile.coord, piece?.id ?? null, tutorialHighlights);
               const occupantClass = displayPiece ? `occupied occupied-${displayPiece.side}` : "";
               const title = tileTitle(tile, piece, viewerSide, droppedItems.length, hasManaSource);
 
               return (
                 <button
                   key={coordKey(tile.coord)}
-                  className={`hex-tile ${hasManaSource ? "mana-source" : ""} ${occupantClass} ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""} ${isFocused ? "keyboard-focused" : ""}`}
+                  className={`hex-tile ${hasManaSource ? "mana-source" : ""} ${occupantClass} ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""} ${isFocused ? "keyboard-focused" : ""} ${tutorialHighlightTone ? `tutorial-highlight tutorial-highlight-${tutorialHighlightTone}` : ""}`}
                   type="button"
                   disabled={disabled && !readOnly}
                   tabIndex={readOnly ? -1 : undefined}
@@ -672,6 +679,8 @@ export function CardButton({
   onClick,
   onDragStart,
   onDragEnd,
+  tutorialTargetId,
+  tutorialHighlighted = false,
 }: {
   card: Card;
   visualIdentity: CardVisualIdentity;
@@ -683,14 +692,17 @@ export function CardButton({
   onClick: () => void;
   onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
   onDragEnd?: () => void;
+  tutorialTargetId?: string;
+  tutorialHighlighted?: boolean;
 }) {
   return (
     <button
-      className={`card-button ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${played ? "played" : ""} ${card.rarity}`}
+      className={`card-button ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${played ? "played" : ""} ${tutorialHighlighted ? "tutorial-highlight tutorial-highlight-primary" : ""} ${card.rarity}`}
       type="button"
       disabled={disabled}
       draggable={!disabled}
       style={style}
+      data-tutorial-target={tutorialTargetId}
       onClick={onClick}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -707,4 +719,18 @@ export function CardButton({
       <span className="card-text">{card.text}</span>
     </button>
   );
+}
+
+function tutorialHighlightForTile(
+  coord: HexCoord,
+  pieceId: string | null,
+  highlights: BoardTutorialHighlight[],
+): TutorialHighlightTone | undefined {
+  return highlights.find((highlight) => {
+    if (highlight.kind === "coord") {
+      return sameTutorialCoord(highlight.coord, coord);
+    }
+
+    return pieceId !== null && highlight.pieceId === pieceId;
+  })?.tone;
 }

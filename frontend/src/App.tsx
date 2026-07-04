@@ -30,6 +30,7 @@ import { PublicDeckPage } from "./pages/PublicDeckPage";
 import { ReplayPage } from "./pages/ReplayPage";
 import { RouteRedirect } from "./pages/RouteRedirect";
 import { SharedMatchPage } from "./pages/SharedMatchPage";
+import { TutorialPage } from "./pages/TutorialPage";
 
 export function App() {
   const [path, setPath] = useState(() => currentRoutePath());
@@ -209,6 +210,19 @@ export function App() {
 
   if (normalizedPath === "/play") {
     return <PlayPage onNavigate={navigate} currentUser={currentUser} onSignOut={handleSignOut} />;
+  }
+
+  if (normalizedPath === "/tutorial") {
+    return (
+      <TutorialPage
+        onNavigate={navigate}
+        currentUser={currentUser}
+        onSignOut={handleSignOut}
+        allowSignOut={false}
+        loginNextPath={path}
+        visualPreferences={visualPreferences}
+      />
+    );
   }
 
   if (import.meta.env.DEV && normalizedPath === "/dev/scenarios") {
