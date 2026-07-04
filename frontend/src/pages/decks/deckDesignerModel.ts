@@ -205,6 +205,8 @@ export function cardKindLabel(card: CatalogCard) {
       return "Spell";
     case "item":
       return "Item";
+    case "manaSource":
+      return "Mana Source";
   }
 }
 

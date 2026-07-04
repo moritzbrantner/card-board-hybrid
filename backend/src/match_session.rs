@@ -16,8 +16,7 @@ mod solo_ai_policy;
 use solo_ai_policy::{SoloAiActionIntent, SoloAiDecision, SoloAiPolicy, SoloAiView};
 
 const BOARD_RADIUS: i32 = 3;
-const STARTING_MANA: u8 = 2;
-const MAX_MANA: u8 = 8;
+const HERO_MANA: u8 = 3;
 const OPENING_HAND_SIZE: usize = 4;
 
 #[derive(Clone, Debug)]
@@ -134,6 +133,10 @@ pub enum ReplayEvent {
         side: Side,
         unit_id: String,
         name: String,
+    },
+    ManaSourceBuilt {
+        side: Side,
+        coord: HexCoord,
     },
     ManaGained {
         side: Side,
@@ -406,6 +409,8 @@ impl HeroType {
 pub struct HexBoard {
     pub radius: i32,
     pub tiles: Vec<HexTile>,
+    #[serde(default)]
+    pub mana_sources: Vec<HexCoord>,
     pub units: Vec<Unit>,
     #[serde(default)]
     pub dropped_items: Vec<DroppedItem>,
@@ -510,6 +515,7 @@ pub enum CardKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         active: Option<ItemActiveEffect>,
     },
+    ManaSource,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -633,6 +639,10 @@ pub enum StackAction {
     EquipItem {
         card: CardSummary,
         unit_id: String,
+    },
+    BuildManaSource {
+        card: CardSummary,
+        coord: HexCoord,
     },
     ActivateItem {
         unit_id: String,
@@ -1142,9 +1152,9 @@ impl MatchState {
         }
     }
 
-    fn refresh_mana_from_control(&mut self, side: Side) {
+    fn refresh_mana_from_sources(&mut self, side: Side) {
         let mana = mana_with_progression(
-            self.mana_from_control(side),
+            HERO_MANA.saturating_add(self.occupied_mana_sources(side)),
             self.player_ref(side).progression.effects.mana_delta,
         );
         let player = self.player_mut(side);
@@ -1152,21 +1162,21 @@ impl MatchState {
         player.mana = mana;
     }
 
-    fn mana_from_control(&self, side: Side) -> u8 {
-        self.controlled_hexes(side).len().min(usize::from(MAX_MANA)) as u8
+    fn occupied_mana_sources(&self, side: Side) -> u8 {
+        let occupied = self
+            .board
+            .mana_sources
+            .iter()
+            .filter(|source| {
+                self.piece_view_at(**source)
+                    .is_some_and(|piece| piece.side == side)
+            })
+            .count();
+        occupied.min(usize::from(u8::MAX)) as u8
     }
 
-    fn controlled_hexes(&self, side: Side) -> HashSet<HexCoord> {
-        let mut controlled = HashSet::new();
-        for piece in self.pieces_for_side(side) {
-            controlled.insert(piece.position);
-            for neighbor in piece.position.neighbors() {
-                if self.board.is_valid(neighbor) {
-                    controlled.insert(neighbor);
-                }
-            }
-        }
-        controlled
+    fn has_mana_source(&self, coord: HexCoord) -> bool {
+        self.board.mana_sources.contains(&coord)
     }
 
     fn play_card_for_side(
@@ -1356,6 +1366,37 @@ impl MatchState {
                     ReplayEvent::ActionQueued { side, item },
                 );
             }
+            CardKind::ManaSource => {
+                let coord = self.validate_mana_source_target(side, target)?;
+
+                self.spend_card_resources(side, &card_id, &card)?;
+                self.log.insert(
+                    0,
+                    format!("{} put {} on the stack.", side.label(), card.name),
+                );
+                let item = self.push_stack_item(
+                    side,
+                    0,
+                    StackAction::BuildManaSource {
+                        card: CardSummary::from(&card),
+                        coord,
+                    },
+                );
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::CardPlayed {
+                        side,
+                        card: CardSummary::from(&card),
+                        target: ActionTarget::Hex { coord },
+                    },
+                );
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::ActionQueued { side, item },
+                );
+            }
         }
 
         if self.mode == MatchMode::Solo && side == Side::Player && stack_was_empty {
@@ -1364,6 +1405,30 @@ impl MatchState {
         self.check_winner(frames, action_index);
         self.truncate_log();
         Ok(())
+    }
+
+    fn validate_mana_source_target(
+        &self,
+        side: Side,
+        target: ActionTarget,
+    ) -> Result<HexCoord, MatchError> {
+        let ActionTarget::Hex { coord } = target else {
+            return Err(MatchError::InvalidTarget);
+        };
+        if !self.board.is_valid(coord) {
+            return Err(MatchError::InvalidHex);
+        }
+        if self.is_occupied(coord) {
+            return Err(MatchError::OccupiedHex);
+        }
+        if self.has_mana_source(coord) {
+            return Err(MatchError::InvalidTarget);
+        }
+        if self.player_ref(side).hero.position.distance(coord) != 1 {
+            return Err(MatchError::InvalidTarget);
+        }
+
+        Ok(coord)
     }
 
     fn spend_card_resources(
@@ -1568,12 +1633,50 @@ impl MatchState {
             StackAction::EquipItem { card, unit_id } => {
                 self.resolve_item_card(item.side, card, &unit_id, frames, action_index);
             }
+            StackAction::BuildManaSource { card, coord } => {
+                self.resolve_mana_source_card(item.side, card, coord, frames, action_index);
+            }
             StackAction::ActivateItem { unit_id, item_id } => {
                 self.resolve_item_activation(item.side, &unit_id, &item_id, frames, action_index);
             }
         }
 
         self.priority_side = self.action_stack.last().map(|item| item.side.opponent());
+    }
+
+    fn resolve_mana_source_card(
+        &mut self,
+        side: Side,
+        card: CardSummary,
+        coord: HexCoord,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        if !self.board.is_valid(coord) || self.is_occupied(coord) || self.has_mana_source(coord) {
+            self.log.insert(
+                0,
+                format!("{} resolved with no legal source hex.", card.name),
+            );
+            self.truncate_log();
+            return;
+        }
+
+        self.board.mana_sources.push(coord);
+        self.log.insert(
+            0,
+            format!(
+                "{} built {} at q {}, r {}.",
+                side.label(),
+                card.name,
+                coord.q,
+                coord.r
+            ),
+        );
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::ManaSourceBuilt { side, coord },
+        );
     }
 
     fn resolve_unit_card(
@@ -2169,7 +2272,7 @@ impl MatchState {
         action_index: Option<u32>,
     ) {
         self.active_side = side;
-        self.refresh_mana_from_control(side);
+        self.refresh_mana_from_sources(side);
         let should_draw = self.player_ref(side).has_started_first_turn;
         let mut drawn = None;
         {
@@ -2251,6 +2354,7 @@ impl MatchState {
             .map(|piece| piece.position)
             .collect();
         let valid_hexes = self.board.tiles.iter().map(|tile| tile.coord).collect();
+        let mana_sources = self.board.mana_sources.iter().copied().collect();
         let mut damaged_piece_ids = HashSet::new();
         for piece in opponent_pieces.iter().chain(player_pieces.iter()) {
             if self.piece_is_damaged(&piece.id) {
@@ -2271,6 +2375,7 @@ impl MatchState {
             opponent_discard_count: self.opponent.discard_count,
             valid_hexes,
             occupied_hexes,
+            mana_sources,
             damaged_piece_ids,
         }
     }
@@ -2285,6 +2390,20 @@ impl MatchState {
                 .map(PieceView::from),
         );
         pieces
+    }
+
+    fn piece_view_at(&self, coord: HexCoord) -> Option<PieceView> {
+        if self.player.hero.position == coord {
+            return Some(PieceView::from(&self.player.hero));
+        }
+        if self.opponent.hero.position == coord {
+            return Some(PieceView::from(&self.opponent.hero));
+        }
+        self.board
+            .units
+            .iter()
+            .find(|unit| unit.position == coord)
+            .map(PieceView::from)
     }
 
     fn piece_view(&self, piece_id: &str) -> Option<PieceView> {
@@ -2711,6 +2830,11 @@ impl HexBoard {
         Self {
             radius,
             tiles,
+            mana_sources: vec![
+                HexCoord { q: -1, r: 0 },
+                HexCoord { q: 0, r: 0 },
+                HexCoord { q: 1, r: 0 },
+            ],
             units: Vec::new(),
             dropped_items: Vec::new(),
         }
@@ -2801,7 +2925,7 @@ impl PlayerState {
         progression: MatchProgressionLoadout,
     ) -> Self {
         shuffle(&mut deck, &mut rng_seed);
-        let mana = mana_with_progression(STARTING_MANA, progression.effects.mana_delta);
+        let mana = mana_with_progression(HERO_MANA, progression.effects.mana_delta);
 
         Self {
             side,
@@ -2934,7 +3058,7 @@ fn opening_hand_size(progression: &MatchProgressionLoadout) -> usize {
 
 fn mana_with_progression(base: u8, delta: i8) -> u8 {
     let value = i16::from(base) + i16::from(delta);
-    value.clamp(0, i16::from(MAX_MANA) + i16::from(delta.max(0))) as u8
+    value.clamp(0, i16::from(u8::MAX)) as u8
 }
 
 fn piece_can_attack(attacker: &PieceView, target: &PieceView) -> bool {
@@ -3102,6 +3226,7 @@ mod tests {
                 ReplayEvent::CardDrawn { .. } => Some("cardDrawn"),
                 ReplayEvent::ItemEquipped { .. } => Some("itemEquipped"),
                 ReplayEvent::ItemActivated { .. } => Some("itemActivated"),
+                ReplayEvent::ManaSourceBuilt { .. } => Some("manaSourceBuilt"),
                 _ => None,
             })
             .collect()
@@ -3113,6 +3238,10 @@ mod tests {
 
         assert_eq!(game.board.radius, 3);
         assert_eq!(game.board.tiles.len(), 37);
+        assert_eq!(
+            game.board.mana_sources,
+            vec![hex(-1, 0), hex(0, 0), hex(1, 0)]
+        );
         assert!(game.board.is_valid(hex(0, 0)));
         assert!(!game.board.is_valid(hex(4, 0)));
     }
@@ -3422,7 +3551,7 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(starter_card_templates().len(), 43);
+        assert_eq!(starter_card_templates().len(), 44);
         assert_eq!(game.player.hand.len(), 4);
         assert_eq!(game.player.deck_count, 56);
     }
@@ -3444,7 +3573,7 @@ mod tests {
             .expect("unit should be playable next to hero");
 
         let unit = game.board.units.first().expect("unit should be on board");
-        assert_eq!(game.player.mana, 3);
+        assert_eq!(game.player.mana, 2);
         assert_eq!(game.player.hero.ap_remaining, 2);
         assert_eq!(unit.position, hex(0, 2));
         assert_eq!(unit.template_id.as_deref(), Some("ember-squire"));
@@ -4494,7 +4623,7 @@ mod tests {
 
         assert_eq!(game.round, 2);
         assert_eq!(game.active_side, Side::Player);
-        assert_eq!(game.player.max_mana, game.mana_from_control(Side::Player));
+        assert_eq!(game.player.max_mana, 3);
         assert_eq!(game.player.hand.len(), 5);
     }
 
@@ -4539,10 +4668,17 @@ mod tests {
     }
 
     #[test]
-    fn turn_start_mana_comes_from_controlled_hexes() {
+    fn turn_start_mana_comes_from_hero_and_occupied_mana_sources() {
         let mut game = MatchState::new_with_seed(7);
-        game.player.hero.position = hex(0, 1);
-        game.opponent.hero.position = hex(0, -1);
+        game.player.hero.position = hex(0, 0);
+        game.board.units.push(board_unit(
+            "source-worker",
+            Side::Player,
+            hex(1, 0),
+            1,
+            1,
+            2,
+        ));
         game.player.mana = 0;
         game.player.max_mana = 0;
         game.opponent.mana = 0;
@@ -4550,12 +4686,122 @@ mod tests {
 
         game.start_turn(Side::Player, &mut Vec::new(), None);
 
-        assert!(game.controlled_hexes(Side::Player).contains(&hex(0, 0)));
-        assert!(game.controlled_hexes(Side::Opponent).contains(&hex(0, 0)));
-        assert_eq!(game.player.max_mana, 7);
-        assert_eq!(game.player.mana, 7);
+        assert_eq!(game.player.max_mana, 5);
+        assert_eq!(game.player.mana, 5);
         assert_eq!(game.opponent.max_mana, 0);
         assert_eq!(game.opponent.mana, 0);
+    }
+
+    #[test]
+    fn adjacent_unoccupied_sources_do_not_generate_mana() {
+        let mut game = MatchState::new_with_seed(7);
+        game.player.hero.position = hex(0, 1);
+        game.player.mana = 0;
+        game.player.max_mana = 0;
+
+        game.start_turn(Side::Player, &mut Vec::new(), None);
+
+        assert_eq!(game.player.max_mana, 3);
+        assert_eq!(game.player.mana, 3);
+    }
+
+    #[test]
+    fn any_side_can_draw_from_an_occupied_mana_source() {
+        let mut game = MatchState::new_with_seed(7);
+        game.board.mana_sources.push(hex(0, -2));
+        game.opponent.hero.position = hex(0, -2);
+        game.opponent.mana = 0;
+        game.opponent.max_mana = 0;
+
+        game.start_turn(Side::Opponent, &mut Vec::new(), None);
+
+        assert_eq!(game.opponent.max_mana, 4);
+        assert_eq!(game.opponent.mana, 4);
+    }
+
+    #[test]
+    fn unspent_mana_remains_for_reactions_until_next_own_turn_refresh() {
+        let mut game = MatchState::new_with_seed_hero_types_and_mode(
+            7,
+            HeroType::Runekeeper,
+            HeroType::Pyromancer,
+            MatchMode::Shared,
+        );
+        game.player.mana = 5;
+        game.player.max_mana = 5;
+
+        game.apply_action_recording_for_side(Side::Player, MatchActionRequest::EndTurn, 0)
+            .expect("player can end their active turn");
+
+        assert_eq!(game.active_side, Side::Opponent);
+        assert_eq!(game.player.mana, 5);
+        assert_eq!(game.player.max_mana, 5);
+
+        game.apply_action_recording_for_side(Side::Opponent, MatchActionRequest::EndTurn, 1)
+            .expect("opponent can end their active turn");
+
+        assert_eq!(game.active_side, Side::Player);
+        assert_eq!(game.player.mana, 3);
+        assert_eq!(game.player.max_mana, 3);
+    }
+
+    #[test]
+    fn mana_well_builds_a_permanent_mana_source() {
+        let mut game = MatchState::new_with_seed(7);
+        let card = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "mana-well")
+            .expect("mana well exists");
+        let card_id = put_card_in_hand(&mut game, card);
+
+        let frames = game
+            .apply_action_recording(
+                MatchActionRequest::PlayCard {
+                    card_id,
+                    target: ActionTarget::Hex { coord: hex(0, 2) },
+                },
+                9,
+            )
+            .expect("mana well should be buildable next to hero");
+
+        assert!(game.board.mana_sources.contains(&hex(0, 2)));
+        assert_eq!(game.player.mana, 1);
+        assert_eq!(game.player.hero.ap_remaining, 2);
+        assert_eq!(
+            card_play_event_names(&frames),
+            vec!["cardPlayed", "actionQueued", "manaSourceBuilt"]
+        );
+    }
+
+    #[test]
+    fn mana_well_requires_adjacent_empty_non_source_hex() {
+        let mut game = MatchState::new_with_seed(7);
+        let card = starter_card_templates()
+            .into_iter()
+            .find(|card| card.template_id == "mana-well")
+            .expect("mana well exists");
+        let card_id = put_card_in_hand(&mut game, card);
+
+        let occupied = game.apply_action(MatchActionRequest::PlayCard {
+            card_id: card_id.clone(),
+            target: ActionTarget::Hex { coord: hex(0, 3) },
+        });
+        assert_eq!(occupied, Err(MatchError::OccupiedHex));
+
+        let non_adjacent = game.apply_action(MatchActionRequest::PlayCard {
+            card_id: card_id.clone(),
+            target: ActionTarget::Hex { coord: hex(0, 1) },
+        });
+        assert_eq!(non_adjacent, Err(MatchError::InvalidTarget));
+
+        game.board.mana_sources.push(hex(0, 2));
+        let duplicate_source = game.apply_action(MatchActionRequest::PlayCard {
+            card_id,
+            target: ActionTarget::Hex { coord: hex(0, 2) },
+        });
+        assert_eq!(duplicate_source, Err(MatchError::InvalidTarget));
+        assert_eq!(game.player.mana, 3);
+        assert_eq!(game.player.hero.ap_remaining, 3);
     }
 
     #[test]
@@ -4578,11 +4824,8 @@ mod tests {
         assert_eq!(game.active_side, Side::Opponent);
         assert_eq!(game.player.mana, 1);
         assert_eq!(game.player.max_mana, 4);
-        assert_eq!(game.opponent.mana, game.mana_from_control(Side::Opponent));
-        assert_eq!(
-            game.opponent.max_mana,
-            game.mana_from_control(Side::Opponent)
-        );
+        assert_eq!(game.opponent.mana, 3);
+        assert_eq!(game.opponent.max_mana, 3);
     }
 
     #[test]

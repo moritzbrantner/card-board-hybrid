@@ -21,8 +21,12 @@ Playing a Card and resolving its card-created effect through the match rules, in
 _Avoid_: card handler, play-card plumbing
 
 **Mana**:
-The per-turn resource spent to play cards, set from the tiles that side controls at the beginning of that side's turn.
+The resource spent to play cards. A side refreshes Mana from its Hero and occupied Mana sources at the beginning of that side's turn, while unspent Mana remains available for reactions until that side's next turn begins.
 _Avoid_: energy
+
+**Mana source**:
+A board hex marker that grants Mana to the side occupying it at the beginning of that side's turn.
+_Avoid_: mana tile, controlled hex
 
 **Hero action points**:
 The hero's per-turn action budget for moving, attacking, and playing cards.

@@ -4674,7 +4674,7 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         let cards = body["cards"].as_array().expect("cards should be an array");
-        assert_eq!(cards.len(), 43);
+        assert_eq!(cards.len(), 44);
         let card_by_id = |id: &str| {
             cards
                 .iter()
@@ -4682,8 +4682,10 @@ mod tests {
                 .expect("card should exist")
         };
         assert_eq!(cards[0]["id"], "ember-squire");
-        assert_eq!(cards[42]["id"], "comet-spear");
-        assert_eq!(card_by_id("ember-squire")["copyCount"], 5);
+        assert_eq!(cards[43]["id"], "comet-spear");
+        assert_eq!(card_by_id("ember-squire")["copyCount"], 4);
+        assert_eq!(card_by_id("mana-well")["copyCount"], 5);
+        assert_eq!(card_by_id("mana-well")["kind"]["type"], "manaSource");
         assert_eq!(card_by_id("blade-dancer")["copyCount"], 1);
         assert_eq!(card_by_id("ember-flask")["copyCount"], 1);
         assert_eq!(card_by_id("rune-charm")["kind"]["type"], "item");

@@ -15,6 +15,7 @@ impl Default for SoloAiPolicy {
             rules: vec![
                 SoloAiRuleId::InRangeAttack,
                 SoloAiRuleId::UsefulSpell,
+                SoloAiRuleId::BuildManaSource,
                 SoloAiRuleId::HighestCostUnitSummon,
                 SoloAiRuleId::MoveTowardPlayerHero,
             ],
@@ -42,6 +43,7 @@ impl SoloAiPolicy {
         match rule {
             SoloAiRuleId::InRangeAttack => self.in_range_attack(view),
             SoloAiRuleId::UsefulSpell => self.useful_spell(view),
+            SoloAiRuleId::BuildManaSource => self.build_mana_source(view),
             SoloAiRuleId::HighestCostUnitSummon => self.highest_cost_unit_summon(view),
             SoloAiRuleId::MoveTowardPlayerHero => self.move_toward_player_hero(view),
         }
@@ -171,6 +173,22 @@ impl SoloAiPolicy {
         })
     }
 
+    fn build_mana_source(&self, view: &SoloAiView) -> Option<SoloAiActionIntent> {
+        if view.opponent_hero.ap_remaining == 0 {
+            return None;
+        }
+
+        let card = view.opponent_hand.iter().find(|card| {
+            card.cost <= view.opponent_mana && matches!(card.kind, CardKind::ManaSource)
+        })?;
+        let coord = self.best_mana_source_hex(view)?;
+
+        Some(SoloAiActionIntent::PlayCard {
+            card_id: card.id.clone(),
+            target: ActionTarget::Hex { coord },
+        })
+    }
+
     fn move_toward_player_hero(&self, view: &SoloAiView) -> Option<SoloAiActionIntent> {
         let player_hero = view.player_hero.position;
         let (piece, destination) = view
@@ -203,6 +221,13 @@ impl SoloAiPolicy {
     fn best_summon_hex(&self, view: &SoloAiView) -> Option<HexCoord> {
         self.empty_neighbors(view, view.opponent_hero.position)
             .into_iter()
+            .min_by_key(|coord| coord.distance(view.player_hero.position))
+    }
+
+    fn best_mana_source_hex(&self, view: &SoloAiView) -> Option<HexCoord> {
+        self.empty_neighbors(view, view.opponent_hero.position)
+            .into_iter()
+            .filter(|coord| !view.mana_sources.contains(coord))
             .min_by_key(|coord| coord.distance(view.player_hero.position))
     }
 
@@ -244,6 +269,7 @@ pub(super) struct SoloAiView {
     pub(super) opponent_discard_count: usize,
     pub(super) valid_hexes: HashSet<HexCoord>,
     pub(super) occupied_hexes: HashSet<HexCoord>,
+    pub(super) mana_sources: HashSet<HexCoord>,
     pub(super) damaged_piece_ids: HashSet<String>,
 }
 
@@ -273,6 +299,7 @@ pub(super) enum SoloAiActionIntent {
 pub(super) enum SoloAiRuleId {
     InRangeAttack,
     UsefulSpell,
+    BuildManaSource,
     HighestCostUnitSummon,
     MoveTowardPlayerHero,
 }
@@ -317,6 +344,7 @@ mod tests {
             opponent_discard_count: 0,
             valid_hexes,
             occupied_hexes,
+            mana_sources: HashSet::new(),
             damaged_piece_ids: HashSet::new(),
         }
     }
@@ -380,6 +408,7 @@ mod tests {
             &[
                 SoloAiRuleId::InRangeAttack,
                 SoloAiRuleId::UsefulSpell,
+                SoloAiRuleId::BuildManaSource,
                 SoloAiRuleId::HighestCostUnitSummon,
                 SoloAiRuleId::MoveTowardPlayerHero,
             ]
@@ -556,6 +585,24 @@ mod tests {
             policy_decision(view),
             SoloAiDecision::TakeAction(SoloAiActionIntent::PlayCard {
                 card_id: "expensive".to_string(),
+                target: ActionTarget::Hex { coord: hex(0, -2) },
+            })
+        );
+    }
+
+    #[test]
+    fn mana_source_card_builds_before_unit_summon() {
+        let mut view = base_view();
+        view.opponent_hand = vec![
+            unit_card("unit", 2),
+            card("mana-well", 2, CardKind::ManaSource),
+        ];
+        view.opponent_mana = 3;
+
+        assert_eq!(
+            policy_decision(view),
+            SoloAiDecision::TakeAction(SoloAiActionIntent::PlayCard {
+                card_id: "mana-well".to_string(),
                 target: ActionTarget::Hex { coord: hex(0, -2) },
             })
         );

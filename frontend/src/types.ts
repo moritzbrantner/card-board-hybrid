@@ -69,6 +69,9 @@ export type CardKind =
       range: number;
       passive: ItemPassiveEffect;
       active?: ItemActiveEffect;
+    }
+  | {
+      type: "manaSource";
     };
 
 export type Card = {
@@ -392,6 +395,7 @@ export type HexTile = {
 export type HexBoard = {
   radius: number;
   tiles: HexTile[];
+  manaSources: HexCoord[];
   units: Unit[];
   droppedItems: DroppedItem[];
 };
@@ -459,6 +463,11 @@ export type StackAction =
       type: "equipItem";
       card: CardSummary;
       unitId: string;
+    }
+  | {
+      type: "buildManaSource";
+      card: CardSummary;
+      coord: HexCoord;
     }
   | {
       type: "activateItem";
@@ -693,6 +702,11 @@ export type ReplayEvent =
       side: Side;
       unitId: string;
       name: string;
+    }
+  | {
+      type: "manaSourceBuilt";
+      side: Side;
+      coord: HexCoord;
     }
   | {
       type: "manaGained";

@@ -228,7 +228,7 @@ function experiencedProgression() {
       {
         id: "wellspring",
         name: "Wellspring Rune",
-        text: "Gain +1 mana from controlled hexes.",
+        text: "Gain +1 natural mana.",
         unlockLevel: 8,
         unlocked: true,
       },
@@ -257,7 +257,7 @@ function experiencedProgression() {
       skillTree("runekeeper", [
         ["runekeeper-runic-balance", "Runic Balance", "The root of Runekeeper mastery.", true, null],
         ["runekeeper-steady-glyph", "Steady Glyph", "Hero starts with +1 max HP.", false, "runekeeper-runic-balance"],
-        ["runekeeper-channel-stone", "Channel Stone", "Gain +1 mana from controlled hexes.", false, "runekeeper-runic-balance"],
+        ["runekeeper-channel-stone", "Channel Stone", "Gain +1 natural mana.", false, "runekeeper-runic-balance"],
         [
           "runekeeper-warding-script",
           "Warding Script",
@@ -270,7 +270,7 @@ function experiencedProgression() {
       skillTree("pyromancer", [
         ["pyromancer-ember-path", "Ember Path", "The root of Pyromancer mastery.", true, null],
         ["pyromancer-heated-focus", "Heated Focus", "Hero starts with +1 attack.", false, "pyromancer-ember-path"],
-        ["pyromancer-kindling-reserve", "Kindling Reserve", "Gain +1 mana from controlled hexes.", false, "pyromancer-ember-path"],
+        ["pyromancer-kindling-reserve", "Kindling Reserve", "Gain +1 natural mana.", false, "pyromancer-ember-path"],
         ["pyromancer-scorching-script", "Scorching Script", "Damaging spells deal +1 damage.", false, "pyromancer-heated-focus"],
         [
           "pyromancer-glass-flame",
@@ -283,7 +283,7 @@ function experiencedProgression() {
       skillTree("chronomancer", [
         ["chronomancer-time-thread", "Time Thread", "The root of Chronomancer mastery.", true, null],
         ["chronomancer-quick-step", "Quick Step", "Hero starts with +1 max AP.", false, "chronomancer-time-thread"],
-        ["chronomancer-stored-moment", "Stored Moment", "Gain +1 mana from controlled hexes.", false, "chronomancer-time-thread"],
+        ["chronomancer-stored-moment", "Stored Moment", "Gain +1 natural mana.", false, "chronomancer-time-thread"],
         ["chronomancer-early-loop", "Early Loop", "Draw +1 opening hand card.", false, "chronomancer-quick-step"],
         ["chronomancer-temporal-guard", "Temporal Guard", "Hero starts with +1 max HP.", false, "chronomancer-stored-moment"],
       ]),
@@ -294,7 +294,7 @@ function experiencedProgression() {
         [
           "warden-anchored-stance",
           "Anchored Stance",
-          "Hero starts with +1 max HP and gains +1 mana from controlled hexes.",
+          "Hero starts with +1 max HP and gains +1 natural mana.",
           false,
           "warden-stone-skin",
         ],
@@ -304,7 +304,7 @@ function experiencedProgression() {
         ["battlemage-duelist-oath", "Duelist Oath", "The root of Battlemage mastery.", true, null],
         ["battlemage-weapon-drill", "Weapon Drill", "Hero starts with +1 attack.", false, "battlemage-duelist-oath"],
         ["battlemage-iron-focus", "Iron Focus", "Hero starts with +1 max HP.", false, "battlemage-duelist-oath"],
-        ["battlemage-battle-rhythm", "Battle Rhythm", "Gain +1 mana from controlled hexes.", false, "battlemage-weapon-drill"],
+        ["battlemage-battle-rhythm", "Battle Rhythm", "Gain +1 natural mana.", false, "battlemage-weapon-drill"],
         [
           "battlemage-frontline-command",
           "Frontline Command",
@@ -317,7 +317,7 @@ function experiencedProgression() {
         ["barbarian-fury-path", "Fury Path", "The root of Barbarian mastery.", true, null],
         ["barbarian-brutal-stamina", "Brutal Stamina", "Hero starts with +2 max HP.", false, "barbarian-fury-path"],
         ["barbarian-weapon-practice", "Weapon Practice", "Hero starts with +1 attack.", false, "barbarian-fury-path"],
-        ["barbarian-battle-hunger", "Battle Hunger", "Gain +1 mana from controlled hexes.", false, "barbarian-weapon-practice"],
+        ["barbarian-battle-hunger", "Battle Hunger", "Gain +1 natural mana.", false, "barbarian-weapon-practice"],
         ["barbarian-warband-hide", "Warband Hide", "Summoned units enter with +1 armor.", false, "barbarian-brutal-stamina"],
         ["barbarian-opening-rage", "Opening Rage", "Draw +1 opening hand card.", false, "barbarian-brutal-stamina"],
         ["barbarian-deep-cuts", "Deep Cuts", "Damaging spells deal +1 damage.", false, "barbarian-weapon-practice"],
@@ -327,14 +327,14 @@ function experiencedProgression() {
         ["archer-fleet-footing", "Fleet Footing", "Hero starts with +1 max AP.", false, "archer-long-watch"],
         ["archer-keen-shot", "Keen Shot", "Damaging spells deal +1 damage.", false, "archer-long-watch"],
         ["archer-scout-cache", "Scout Cache", "Draw +1 opening hand card.", false, "archer-fleet-footing"],
-        ["archer-trail-rations", "Trail Rations", "Gain +1 mana from controlled hexes.", false, "archer-keen-shot"],
+        ["archer-trail-rations", "Trail Rations", "Gain +1 natural mana.", false, "archer-keen-shot"],
         ["archer-screening-line", "Screening Line", "First summoned unit each match enters with +1 armor.", false, "archer-fleet-footing"],
         ["archer-light-armor", "Light Armor", "Hero starts with +1 max HP.", false, "archer-keen-shot"],
       ]),
       skillTree("builder", [
         ["builder-foundation-plan", "Foundation Plan", "The root of Builder mastery.", true, null],
         ["builder-reinforced-frame", "Reinforced Frame", "Hero starts with +2 max HP.", false, "builder-foundation-plan"],
-        ["builder-supply-cache", "Supply Cache", "Gain +1 mana from controlled hexes.", false, "builder-foundation-plan"],
+        ["builder-supply-cache", "Supply Cache", "Gain +1 natural mana.", false, "builder-foundation-plan"],
         ["builder-work-crew-drill", "Work Crew Drill", "Summoned units enter with +1 armor.", false, "builder-reinforced-frame"],
         ["builder-first-wall", "First Wall", "First summoned unit each match enters with +1 armor.", false, "builder-reinforced-frame"],
         ["builder-field-manual", "Field Manual", "Draw +1 opening hand card.", false, "builder-supply-cache"],

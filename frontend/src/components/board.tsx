@@ -45,6 +45,7 @@ import {
   isLegalAttack,
   isLegalCardTarget,
   isLegalMove,
+  isManaSourceAt,
   pieceAnimationFeedback,
   pieceAnimationStyle,
   pieceAt,
@@ -380,6 +381,7 @@ export function Board({
   );
   const tileInteractions = match.board.tiles.map((tile): Board3DTileInteraction => {
     const piece = pieceAt(match, tile.coord);
+    const hasManaSource = isManaSourceAt(match, tile.coord);
     const isLegal =
       isInteractive &&
       ((selectedCard && isLegalCardTarget(match, viewerSide, selectedCard, tile.coord, piece)) ||
@@ -391,11 +393,12 @@ export function Board({
 
     return {
       coord: tile.coord,
-      title: tileTitle(tile, piece, viewerSide),
+      title: tileTitle(tile, piece, viewerSide, 0, hasManaSource),
       disabled: !isInteractive,
       isLegal: Boolean(isLegal),
       isSelected,
       isFocused,
+      hasManaSource,
       hasPiece: Boolean(piece),
       pieceSide: piece?.side,
       pieceType: piece?.pieceType,
@@ -497,6 +500,7 @@ export function Board({
               const piece = pieceAt(match, tile.coord);
               const displayPiece = displayPieceByCoord.get(coordKey(tile.coord)) ?? piece;
               const droppedItems = droppedItemsAt(match, tile.coord);
+              const hasManaSource = isManaSourceAt(match, tile.coord);
               const interaction = tileInteractions.find(
                 (candidate) => coordKey(candidate.coord) === coordKey(tile.coord),
               );
@@ -504,12 +508,12 @@ export function Board({
               const isSelected = piece?.id === selectedPiece?.id;
               const isFocused = focusedCoord ? sameCoord(tile.coord, focusedCoord) : false;
               const occupantClass = displayPiece ? `occupied occupied-${displayPiece.side}` : "";
-              const title = tileTitle(tile, piece, viewerSide, droppedItems.length);
+              const title = tileTitle(tile, piece, viewerSide, droppedItems.length, hasManaSource);
 
               return (
                 <button
                   key={coordKey(tile.coord)}
-                  className={`hex-tile ${occupantClass} ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""} ${isFocused ? "keyboard-focused" : ""}`}
+                  className={`hex-tile ${hasManaSource ? "mana-source" : ""} ${occupantClass} ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""} ${isFocused ? "keyboard-focused" : ""}`}
                   type="button"
                   disabled={disabled && !readOnly}
                   tabIndex={readOnly ? -1 : undefined}
@@ -545,6 +549,11 @@ export function Board({
                   title={title}
                   aria-label={title}
                 >
+                  {hasManaSource ? (
+                    <span className="mana-source-marker" aria-hidden="true">
+                      M
+                    </span>
+                  ) : null}
                   {displayPiece ? (
                     <>
                       <span

@@ -122,6 +122,7 @@ function matchWithUnit({
     board: {
       radius: 3,
       tiles: [{ coord: { q, r } }],
+      manaSources: [],
       units: [
         {
           id,
@@ -198,6 +199,7 @@ function matchWithoutUnits(): MatchState {
     board: {
       radius: 3,
       tiles: [],
+      manaSources: [],
       units: [],
       droppedItems: [],
     },

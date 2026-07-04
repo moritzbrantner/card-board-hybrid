@@ -243,6 +243,13 @@ pub fn starter_card_templates() -> Vec<Card> {
                 max_ap: 1,
             },
         ),
+        mana_source_card(
+            "mana-well",
+            "Mana Well",
+            Rarity::Basic,
+            2,
+            "Build a mana source on an adjacent empty hex. Occupied mana sources give +1 mana at the start of that side's turn.",
+        ),
         spell_card(
             "runic-insight",
             "Runic Insight",
@@ -649,5 +656,17 @@ fn item_card(
             passive,
             active,
         },
+    }
+}
+
+fn mana_source_card(template_id: &str, name: &str, rarity: Rarity, cost: u8, text: &str) -> Card {
+    Card {
+        id: template_id.to_string(),
+        template_id: template_id.to_string(),
+        name: name.to_string(),
+        rarity,
+        cost,
+        text: text.to_string(),
+        kind: CardKind::ManaSource,
     }
 }

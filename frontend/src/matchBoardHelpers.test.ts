@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { isLegalAttack, pieceStatLabel } from "./matchBoardHelpers";
-import type { BoardPiece } from "./appTypes";
-import type { MatchState, Side } from "./types";
+import { isLegalAttack, isLegalCardTarget, pieceStatLabel, tileTitle } from "./matchBoardHelpers";
+import type { BoardPiece, BoardUnit } from "./appTypes";
+import type { Card, MatchState, Side } from "./types";
 
 type BoardHero = Extract<BoardPiece, { pieceType: "hero" }>;
 
@@ -22,6 +22,24 @@ describe("match board helpers", () => {
     expect(pieceStatLabel(hero("archer", "player", { q: 0, r: 3 }, 2))).toContain("R2");
     expect(pieceStatLabel(hero("runekeeper", "player", { q: 0, r: 3 }, 1))).not.toContain("R1");
   });
+
+  it("allows mana source cards on adjacent empty non-source hexes only", () => {
+    const match = baseMatch();
+    match.board.manaSources = [{ q: 1, r: 2 }];
+    const blocker = unit("blocker", "player", { q: 0, r: 2 }, 1);
+    match.board.units = [blocker];
+
+    expect(isLegalCardTarget(match, "player", manaSourceCard(), { q: -1, r: 3 }, null)).toBe(true);
+    expect(isLegalCardTarget(match, "player", manaSourceCard(), { q: 0, r: 2 }, blocker)).toBe(false);
+    expect(isLegalCardTarget(match, "player", manaSourceCard(), { q: 1, r: 2 }, null)).toBe(false);
+    expect(isLegalCardTarget(match, "player", manaSourceCard(), { q: 0, r: 1 }, null)).toBe(false);
+  });
+
+  it("labels mana source tiles", () => {
+    expect(
+      tileTitle({ coord: { q: 0, r: 0 } }, null, "player", 0, true),
+    ).toContain("mana source");
+  });
 });
 
 function baseMatch(): MatchState {
@@ -33,7 +51,7 @@ function baseMatch(): MatchState {
     prioritySide: null,
     player: participant("player"),
     opponent: participant("opponent"),
-    board: { radius: 3, tiles: [], units: [], droppedItems: [] },
+    board: { radius: 3, tiles: [], manaSources: [], units: [], droppedItems: [] },
     actionStack: [],
     log: [],
     winner: null,
@@ -95,7 +113,7 @@ function unit(
   side: Side,
   position: { q: number; r: number },
   attackRange: number,
-): BoardPiece {
+): BoardUnit {
   return {
     pieceType: "unit",
     id,
@@ -111,5 +129,17 @@ function unit(
     maxAp: 2,
     hasAttacked: false,
     items: [],
+  };
+}
+
+function manaSourceCard(): Card {
+  return {
+    id: "mana-well",
+    templateId: "mana-well",
+    name: "Mana Well",
+    rarity: "basic",
+    cost: 2,
+    text: "",
+    kind: { type: "manaSource" },
   };
 }

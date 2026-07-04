@@ -20,12 +20,16 @@ export function kindSummary(card: Card | CatalogCard) {
     return `${itemPassiveLabel(card.kind.passive)} rng ${card.kind.range}`;
   }
 
+  if (card.kind.type === "manaSource") {
+    return "Build mana source";
+  }
+
   return `${spellEffectLabel(card)} rng ${card.kind.range} pri ${card.kind.priority}`;
 }
 
 export function spellEffectLabel(card: Card | CatalogCard) {
   if (card.kind.type !== "spell") {
-    return "unit";
+    return card.kind.type;
   }
 
   switch (card.kind.effect.type) {
@@ -77,6 +81,8 @@ export function stackItemTitle(item: StackItem) {
       return `${sideLabel(item.side)} attacks with ${item.action.attackerId}`;
     case "equipItem":
       return `${sideLabel(item.side)} equips ${item.action.card.name}`;
+    case "buildManaSource":
+      return `${sideLabel(item.side)} builds ${item.action.card.name}`;
     case "activateItem":
       return `${sideLabel(item.side)} activates ${item.action.itemId}`;
   }
@@ -140,6 +146,8 @@ export function eventTitle(event: ReplayEvent) {
       return `${event.pieceId} damaged`;
     case "unitDestroyed":
       return `${event.name} destroyed`;
+    case "manaSourceBuilt":
+      return "Mana source built";
     case "manaGained":
       return `${sideLabel(event.side)} gained mana`;
     case "itemEquipped":
@@ -185,6 +193,8 @@ export function eventDetail(event: ReplayEvent) {
       return `${event.pieceId} took ${event.amount} damage.`;
     case "unitDestroyed":
       return `${event.name} left the board.`;
+    case "manaSourceBuilt":
+      return `${sideLabel(event.side)} built a mana source at q ${event.coord.q}, r ${event.coord.r}.`;
     case "manaGained":
       switch (event.source.type) {
         case "barbarianKill":

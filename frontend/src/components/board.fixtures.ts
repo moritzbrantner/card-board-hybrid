@@ -105,6 +105,7 @@ export function storyMatch(options: {
     board: {
       radius: 3,
       tiles: radiusThreeTiles(),
+      manaSources: [],
       units: options.units ?? [],
       droppedItems: [],
     },

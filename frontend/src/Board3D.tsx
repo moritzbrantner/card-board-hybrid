@@ -81,6 +81,7 @@ export type Board3DTileInteraction = {
   isLegal: boolean;
   isSelected: boolean;
   isFocused?: boolean;
+  hasManaSource?: boolean;
   hasPiece: boolean;
   pieceSide?: Side;
   pieceType?: Board3DPiece["pieceType"];
@@ -523,7 +524,9 @@ function HexTileMesh({
       ? "#6f6331"
       : interaction?.hasPiece
         ? "#34423d"
-        : "#293733";
+        : interaction?.hasManaSource
+          ? "#403b25"
+          : "#293733";
   const emissive = interaction?.isLegal ? "#3d3311" : "#000000";
 
   function handlePointer(event: ThreeEvent<PointerEvent>) {
@@ -1131,6 +1134,7 @@ function Board3DHitTarget({
 }) {
   const className = [
     "board-3d-hit-target",
+    interaction.hasManaSource ? "mana-source" : "",
     interaction.hasPiece ? "occupied" : "",
     interaction.pieceSide ? `occupied-${interaction.pieceSide}` : "",
     interaction.isLegal ? "legal" : "",
@@ -1187,6 +1191,7 @@ function Board3DHitTarget({
         });
       }}
     >
+      {interaction.hasManaSource ? <span aria-hidden="true">M</span> : null}
       {interaction.pieceLabel ? <span>{interaction.pieceLabel}</span> : null}
       {interaction.pieceStatLabel ? <strong>{interaction.pieceStatLabel}</strong> : null}
       {interaction.droppedItemCount ? (

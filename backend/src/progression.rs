@@ -715,7 +715,7 @@ fn rune_definitions() -> Vec<RuneDefinition> {
         RuneDefinition {
             id: "wellspring",
             name: "Wellspring Rune",
-            text: "Gain +1 mana from controlled hexes.",
+            text: "Gain +1 natural mana.",
             unlock_level: 8,
             unlocked: false,
         },
@@ -850,7 +850,7 @@ fn skill_nodes(hero_type: HeroType) -> Vec<SkillNodeDefinition> {
             skill(
                 "runekeeper-channel-stone",
                 "Channel Stone",
-                "Gain +1 mana from controlled hexes.",
+                "Gain +1 natural mana.",
                 false,
                 Some("runekeeper-runic-balance"),
             ),
@@ -887,7 +887,7 @@ fn skill_nodes(hero_type: HeroType) -> Vec<SkillNodeDefinition> {
             skill(
                 "pyromancer-kindling-reserve",
                 "Kindling Reserve",
-                "Gain +1 mana from controlled hexes.",
+                "Gain +1 natural mana.",
                 false,
                 Some("pyromancer-ember-path"),
             ),
@@ -924,7 +924,7 @@ fn skill_nodes(hero_type: HeroType) -> Vec<SkillNodeDefinition> {
             skill(
                 "chronomancer-stored-moment",
                 "Stored Moment",
-                "Gain +1 mana from controlled hexes.",
+                "Gain +1 natural mana.",
                 false,
                 Some("chronomancer-time-thread"),
             ),
@@ -968,7 +968,7 @@ fn skill_nodes(hero_type: HeroType) -> Vec<SkillNodeDefinition> {
             skill(
                 "warden-anchored-stance",
                 "Anchored Stance",
-                "Hero starts with +1 max HP and gains +1 mana from controlled hexes.",
+                "Hero starts with +1 max HP and gains +1 natural mana.",
                 false,
                 Some("warden-stone-skin"),
             ),
@@ -1005,7 +1005,7 @@ fn skill_nodes(hero_type: HeroType) -> Vec<SkillNodeDefinition> {
             skill(
                 "battlemage-battle-rhythm",
                 "Battle Rhythm",
-                "Gain +1 mana from controlled hexes.",
+                "Gain +1 natural mana.",
                 false,
                 Some("battlemage-weapon-drill"),
             ),
@@ -1042,7 +1042,7 @@ fn skill_nodes(hero_type: HeroType) -> Vec<SkillNodeDefinition> {
             skill(
                 "barbarian-battle-hunger",
                 "Battle Hunger",
-                "Gain +1 mana from controlled hexes.",
+                "Gain +1 natural mana.",
                 false,
                 Some("barbarian-weapon-practice"),
             ),
@@ -1100,7 +1100,7 @@ fn skill_nodes(hero_type: HeroType) -> Vec<SkillNodeDefinition> {
             skill(
                 "archer-trail-rations",
                 "Trail Rations",
-                "Gain +1 mana from controlled hexes.",
+                "Gain +1 natural mana.",
                 false,
                 Some("archer-keen-shot"),
             ),
@@ -1137,7 +1137,7 @@ fn skill_nodes(hero_type: HeroType) -> Vec<SkillNodeDefinition> {
             skill(
                 "builder-supply-cache",
                 "Supply Cache",
-                "Gain +1 mana from controlled hexes.",
+                "Gain +1 natural mana.",
                 false,
                 Some("builder-foundation-plan"),
             ),

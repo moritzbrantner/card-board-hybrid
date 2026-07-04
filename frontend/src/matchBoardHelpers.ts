@@ -112,20 +112,26 @@ export function tileTitle(
   piece: BoardPiece | null,
   viewerSide: Side,
   droppedItemCount = 0,
+  hasManaSource = false,
 ) {
   const coordLabel = `q ${tile.coord.q}, r ${tile.coord.r}`;
   const dropLabel =
     droppedItemCount > 0 ? `, ${droppedItemCount} dropped item${droppedItemCount === 1 ? "" : "s"}` : "";
+  const sourceLabel = hasManaSource ? ", mana source" : "";
   if (!piece) {
-    return `${coordLabel}, empty hex${dropLabel}`;
+    return `${coordLabel}, empty hex${sourceLabel}${dropLabel}`;
   }
 
   const owner = viewerSideLabel(piece.side, viewerSide);
-  return `${coordLabel}, occupied by ${owner} ${piece.pieceType}${dropLabel}`;
+  return `${coordLabel}, occupied by ${owner} ${piece.pieceType}${sourceLabel}${dropLabel}`;
 }
 
 export function droppedItemsAt(match: MatchState, coord: HexCoord) {
   return (match.board.droppedItems ?? []).filter((item) => sameCoord(item.position, coord));
+}
+
+export function isManaSourceAt(match: MatchState, coord: HexCoord) {
+  return (match.board.manaSources ?? []).some((source) => sameCoord(source, coord));
 }
 
 export function tileAt(match: MatchState, coord: HexCoord) {
@@ -256,7 +262,7 @@ export function cardTargetForTile(
     return null;
   }
 
-  if (card.kind.type === "unit") {
+  if (card.kind.type === "unit" || card.kind.type === "manaSource") {
     return { type: "hex", coord: tile.coord };
   }
 
@@ -282,6 +288,14 @@ export function isLegalCardTarget(
 
   if (card.kind.type === "unit") {
     return !piece && distance(participant.hero.position, coord) === 1;
+  }
+
+  if (card.kind.type === "manaSource") {
+    return (
+      !piece &&
+      !isManaSourceAt(match, coord) &&
+      distance(participant.hero.position, coord) === 1
+    );
   }
 
   if (card.kind.type === "item") {

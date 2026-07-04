@@ -90,7 +90,7 @@ function matchWithHeroPositions(positions: Record<Side, { q: number; r: number }
     prioritySide: null,
     player: participant("player", positions.player),
     opponent: participant("opponent", positions.opponent),
-    board: { radius: 3, tiles: [], units: [], droppedItems: [] },
+    board: { radius: 3, tiles: [], manaSources: [], units: [], droppedItems: [] },
     actionStack: [],
     log: [],
     winner: null,
