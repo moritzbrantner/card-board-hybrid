@@ -228,6 +228,23 @@ struct MatchArchiveResponse {
     matches: Vec<MatchSummary>,
 }
 
+#[cfg(debug_assertions)]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MatchScenarioListResponse {
+    scenarios: Vec<MatchScenarioSummary>,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MatchScenarioSummary {
+    id: &'static str,
+    name: &'static str,
+    description: &'static str,
+    primary_actions: &'static [&'static str],
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MatchSummary {
@@ -349,7 +366,7 @@ fn create_app(store: SqliteMatchStore) -> Router {
     let static_files = ServeDir::new("frontend/dist")
         .not_found_service(ServeFile::new("frontend/dist/index.html"));
 
-    Router::new()
+    let router = Router::new()
         .route("/api/health", get(health))
         .route("/api/catalog/cards", get(catalog_cards))
         .route("/api/system-decks", get(system_decks))
@@ -400,7 +417,17 @@ fn create_app(store: SqliteMatchStore) -> Router {
         .route(
             "/api/shared-matches/{match_id}/seats/{seat_token}/ws",
             get(shared_match_ws),
-        )
+        );
+
+    #[cfg(debug_assertions)]
+    let router = router
+        .route("/api/dev/match-scenarios", get(list_match_scenarios))
+        .route(
+            "/api/dev/match-scenarios/{scenario_id}/matches",
+            post(create_match_scenario),
+        );
+
+    router
         .layer(cors)
         .fallback_service(static_files)
         .with_state(state)
@@ -1060,6 +1087,45 @@ async fn create_match(
             profile.as_ref().map(|profile| profile.id),
         );
         match result {
+            Ok(created) => created,
+            Err(error) => return store_error_response(error),
+        }
+    };
+
+    Json(MatchResponse::from(created)).into_response()
+}
+
+#[cfg(debug_assertions)]
+async fn list_match_scenarios() -> impl IntoResponse {
+    let scenarios = match_session::scenarios::match_scenarios()
+        .into_iter()
+        .map(MatchScenarioSummary::from)
+        .collect();
+
+    Json(MatchScenarioListResponse { scenarios }).into_response()
+}
+
+#[cfg(debug_assertions)]
+async fn create_match_scenario(
+    State(state): State<SharedState>,
+    Path(scenario_id): Path<String>,
+) -> impl IntoResponse {
+    let Some(match_state) = match_session::scenarios::build_match_scenario(&scenario_id) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ApiError {
+                message: format!("Match scenario {scenario_id} was not found"),
+            }),
+        )
+            .into_response();
+    };
+
+    let created = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        match store.create_scenario_match(&scenario_id, match_state) {
             Ok(created) => created,
             Err(error) => return store_error_response(error),
         }
@@ -2105,6 +2171,18 @@ impl From<StoredMatch> for MatchResponse {
     }
 }
 
+#[cfg(debug_assertions)]
+impl From<match_session::scenarios::MatchScenarioDefinition> for MatchScenarioSummary {
+    fn from(scenario: match_session::scenarios::MatchScenarioDefinition) -> Self {
+        Self {
+            id: scenario.id,
+            name: scenario.name,
+            description: scenario.description,
+            primary_actions: scenario.primary_actions,
+        }
+    }
+}
+
 impl MatchResponse {
     fn from_stored_with_replay_frames(
         stored_match: StoredMatch,
@@ -2410,6 +2488,150 @@ mod tests {
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["message"], "Sign in to continue.");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn debug_match_scenarios_can_be_listed() {
+        let path = test_db_path("dev-scenarios-list");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, body) = json_request(
+            app,
+            Request::builder()
+                .uri("/api/dev/match-scenarios")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let scenarios = body["scenarios"]
+            .as_array()
+            .expect("scenarios should exist");
+        assert!(
+            scenarios
+                .iter()
+                .any(|scenario| scenario["id"] == "play-unit-card")
+        );
+        assert!(
+            scenarios
+                .iter()
+                .any(|scenario| scenario["id"] == "priority-response")
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn debug_match_scenario_creation_returns_a_playable_match() {
+        let path = test_db_path("dev-scenario-create");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, created) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/dev/match-scenarios/play-unit-card/matches")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let match_id = created["matchId"].as_str().expect("match id should exist");
+        assert!(match_id.starts_with("dev-play-unit-card-"));
+        assert_eq!(
+            created["matchState"]["player"]["hand"][0]["templateId"],
+            "ember-squire"
+        );
+
+        let (status, loaded) = json_request(
+            app.clone(),
+            Request::builder()
+                .uri(format!("/api/matches/{match_id}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(loaded["matchId"], match_id);
+
+        let (status, acted) = post_match_action(
+            app,
+            match_id,
+            r#"{"type":"playCard","cardId":"scenario-ember-squire","target":{"type":"hex","coord":{"q":0,"r":0}}}"#,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            acted["matchState"]["board"]["units"]
+                .as_array()
+                .expect("units should exist")
+                .iter()
+                .any(|unit| unit["templateId"] == "ember-squire")
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn unknown_debug_match_scenario_returns_not_found() {
+        let path = test_db_path("dev-scenario-missing");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, body) = json_request(
+            app,
+            Request::builder()
+                .method("POST")
+                .uri("/api/dev/match-scenarios/missing/matches")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["message"], "Match scenario missing was not found");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn debug_match_scenarios_do_not_appear_in_account_archives() {
+        let path = test_db_path("dev-scenario-archive");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, _created) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/dev/match-scenarios/play-unit-card/matches")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let token = register_test_account(app.clone(), "scenario-archive@example.com").await;
+        let (status, archive) = json_request(
+            app,
+            Request::builder()
+                .uri("/api/matches")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            archive["matches"]
+                .as_array()
+                .expect("matches should exist")
+                .len(),
+            0
+        );
 
         let _ = fs::remove_file(path);
     }

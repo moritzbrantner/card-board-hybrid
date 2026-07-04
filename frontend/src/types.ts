@@ -509,6 +509,17 @@ export type MatchArchiveResponse = {
   matches: MatchSummary[];
 };
 
+export type MatchScenarioSummary = {
+  id: string;
+  name: string;
+  description: string;
+  primaryActions: string[];
+};
+
+export type MatchScenarioListResponse = {
+  scenarios: MatchScenarioSummary[];
+};
+
 export type ActionTarget =
   | {
       type: "hex";

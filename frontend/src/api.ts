@@ -14,6 +14,7 @@ import type {
   MatchActionRequest,
   MatchReplayResponse,
   MatchResponse,
+  MatchScenarioListResponse,
   MatchState,
   ProgressionResponse,
   PublicDeckRecipeResponse,
@@ -257,6 +258,17 @@ export function sharedMatchWebSocketUrl(matchId: string, seatToken: string) {
 
 export function loadMatch(matchId: string) {
   return request<MatchResponse>(`/api/matches/${encodeURIComponent(matchId)}`);
+}
+
+export function loadMatchScenarios() {
+  return request<MatchScenarioListResponse>("/api/dev/match-scenarios");
+}
+
+export function createMatchScenario(scenarioId: string) {
+  return request<MatchResponse>(
+    `/api/dev/match-scenarios/${encodeURIComponent(scenarioId)}/matches`,
+    { method: "POST" },
+  );
 }
 
 export function loadMatches() {

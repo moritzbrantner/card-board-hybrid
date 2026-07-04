@@ -24,6 +24,7 @@ import { DecksPage } from "./pages/DecksPage";
 import { MatchArchivePage } from "./pages/MatchArchivePage";
 import { MatchPage } from "./pages/MatchPage";
 import { MatchPicker } from "./pages/MatchPicker";
+import { MatchScenariosPage } from "./pages/MatchScenariosPage";
 import { PublicDeckPage } from "./pages/PublicDeckPage";
 import { ReplayPage } from "./pages/ReplayPage";
 import { RouteRedirect } from "./pages/RouteRedirect";
@@ -203,6 +204,16 @@ export function App() {
 
   if (path === "/" || path === "") {
     return <MatchPicker onNavigate={navigate} currentUser={currentUser} onSignOut={handleSignOut} />;
+  }
+
+  if (import.meta.env.DEV && normalizedPath === "/dev/scenarios") {
+    return (
+      <MatchScenariosPage
+        onNavigate={navigate}
+        currentUser={currentUser}
+        onSignOut={handleSignOut}
+      />
+    );
   }
 
   if (normalizedPath === "/matches") {

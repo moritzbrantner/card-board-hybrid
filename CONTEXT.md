@@ -191,3 +191,7 @@ _Avoid_: screenshot, animation frame
 **Replay visibility**:
 The rule that decides whether hidden card information is redacted or revealed in replay responses.
 _Avoid_: debug mode
+
+**Match scenario**:
+An authored local-development starting match state loaded into the Rust rules engine to exercise a specific interaction or board condition. A match scenario creates a normal playable match instance, but is not a player-facing mode, replay format, deck recipe, or production feature.
+_Avoid_: fixture, sandbox match, test deck

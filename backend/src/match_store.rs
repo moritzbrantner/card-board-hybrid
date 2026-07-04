@@ -439,6 +439,49 @@ impl SqliteMatchStore {
         ))
     }
 
+    #[cfg(any(test, debug_assertions))]
+    pub fn create_scenario_match(
+        &mut self,
+        scenario_id: &str,
+        state: MatchState,
+    ) -> Result<StoredMatch, MatchStoreError> {
+        for attempt in 0..8 {
+            let id = scenario_match_id(scenario_id, attempt);
+            let snapshot = state.to_snapshot_json()?;
+            let initial_frame = state.initial_replay_frame();
+            let event_json = serde_json::to_string(&initial_frame.event)?;
+
+            let transaction = self.connection.transaction()?;
+            let inserted = transaction.execute(
+                "
+                INSERT OR IGNORE INTO matches (
+                    id,
+                    snapshot_json,
+                    initial_snapshot_json,
+                    mode,
+                    owner_user_id,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?1, ?2, ?2, 'solo', NULL, unixepoch(), unixepoch())
+                ",
+                params![id, snapshot],
+            )?;
+
+            if inserted == 1 {
+                insert_replay_frame(&transaction, &id, 0, &initial_frame, &event_json)?;
+                transaction.commit()?;
+                return Ok(StoredMatch { id, state });
+            }
+
+            transaction.commit()?;
+        }
+
+        Err(MatchStoreError::Sqlite(
+            rusqlite::Error::ExecuteReturnedResults,
+        ))
+    }
+
     pub fn load_shared_match_for_seat(
         &self,
         id: &str,
@@ -1310,6 +1353,20 @@ fn readable_match_id(attempt: u32) -> String {
         format!("-{}", to_base36(u64::from(attempt)))
     };
     format!("rl-{}{}", to_base36(millis), suffix)
+}
+
+#[cfg(any(test, debug_assertions))]
+fn scenario_match_id(scenario_id: &str, attempt: u32) -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(1);
+    let suffix = if attempt == 0 {
+        String::new()
+    } else {
+        format!("-{}", to_base36(u64::from(attempt)))
+    };
+    format!("dev-{}-{}{}", scenario_id, to_base36(millis), suffix)
 }
 
 fn random_seat_token() -> String {

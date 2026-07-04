@@ -9,6 +9,8 @@ use serde_json::json;
 
 #[path = "card_interactions.rs"]
 mod card_interactions;
+#[cfg(any(test, debug_assertions))]
+pub mod scenarios;
 mod solo_ai_policy;
 
 use solo_ai_policy::{SoloAiActionIntent, SoloAiDecision, SoloAiPolicy, SoloAiView};
