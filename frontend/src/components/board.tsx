@@ -25,7 +25,7 @@ import {
   selectBoardRenderer,
   type BoardRendererFallbackReason,
 } from "../boardRenderer";
-import { createMatchVisualCatalog, type CardVisualIdentity, type MatchVisualCatalog, type UnitVisualIdentity, type WizardVisualIdentity } from "../matchVisualIdentity";
+import { createMatchVisualCatalog, type CardVisualIdentity, type MatchVisualCatalog, type UnitVisualIdentity, type HeroVisualIdentity } from "../matchVisualIdentity";
 import type { BoardPiece, BoardUnit, UnitContextMenu } from "../appTypes";
 import type {
   BoardVisualMode,
@@ -61,7 +61,7 @@ import {
   sideLabel,
   stackItemTitle,
   viewerSideShortLabel,
-  wizardTypeLabel,
+  heroTypeLabel,
 } from "../labels";
 
 const EMPTY_MATCH_VISUAL_CATALOG = createMatchVisualCatalog([]);
@@ -285,17 +285,17 @@ export function PlayerBadge({ player }: { player: MatchParticipantState }) {
   return (
     <div className={`player-badge ${player.side}`}>
       <strong>{sideLabel(player.side)}</strong>
-      <span className="wizard-type-pill">
+      <span className="hero-type-pill">
         <WandSparkles size={16} />
-        {wizardTypeLabel(player.wizard.wizardType)}
+        {heroTypeLabel(player.hero.heroType)}
       </span>
       <span>
         <Heart size={16} />
-        {player.wizard.hp}/{player.wizard.maxHp}
+        {player.hero.hp}/{player.hero.maxHp}
       </span>
       <span>
         <Zap size={16} />
-        {player.wizard.apRemaining}/{player.wizard.maxAp}
+        {player.hero.apRemaining}/{player.hero.maxAp}
       </span>
       <span>
         <Sparkles size={16} />
@@ -587,12 +587,12 @@ export function PieceToken({
   viewerSide: Side;
   visualCatalog: MatchVisualCatalog;
 }) {
-  let visualIdentity: UnitVisualIdentity | WizardVisualIdentity;
+  let visualIdentity: UnitVisualIdentity | HeroVisualIdentity;
   let accentClass: string;
-  if (piece.pieceType === "wizard") {
-    const wizardVisualIdentity = visualCatalog.wizard(piece);
-    visualIdentity = wizardVisualIdentity;
-    accentClass = wizardVisualIdentity.accentClass;
+  if (piece.pieceType === "hero") {
+    const heroVisualIdentity = visualCatalog.hero(piece);
+    visualIdentity = heroVisualIdentity;
+    accentClass = heroVisualIdentity.accentClass;
   } else {
     const unitVisualIdentity = visualCatalog.unit(piece);
     visualIdentity = unitVisualIdentity;
@@ -624,7 +624,7 @@ export function PieceToken({
           <Sword size={11} />
           {piece.attack}
         </span>
-      {piece.pieceType === "wizard" ? (
+      {piece.pieceType === "hero" ? (
         <span>
           <Heart size={11} />
           {piece.hp}

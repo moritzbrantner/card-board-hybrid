@@ -33,7 +33,7 @@ use identity::{
 use match_access::{Actor, MatchAccess};
 use match_session::{
     MatchActionRequest, MatchMode, MatchState, RecordedReplayFrame, ReplayEvent, ReplayVisibility,
-    Side, WizardType,
+    Side, HeroType,
 };
 use match_store::{
     CreatedSharedMatch, MatchStoreError, SharedMatchStatus, SqliteMatchStore, StoredMatch,
@@ -98,7 +98,7 @@ struct AuthUserResponse {
     email: String,
     display_name: String,
     avatar: GeneratedAvatarResponse,
-    preferred_wizard_type: WizardType,
+    preferred_hero_type: HeroType,
     board_visual_mode: BoardVisualMode,
     progression_summary: ProgressionSummary,
 }
@@ -145,8 +145,8 @@ struct UpdateProfileRequest {
     display_name: String,
     handle: String,
     avatar: GeneratedAvatarRequest,
-    #[serde(default)]
-    preferred_wizard_type: Option<WizardType>,
+    #[serde(default, alias = "preferredWizardType")]
+    preferred_hero_type: Option<HeroType>,
     #[serde(default)]
     board_visual_mode: Option<BoardVisualMode>,
 }
@@ -161,8 +161,8 @@ struct GeneratedAvatarRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateMatchRequest {
-    #[serde(default)]
-    wizard_type: Option<WizardType>,
+    #[serde(default, alias = "wizardType")]
+    hero_type: Option<HeroType>,
     #[serde(default)]
     player_deck: Option<DeckChoiceRequest>,
     #[serde(default)]
@@ -185,7 +185,8 @@ enum AiOpponentRequest {
     },
     Account {
         deck_id: i64,
-        wizard_type: WizardType,
+        #[serde(alias = "wizardType")]
+        hero_type: HeroType,
     },
 }
 
@@ -204,7 +205,8 @@ enum DeckChoiceRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JoinSharedMatchRequest {
-    wizard_type: WizardType,
+    #[serde(alias = "wizardType")]
+    hero_type: HeroType,
     #[serde(default)]
     deck_choice: Option<DeckChoiceRequest>,
     #[serde(default)]
@@ -293,8 +295,8 @@ struct SharedMatchResponse {
     mode: &'static str,
     status: &'static str,
     viewer_side: Side,
-    viewer_wizard_type: Option<WizardType>,
-    opponent_wizard_type: Option<WizardType>,
+    viewer_hero_type: Option<HeroType>,
+    opponent_hero_type: Option<HeroType>,
     viewer_ready: bool,
     opponent_ready: bool,
     active_side: Option<Side>,
@@ -390,15 +392,15 @@ fn create_app(store: SqliteMatchStore) -> Router {
         )
         .route("/api/progression", get(load_progression))
         .route(
-            "/api/progression/wizards/{wizard_type}/skills/{node_id}",
+            "/api/progression/heroes/{hero_type}/skills/{node_id}",
             post(unlock_progression_skill),
         )
         .route(
-            "/api/progression/wizards/{wizard_type}/respec",
-            post(respec_progression_wizard),
+            "/api/progression/heroes/{hero_type}/respec",
+            post(respec_progression_hero),
         )
         .route(
-            "/api/progression/wizards/{wizard_type}/loadout",
+            "/api/progression/heroes/{hero_type}/loadout",
             axum::routing::patch(save_progression_loadout),
         )
         .route("/api/matches", get(list_matches).post(create_match))
@@ -485,7 +487,7 @@ async fn create_deck(
         Ok(profile) => profile,
         Err(response) => return response,
     };
-    let request = default_deck_configuration(request, profile.preferred_wizard_type);
+    let request = default_deck_configuration(request, profile.preferred_hero_type);
     let deck = {
         let mut store = state
             .store
@@ -581,7 +583,7 @@ async fn update_deck(
         Ok(profile) => profile,
         Err(response) => return response,
     };
-    let request = default_deck_configuration(request, profile.preferred_wizard_type);
+    let request = default_deck_configuration(request, profile.preferred_hero_type);
     let deck = {
         let mut store = state
             .store
@@ -785,8 +787,8 @@ async fn update_profile(
                 color: request.avatar.color,
             },
             request
-                .preferred_wizard_type
-                .unwrap_or(profile.preferred_wizard_type),
+                .preferred_hero_type
+                .unwrap_or(profile.preferred_hero_type),
             request
                 .board_visual_mode
                 .unwrap_or(profile.board_visual_mode),
@@ -895,31 +897,31 @@ async fn load_progression(
 async fn unlock_progression_skill(
     State(state): State<SharedState>,
     headers: HeaderMap,
-    Path((wizard_type, node_id)): Path<(WizardType, String)>,
+    Path((hero_type, node_id)): Path<(HeroType, String)>,
 ) -> impl IntoResponse {
     mutate_progression(&state, &headers, |progression, user_id| {
-        progression.unlock_skill(user_id, wizard_type, &node_id)
+        progression.unlock_skill(user_id, hero_type, &node_id)
     })
 }
 
-async fn respec_progression_wizard(
+async fn respec_progression_hero(
     State(state): State<SharedState>,
     headers: HeaderMap,
-    Path(wizard_type): Path<WizardType>,
+    Path(hero_type): Path<HeroType>,
 ) -> impl IntoResponse {
     mutate_progression(&state, &headers, |progression, user_id| {
-        progression.respec_wizard(user_id, wizard_type)
+        progression.respec_hero(user_id, hero_type)
     })
 }
 
 async fn save_progression_loadout(
     State(state): State<SharedState>,
     headers: HeaderMap,
-    Path(wizard_type): Path<WizardType>,
+    Path(hero_type): Path<HeroType>,
     Json(request): Json<SaveRuneLoadoutRequest>,
 ) -> impl IntoResponse {
     mutate_progression(&state, &headers, |progression, user_id| {
-        progression.save_rune_loadout(user_id, wizard_type, request)
+        progression.save_rune_loadout(user_id, hero_type, request)
     })
 }
 
@@ -1007,7 +1009,7 @@ async fn create_match(
     };
     let request = if body.is_empty() || body.iter().all(|byte| byte.is_ascii_whitespace()) {
         CreateMatchRequest {
-            wizard_type: None,
+            hero_type: None,
             player_deck: None,
             player_deck_id: None,
             ai_opponent: None,
@@ -1033,15 +1035,15 @@ async fn create_match(
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        let (player_wizard_type, player_snapshot, requested_rune_ids) =
+        let (player_hero_type, player_snapshot, requested_rune_ids) =
             match resolve_player_loadout_choice(
                 &mut store,
                 profile.as_ref().map(|profile| profile.id),
                 profile
                     .as_ref()
-                    .map(|profile| profile.preferred_wizard_type)
+                    .map(|profile| profile.preferred_hero_type)
                     .unwrap_or_default(),
-                request.wizard_type,
+                request.hero_type,
                 request.player_deck,
                 request.player_deck_id,
                 request.rune_ids,
@@ -1049,7 +1051,7 @@ async fn create_match(
                 Ok(loadouts) => loadouts,
                 Err(response) => return response,
             };
-        let (opponent_wizard_type, opponent_snapshot) = match resolve_solo_ai_choice(
+        let (opponent_hero_type, opponent_snapshot) = match resolve_solo_ai_choice(
             &mut store,
             profile.as_ref().map(|profile| profile.id),
             request.ai_opponent,
@@ -1070,7 +1072,7 @@ async fn create_match(
             let mut progression = ProgressionModule::new(store.connection_mut());
             match progression.match_loadout(
                 profile.as_ref().map(|profile| profile.id),
-                player_wizard_type,
+                player_hero_type,
                 requested_rune_ids,
             ) {
                 Ok(loadout) => loadout,
@@ -1078,8 +1080,8 @@ async fn create_match(
             }
         };
         let result = store.create_match_for_user_with_decks(
-            player_wizard_type,
-            opponent_wizard_type,
+            player_hero_type,
+            opponent_hero_type,
             player_deck,
             opponent_deck,
             player_progression,
@@ -1207,7 +1209,7 @@ async fn join_shared_match(
             let mut progression = ProgressionModule::new(store.connection_mut());
             match progression.match_loadout(
                 profile.as_ref().map(|profile| profile.id),
-                request.wizard_type,
+                request.hero_type,
                 request.rune_ids,
             ) {
                 Ok(loadout) => loadout,
@@ -1217,7 +1219,7 @@ async fn join_shared_match(
         match store.join_shared_match(
             &match_id,
             &seat_token,
-            request.wizard_type,
+            request.hero_type,
             deck_recipe,
             progression_loadout,
             profile.as_ref().map(|profile| profile.id),
@@ -1862,9 +1864,9 @@ fn generated_avatar_is_valid(avatar: &GeneratedAvatarRequest) -> bool {
 )]
 fn default_deck_configuration(
     mut request: SaveDeckRequest,
-    preferred_wizard_type: WizardType,
+    preferred_hero_type: HeroType,
 ) -> SaveDeckRequest {
-    request.wizard_type.get_or_insert(preferred_wizard_type);
+    request.hero_type.get_or_insert(preferred_hero_type);
     request
 }
 
@@ -1877,9 +1879,9 @@ fn validate_deck_configuration(
     user_id: i64,
     request: &SaveDeckRequest,
 ) -> Result<(), axum::response::Response> {
-    let wizard_type = request.wizard_type.unwrap_or_default();
+    let hero_type = request.hero_type.unwrap_or_default();
     let mut progression = ProgressionModule::new(store.connection_mut());
-    match progression.match_loadout(Some(user_id), wizard_type, Some(request.rune_ids.clone())) {
+    match progression.match_loadout(Some(user_id), hero_type, Some(request.rune_ids.clone())) {
         Ok(_) => Ok(()),
         Err(error) => Err(progression_error_response(error)),
     }
@@ -1892,20 +1894,20 @@ fn validate_deck_configuration(
 fn resolve_player_loadout_choice(
     store: &mut SqliteMatchStore,
     user_id: Option<i64>,
-    preferred_wizard_type: WizardType,
-    requested_wizard_type: Option<WizardType>,
+    preferred_hero_type: HeroType,
+    requested_hero_type: Option<HeroType>,
     player_deck: Option<DeckChoiceRequest>,
     legacy_player_deck_id: Option<i64>,
     requested_rune_ids: Option<Vec<String>>,
-) -> Result<(WizardType, DeckRecipeSnapshot, Option<Vec<String>>), axum::response::Response> {
+) -> Result<(HeroType, DeckRecipeSnapshot, Option<Vec<String>>), axum::response::Response> {
     match player_deck {
         Some(DeckChoiceRequest::Starter) => Ok((
-            requested_wizard_type.unwrap_or(preferred_wizard_type),
+            requested_hero_type.unwrap_or(preferred_hero_type),
             starter_deck_snapshot(),
             requested_rune_ids,
         )),
         None if legacy_player_deck_id.is_none() => Ok((
-            requested_wizard_type.unwrap_or(preferred_wizard_type),
+            requested_hero_type.unwrap_or(preferred_hero_type),
             starter_deck_snapshot(),
             requested_rune_ids,
         )),
@@ -1924,7 +1926,7 @@ fn resolve_player_loadout_choice(
                 Err(error) => return Err(deck_error_response(error)),
             };
             Ok((
-                requested_wizard_type.unwrap_or(system_deck.wizard_type),
+                requested_hero_type.unwrap_or(system_deck.hero_type),
                 snapshot,
                 requested_rune_ids,
             ))
@@ -1932,7 +1934,7 @@ fn resolve_player_loadout_choice(
         Some(DeckChoiceRequest::Account { deck_id }) => {
             let (snapshot, configured) = resolve_account_deck_loadout(store, user_id, deck_id)?;
             Ok((
-                requested_wizard_type.unwrap_or(configured.0),
+                requested_hero_type.unwrap_or(configured.0),
                 snapshot,
                 requested_rune_ids.or(Some(configured.1)),
             ))
@@ -1942,7 +1944,7 @@ fn resolve_player_loadout_choice(
                 legacy_player_deck_id.expect("legacy deck id should exist in this branch");
             let snapshot = resolve_required_account_deck_choice(store, user_id, deck_id)?;
             Ok((
-                requested_wizard_type.unwrap_or(preferred_wizard_type),
+                requested_hero_type.unwrap_or(preferred_hero_type),
                 snapshot,
                 requested_rune_ids,
             ))
@@ -1958,7 +1960,7 @@ fn resolve_solo_ai_choice(
     store: &mut SqliteMatchStore,
     user_id: Option<i64>,
     ai_opponent: Option<AiOpponentRequest>,
-) -> Result<(WizardType, DeckRecipeSnapshot), axum::response::Response> {
+) -> Result<(HeroType, DeckRecipeSnapshot), axum::response::Response> {
     let loadout = match ai_opponent {
         Some(AiOpponentRequest::System { system_deck_id }) => {
             let Some(system_deck) = system_deck_by_id(&system_deck_id) else {
@@ -1974,16 +1976,16 @@ fn resolve_solo_ai_choice(
                 Ok(snapshot) => snapshot,
                 Err(error) => return Err(deck_error_response(error)),
             };
-            (system_deck.wizard_type, snapshot)
+            (system_deck.hero_type, snapshot)
         }
         Some(AiOpponentRequest::Account {
             deck_id,
-            wizard_type,
+            hero_type,
         }) => {
             let snapshot = resolve_required_account_deck_choice(store, user_id, deck_id)?;
-            (wizard_type, snapshot)
+            (hero_type, snapshot)
         }
-        None => (WizardType::Runekeeper, starter_deck_snapshot()),
+        None => (HeroType::Runekeeper, starter_deck_snapshot()),
     };
     Ok(loadout)
 }
@@ -2036,7 +2038,7 @@ fn resolve_account_deck_loadout(
     store: &mut SqliteMatchStore,
     user_id: Option<i64>,
     deck_id: i64,
-) -> Result<(DeckRecipeSnapshot, (WizardType, Vec<String>)), axum::response::Response> {
+) -> Result<(DeckRecipeSnapshot, (HeroType, Vec<String>)), axum::response::Response> {
     let Some(user_id) = user_id else {
         return Err(unauthorized_response());
     };
@@ -2131,7 +2133,7 @@ impl From<AccountProfile> for AuthUserResponse {
                 symbol: profile.avatar.symbol,
                 color: profile.avatar.color,
             },
-            preferred_wizard_type: profile.preferred_wizard_type,
+            preferred_hero_type: profile.preferred_hero_type,
             board_visual_mode: profile.board_visual_mode,
             progression_summary: progression::summary_for_xp(profile.total_xp),
         }
@@ -2242,8 +2244,8 @@ impl From<StoredSharedMatch> for SharedMatchResponse {
             mode: "shared",
             status: shared.status.as_str(),
             viewer_side: shared.viewer_seat.side,
-            viewer_wizard_type: shared.viewer_seat.wizard_type,
-            opponent_wizard_type: shared.opposing_seat.wizard_type,
+            viewer_hero_type: shared.viewer_seat.hero_type,
+            opponent_hero_type: shared.opposing_seat.hero_type,
             viewer_ready: shared.viewer_seat.joined_at.is_some(),
             opponent_ready: shared.opposing_seat.joined_at.is_some(),
             active_side,
@@ -2423,7 +2425,7 @@ mod tests {
         assert_eq!(current_user["displayName"], "player");
         assert!(current_user["avatar"]["symbol"].as_str().is_some());
         assert!(current_user["avatar"]["color"].as_str().is_some());
-        assert_eq!(current_user["preferredWizardType"], "runekeeper");
+        assert_eq!(current_user["preferredHeroType"], "runekeeper");
         assert_eq!(current_user["boardVisualMode"], "3d");
         assert!(current_user["id"].as_i64().unwrap() > 0);
 
@@ -2722,7 +2724,7 @@ mod tests {
         assert_eq!(library["decks"].as_array().unwrap().len(), 1);
         assert_eq!(library["decks"][0]["name"], "Balanced Starter");
         assert_eq!(library["decks"][0]["isDefault"], true);
-        assert_eq!(library["decks"][0]["wizardType"], "runekeeper");
+        assert_eq!(library["decks"][0]["heroType"], "runekeeper");
         assert_eq!(library["decks"][0]["runeIds"].as_array().unwrap().len(), 0);
         assert_eq!(library["decks"][0]["legality"]["legal"], true);
 
@@ -2742,7 +2744,7 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(draft["name"], "Tiny Draft");
-        assert_eq!(draft["wizardType"], "runekeeper");
+        assert_eq!(draft["heroType"], "runekeeper");
         assert_eq!(draft["runeIds"].as_array().unwrap().len(), 0);
         assert_eq!(draft["legality"]["legal"], false);
 
@@ -2801,8 +2803,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deck_recipes_store_wizard_configuration_and_validate_runes() {
-        let path = test_db_path("decks-wizard-config");
+    async fn deck_recipes_store_hero_configuration_and_validate_runes() {
+        let path = test_db_path("decks-hero-config");
         let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
         let token = register_test_account(app.clone(), "configured@example.com").await;
 
@@ -2814,7 +2816,7 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"name":"Locked Rune","wizardType":"pyromancer","runeIds":["vitality"],"cards":[]}"#,
+                    r#"{"name":"Locked Rune","heroType":"pyromancer","runeIds":["vitality"],"cards":[]}"#,
                 ))
                 .expect("request should build"),
         )
@@ -2835,13 +2837,13 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"name":"Configured","wizardType":"pyromancer","runeIds":[],"cards":[]}"#,
+                    r#"{"name":"Configured","heroType":"pyromancer","runeIds":[],"cards":[]}"#,
                 ))
                 .expect("request should build"),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(created["wizardType"], "pyromancer");
+        assert_eq!(created["heroType"], "pyromancer");
         assert_eq!(created["runeIds"].as_array().unwrap().len(), 0);
 
         let _ = fs::remove_file(path);
@@ -2899,7 +2901,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn match_creation_rejects_illegal_account_deck_and_uses_system_ai_wizard() {
+    async fn match_creation_rejects_illegal_account_deck_and_uses_system_ai_hero() {
         let path = test_db_path("match-deck-selection");
         let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
         let token = register_test_account(app.clone(), "loadout@example.com").await;
@@ -2927,7 +2929,7 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(format!(
-                    r#"{{"wizardType":"runekeeper","playerDeckId":{draft_id}}}"#
+                    r#"{{"heroType":"runekeeper","playerDeckId":{draft_id}}}"#
                 )))
                 .expect("request should build"),
         )
@@ -2947,14 +2949,14 @@ mod tests {
                 .uri("/api/matches")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"wizardType":"runekeeper","aiOpponent":{"source":"system","systemDeckId":"ember-burn"}}"#,
+                    r#"{"heroType":"runekeeper","aiOpponent":{"source":"system","systemDeckId":"ember-burn"}}"#,
                 ))
                 .expect("request should build"),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
-            created["matchState"]["opponent"]["wizard"]["wizardType"],
+            created["matchState"]["opponent"]["hero"]["heroType"],
             "pyromancer"
         );
 
@@ -2981,7 +2983,7 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
-            created["matchState"]["player"]["wizard"]["wizardType"],
+            created["matchState"]["player"]["hero"]["heroType"],
             "pyromancer"
         );
 
@@ -3002,7 +3004,7 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"displayName":"Rune Pilot","handle":"rune-pilot","avatar":{"symbol":"shield","color":"indigo"},"preferredWizardType":"chronomancer","boardVisualMode":"2d"}"#,
+                    r#"{"displayName":"Rune Pilot","handle":"rune-pilot","avatar":{"symbol":"shield","color":"indigo"},"preferredHeroType":"chronomancer","boardVisualMode":"2d"}"#,
                 ))
                 .expect("request should build"),
         )
@@ -3013,7 +3015,7 @@ mod tests {
         assert_eq!(updated["displayName"], "Rune Pilot");
         assert_eq!(updated["avatar"]["symbol"], "shield");
         assert_eq!(updated["avatar"]["color"], "indigo");
-        assert_eq!(updated["preferredWizardType"], "chronomancer");
+        assert_eq!(updated["preferredHeroType"], "chronomancer");
         assert_eq!(updated["boardVisualMode"], "2d");
 
         let (status, loaded) = json_request(
@@ -3031,7 +3033,7 @@ mod tests {
         assert_eq!(loaded["displayName"], "Rune Pilot");
         assert_eq!(loaded["avatar"]["symbol"], "shield");
         assert_eq!(loaded["avatar"]["color"], "indigo");
-        assert_eq!(loaded["preferredWizardType"], "chronomancer");
+        assert_eq!(loaded["preferredHeroType"], "chronomancer");
         assert_eq!(loaded["boardVisualMode"], "2d");
 
         let _ = fs::remove_file(path);
@@ -3052,7 +3054,7 @@ mod tests {
                 .header("authorization", format!("Bearer {first_token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"displayName":"First","handle":"no","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"runekeeper","boardVisualMode":"3d"}"#,
+                    r#"{"displayName":"First","handle":"no","avatar":{"symbol":"wand","color":"sky"},"preferredHeroType":"runekeeper","boardVisualMode":"3d"}"#,
                 ))
                 .expect("request should build"),
         )
@@ -3073,7 +3075,7 @@ mod tests {
                 .header("authorization", format!("Bearer {second_token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"displayName":"Second","handle":"first","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"runekeeper","boardVisualMode":"3d"}"#,
+                    r#"{"displayName":"Second","handle":"first","avatar":{"symbol":"wand","color":"sky"},"preferredHeroType":"runekeeper","boardVisualMode":"3d"}"#,
                 ))
                 .expect("request should build"),
         )
@@ -3189,7 +3191,7 @@ mod tests {
                         display_name,
                         avatar_symbol,
                         avatar_color,
-                        preferred_wizard_type,
+                        preferred_hero_type,
                         board_visual_mode
                     )
                     VALUES (501, 'merge@example.com', 'merge@example.com', 'unused', 'Merge', 'rune', 'sky', 'runekeeper', '3d')
@@ -3338,7 +3340,7 @@ mod tests {
                         display_name,
                         avatar_symbol,
                         avatar_color,
-                        preferred_wizard_type,
+                        preferred_hero_type,
                         board_visual_mode
                     )
                     VALUES (502, 'legacy-board@example.com', 'legacy-board@example.com', 'unused', 'Legacy', 'rune', 'sky', 'runekeeper', '2d')
@@ -3388,7 +3390,7 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"displayName":"Profile Sync","handle":"profile-sync","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"runekeeper","boardVisualMode":"2d"}"#,
+                    r#"{"displayName":"Profile Sync","handle":"profile-sync","avatar":{"symbol":"wand","color":"sky"},"preferredHeroType":"runekeeper","boardVisualMode":"2d"}"#,
                 ))
                 .expect("request should build"),
         )
@@ -3530,7 +3532,7 @@ mod tests {
                         display_name TEXT NOT NULL DEFAULT '',
                         avatar_symbol TEXT NOT NULL DEFAULT 'sparkles',
                         avatar_color TEXT NOT NULL DEFAULT 'emerald',
-                        preferred_wizard_type TEXT NOT NULL DEFAULT 'runekeeper',
+                        preferred_hero_type TEXT NOT NULL DEFAULT 'runekeeper',
                         created_at INTEGER NOT NULL DEFAULT (unixepoch())
                     );
                     INSERT INTO users (
@@ -3540,7 +3542,7 @@ mod tests {
                         display_name,
                         avatar_symbol,
                         avatar_color,
-                        preferred_wizard_type
+                        preferred_hero_type
                     )
                     VALUES (
                         'migrated@example.com',
@@ -3579,6 +3581,205 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[test]
+    fn hero_migration_preserves_durable_data_and_discards_legacy_matches() {
+        let path = test_db_path("hero-migration");
+        {
+            let connection = rusqlite::Connection::open(&path).expect("database should open");
+            connection
+                .execute_batch(
+                    r#"
+                    CREATE TABLE users (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        email TEXT NOT NULL,
+                        email_normalized TEXT NOT NULL UNIQUE,
+                        public_handle TEXT UNIQUE,
+                        password_hash TEXT NOT NULL,
+                        display_name TEXT NOT NULL DEFAULT '',
+                        avatar_symbol TEXT NOT NULL DEFAULT 'sparkles',
+                        avatar_color TEXT NOT NULL DEFAULT 'emerald',
+                        preferred_wizard_type TEXT NOT NULL DEFAULT 'runekeeper',
+                        board_visual_mode TEXT NOT NULL DEFAULT '3d',
+                        total_xp INTEGER NOT NULL DEFAULT 0,
+                        created_at INTEGER NOT NULL DEFAULT (unixepoch())
+                    );
+                    INSERT INTO users (id, email, email_normalized, public_handle, password_hash, display_name, preferred_wizard_type)
+                    VALUES (1, 'hero@example.com', 'hero@example.com', 'hero', 'hash', 'Hero', 'pyromancer');
+
+                    CREATE TABLE deck_recipes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        name TEXT NOT NULL,
+                        is_default INTEGER NOT NULL DEFAULT 0,
+                        wizard_type TEXT NOT NULL DEFAULT 'runekeeper',
+                        rune_ids_json TEXT NOT NULL DEFAULT '[]',
+                        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                        updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+                    );
+                    INSERT INTO deck_recipes (id, user_id, name, wizard_type, rune_ids_json)
+                    VALUES (10, 1, 'Legacy Deck', 'chronomancer', '["force"]');
+                    CREATE TABLE deck_recipe_cards (
+                        deck_id INTEGER NOT NULL,
+                        template_id TEXT NOT NULL,
+                        count INTEGER NOT NULL,
+                        PRIMARY KEY (deck_id, template_id)
+                    );
+
+                    CREATE TABLE wizard_mastery (
+                        user_id INTEGER NOT NULL,
+                        wizard_type TEXT NOT NULL,
+                        xp INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (user_id, wizard_type)
+                    );
+                    INSERT INTO wizard_mastery (user_id, wizard_type, xp) VALUES (1, 'pyromancer', 300);
+                    CREATE TABLE wizard_skill_unlocks (
+                        user_id INTEGER NOT NULL,
+                        wizard_type TEXT NOT NULL,
+                        node_id TEXT NOT NULL,
+                        unlocked_at INTEGER NOT NULL,
+                        PRIMARY KEY (user_id, wizard_type, node_id)
+                    );
+                    INSERT INTO wizard_skill_unlocks (user_id, wizard_type, node_id, unlocked_at)
+                    VALUES (1, 'pyromancer', 'pyromancer-heated-focus', 123);
+                    CREATE TABLE wizard_rune_loadouts (
+                        user_id INTEGER NOT NULL,
+                        wizard_type TEXT NOT NULL,
+                        rune_ids_json TEXT NOT NULL,
+                        updated_at INTEGER NOT NULL,
+                        PRIMARY KEY (user_id, wizard_type)
+                    );
+                    INSERT INTO wizard_rune_loadouts (user_id, wizard_type, rune_ids_json, updated_at)
+                    VALUES (1, 'pyromancer', '["vitality"]', 456);
+                    CREATE TABLE match_xp_awards (
+                        match_id TEXT NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        account_xp INTEGER NOT NULL,
+                        wizard_type TEXT NOT NULL,
+                        wizard_xp INTEGER NOT NULL,
+                        won INTEGER NOT NULL,
+                        awarded_at INTEGER NOT NULL,
+                        PRIMARY KEY (match_id, user_id)
+                    );
+                    INSERT INTO match_xp_awards (match_id, user_id, account_xp, wizard_type, wizard_xp, won, awarded_at)
+                    VALUES ('legacy-match', 1, 150, 'pyromancer', 150, 1, 789);
+
+                    CREATE TABLE matches (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        snapshot_json TEXT NOT NULL,
+                        initial_snapshot_json TEXT,
+                        completed_at INTEGER,
+                        mode TEXT NOT NULL DEFAULT 'solo',
+                        owner_user_id INTEGER,
+                        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                        updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+                    );
+                    INSERT INTO matches (id, snapshot_json, initial_snapshot_json)
+                    VALUES ('legacy-match', '{"player":{"wizard":{"id":"player-wizard","wizardType":"pyromancer"}}}', '{}');
+                    CREATE TABLE match_actions (
+                        match_id TEXT NOT NULL,
+                        action_index INTEGER NOT NULL,
+                        request_json TEXT NOT NULL,
+                        accepted_at INTEGER NOT NULL,
+                        PRIMARY KEY (match_id, action_index)
+                    );
+                    INSERT INTO match_actions (match_id, action_index, request_json, accepted_at)
+                    VALUES ('legacy-match', 1, '{"pieceId":"player-wizard"}', 1);
+                    CREATE TABLE match_replay_frames (
+                        match_id TEXT NOT NULL,
+                        frame_index INTEGER NOT NULL,
+                        action_index INTEGER,
+                        event_json TEXT NOT NULL,
+                        snapshot_json TEXT NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        PRIMARY KEY (match_id, frame_index)
+                    );
+                    INSERT INTO match_replay_frames (match_id, frame_index, event_json, snapshot_json, created_at)
+                    VALUES ('legacy-match', 0, '{"type":"matchCreated"}', '{"player":{"wizard":{}}}', 1);
+                    CREATE TABLE shared_matches (
+                        match_id TEXT PRIMARY KEY NOT NULL,
+                        status TEXT NOT NULL,
+                        creator_user_id INTEGER,
+                        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                        updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                        forfeit_winner TEXT
+                    );
+                    INSERT INTO shared_matches (match_id, status) VALUES ('legacy-match', 'setup');
+                    CREATE TABLE match_seats (
+                        match_id TEXT NOT NULL,
+                        side TEXT NOT NULL,
+                        seat_token TEXT NOT NULL UNIQUE,
+                        wizard_type TEXT,
+                        joined_at INTEGER,
+                        last_seen_at INTEGER,
+                        disconnected_at INTEGER,
+                        deck_recipe_name TEXT,
+                        deck_recipe_snapshot_json TEXT,
+                        progression_loadout_json TEXT,
+                        PRIMARY KEY (match_id, side)
+                    );
+                    INSERT INTO match_seats (match_id, side, seat_token, wizard_type)
+                    VALUES ('legacy-match', 'player', 'seat', 'pyromancer');
+                    "#,
+                )
+                .expect("legacy schema should seed");
+        }
+
+        let mut store = SqliteMatchStore::new(&path).expect("migration should succeed");
+        let connection = store.connection_mut();
+
+        let preferred_hero_type: String = connection
+            .query_row("SELECT preferred_hero_type FROM users WHERE id = 1", [], |row| row.get(0))
+            .expect("preferred hero should migrate");
+        assert_eq!(preferred_hero_type, "pyromancer");
+        let deck_hero_type: String = connection
+            .query_row("SELECT hero_type FROM deck_recipes WHERE id = 10", [], |row| row.get(0))
+            .expect("deck hero should migrate");
+        assert_eq!(deck_hero_type, "chronomancer");
+        let mastery_xp: i64 = connection
+            .query_row(
+                "SELECT xp FROM hero_mastery WHERE user_id = 1 AND hero_type = 'pyromancer'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("hero mastery should migrate");
+        assert_eq!(mastery_xp, 300);
+        let unlocked_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM hero_skill_unlocks", [], |row| row.get(0))
+            .expect("hero skill unlocks should migrate");
+        assert_eq!(unlocked_count, 1);
+        let rune_ids_json: String = connection
+            .query_row(
+                "SELECT rune_ids_json FROM hero_rune_loadouts WHERE user_id = 1 AND hero_type = 'pyromancer'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("hero rune loadout should migrate");
+        assert_eq!(rune_ids_json, "[\"vitality\"]");
+        let award_hero_type: String = connection
+            .query_row(
+                "SELECT hero_type FROM match_xp_awards WHERE match_id = 'legacy-match'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("match award hero type should migrate");
+        assert_eq!(award_hero_type, "pyromancer");
+
+        for table in [
+            "matches",
+            "match_actions",
+            "match_replay_frames",
+            "shared_matches",
+            "match_seats",
+        ] {
+            let count: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                .expect("table should be queryable");
+            assert_eq!(count, 0, "{table} should be discarded");
+        }
+
+        let _ = fs::remove_file(path);
+    }
+
     #[tokio::test]
     async fn profile_rejects_unknown_generated_avatar_values() {
         let path = test_db_path("profile-avatar-invalid");
@@ -3593,7 +3794,7 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"displayName":"Avatar","handle":"avatar","avatar":{"symbol":"dragon","color":"void"},"preferredWizardType":"runekeeper"}"#,
+                    r#"{"displayName":"Avatar","handle":"avatar","avatar":{"symbol":"dragon","color":"void"},"preferredHeroType":"runekeeper"}"#,
                 ))
                 .expect("request should build"),
         )
@@ -3606,10 +3807,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn profile_rejects_unknown_preferred_wizard_type() {
-        let path = test_db_path("profile-wizard-invalid");
+    async fn profile_rejects_unknown_preferred_hero_type() {
+        let path = test_db_path("profile-hero-invalid");
         let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
-        let token = register_test_account(app.clone(), "wizard-invalid@example.com").await;
+        let token = register_test_account(app.clone(), "hero-invalid@example.com").await;
 
         let (status, _body) = json_request(
             app,
@@ -3619,7 +3820,7 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"displayName":"Avatar","handle":"avatar","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"stormcaller"}"#,
+                    r#"{"displayName":"Avatar","handle":"avatar","avatar":{"symbol":"wand","color":"sky"},"preferredHeroType":"stormcaller"}"#,
                 ))
                 .expect("request should build"),
         )
@@ -3644,7 +3845,7 @@ mod tests {
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"displayName":"Avatar","handle":"avatar","avatar":{"symbol":"wand","color":"sky"},"preferredWizardType":"runekeeper","boardVisualMode":"cinematic"}"#,
+                    r#"{"displayName":"Avatar","handle":"avatar","avatar":{"symbol":"wand","color":"sky"},"preferredHeroType":"runekeeper","boardVisualMode":"cinematic"}"#,
                 ))
                 .expect("request should build"),
         )
@@ -3779,7 +3980,7 @@ mod tests {
                 .uri("/api/shared-matches")
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
+                .body(Body::from(r#"{"heroType":"chronomancer"}"#))
                 .expect("request should build"),
         )
         .await;
@@ -3803,7 +4004,7 @@ mod tests {
                     "/api/shared-matches/{match_id}/seats/{opponent_token}/join"
                 ))
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"wizardType":"pyromancer"}"#))
+                .body(Body::from(r#"{"heroType":"pyromancer"}"#))
                 .expect("request should build"),
         )
         .await;
@@ -3816,7 +4017,7 @@ mod tests {
                 ))
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
+                .body(Body::from(r#"{"heroType":"chronomancer"}"#))
                 .expect("request should build"),
         )
         .await;
@@ -3890,8 +4091,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_match_accepts_player_wizard_type() {
-        let path = test_db_path("create-wizard-type");
+    async fn create_match_accepts_player_hero_type() {
+        let path = test_db_path("create-hero-type");
         let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
 
         let (status, created) = json_request(
@@ -3900,20 +4101,20 @@ mod tests {
                 .method("POST")
                 .uri("/api/matches")
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
+                .body(Body::from(r#"{"heroType":"chronomancer"}"#))
                 .expect("request should build"),
         )
         .await;
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
-            created["matchState"]["player"]["wizard"]["wizardType"],
+            created["matchState"]["player"]["hero"]["heroType"],
             "chronomancer"
         );
-        assert_eq!(created["matchState"]["player"]["wizard"]["maxAp"], 4);
-        assert_eq!(created["matchState"]["player"]["wizard"]["maxHp"], 16);
+        assert_eq!(created["matchState"]["player"]["hero"]["maxAp"], 4);
+        assert_eq!(created["matchState"]["player"]["hero"]["maxHp"], 16);
         assert_eq!(
-            created["matchState"]["opponent"]["wizard"]["wizardType"],
+            created["matchState"]["opponent"]["hero"]["heroType"],
             "runekeeper"
         );
 
@@ -4132,7 +4333,7 @@ mod tests {
                 .uri(format!("/api/matches/{match_id}/actions"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"type":"movePiece","pieceId":"player-wizard","to":{"q":0,"r":0}}"#,
+                    r#"{"type":"movePiece","pieceId":"player-hero","to":{"q":0,"r":0}}"#,
                 ))
                 .expect("request should build"),
         )
@@ -4213,7 +4414,7 @@ mod tests {
                 .uri("/api/shared-matches")
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
+                .body(Body::from(r#"{"heroType":"chronomancer"}"#))
                 .expect("request should build"),
         )
         .await;
@@ -4222,7 +4423,7 @@ mod tests {
         assert_eq!(created["mode"], "shared");
         assert_eq!(created["status"], "setup");
         assert_eq!(created["viewerSide"], "player");
-        assert!(created.get("viewerWizardType").is_none());
+        assert!(created.get("viewerHeroType").is_none());
         assert_ne!(created["playerSeatUrl"], created["inviteSeatUrl"]);
         assert!(
             created["playerSeatUrl"]
@@ -4264,7 +4465,7 @@ mod tests {
                 .method("POST")
                 .uri("/api/shared-matches")
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
+                .body(Body::from(r#"{"heroType":"chronomancer"}"#))
                 .expect("request should build"),
         )
         .await;
@@ -4294,8 +4495,8 @@ mod tests {
         assert_eq!(setup["status"], "setup");
         assert_eq!(setup["viewerReady"], false);
         assert_eq!(setup["opponentReady"], false);
-        assert!(setup["viewerWizardType"].is_null());
-        assert!(setup["opponentWizardType"].is_null());
+        assert!(setup["viewerHeroType"].is_null());
+        assert!(setup["opponentHeroType"].is_null());
         assert!(setup["matchState"].is_null());
 
         let (status, joined) = json_request(
@@ -4306,7 +4507,7 @@ mod tests {
                     "/api/shared-matches/{match_id}/seats/{opponent_token}/join"
                 ))
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"wizardType":"pyromancer"}"#))
+                .body(Body::from(r#"{"heroType":"pyromancer"}"#))
                 .expect("request should build"),
         )
         .await;
@@ -4315,7 +4516,7 @@ mod tests {
         assert_eq!(joined["viewerSide"], "opponent");
         assert_eq!(joined["viewerReady"], true);
         assert_eq!(joined["opponentReady"], false);
-        assert_eq!(joined["viewerWizardType"], "pyromancer");
+        assert_eq!(joined["viewerHeroType"], "pyromancer");
         assert!(joined["matchState"].is_null());
 
         let (status, activated) = json_request(
@@ -4327,7 +4528,7 @@ mod tests {
                 ))
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"wizardType":"chronomancer"}"#))
+                .body(Body::from(r#"{"heroType":"chronomancer"}"#))
                 .expect("request should build"),
         )
         .await;
@@ -4336,8 +4537,8 @@ mod tests {
         assert_eq!(activated["viewerSide"], "player");
         assert_eq!(activated["viewerReady"], true);
         assert_eq!(activated["opponentReady"], true);
-        assert_eq!(activated["viewerWizardType"], "chronomancer");
-        assert_eq!(activated["opponentWizardType"], "pyromancer");
+        assert_eq!(activated["viewerHeroType"], "chronomancer");
+        assert_eq!(activated["opponentHeroType"], "pyromancer");
 
         let (status, joined) = json_request(
             app.clone(),
@@ -4353,7 +4554,7 @@ mod tests {
         assert_eq!(joined["status"], "active");
         assert_eq!(joined["viewerSide"], "opponent");
         assert_eq!(
-            joined["matchState"]["opponent"]["wizard"]["wizardType"],
+            joined["matchState"]["opponent"]["hero"]["heroType"],
             "pyromancer"
         );
         assert!(joined["matchState"]["opponent"].get("hand").is_some());
@@ -4373,7 +4574,7 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
-            player_view["matchState"]["player"]["wizard"]["wizardType"],
+            player_view["matchState"]["player"]["hero"]["heroType"],
             "chronomancer"
         );
         assert!(player_view["matchState"]["player"].get("hand").is_some());
@@ -4464,14 +4665,20 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         let cards = body["cards"].as_array().expect("cards should be an array");
-        assert_eq!(cards.len(), 34);
+        assert_eq!(cards.len(), 43);
+        let card_by_id = |id: &str| {
+            cards
+                .iter()
+                .find(|card| card["id"] == id)
+                .expect("card should exist")
+        };
         assert_eq!(cards[0]["id"], "ember-squire");
-        assert_eq!(cards[33]["id"], "comet-spear");
-        assert_eq!(cards[0]["copyCount"], 5);
-        assert_eq!(cards[4]["copyCount"], 1);
-        assert_eq!(cards[19]["copyCount"], 1);
-        assert_eq!(cards[9]["kind"]["type"], "item");
-        assert_eq!(cards[17]["kind"]["priority"], 4);
+        assert_eq!(cards[42]["id"], "comet-spear");
+        assert_eq!(card_by_id("ember-squire")["copyCount"], 5);
+        assert_eq!(card_by_id("blade-dancer")["copyCount"], 1);
+        assert_eq!(card_by_id("ember-flask")["copyCount"], 1);
+        assert_eq!(card_by_id("rune-charm")["kind"]["type"], "item");
+        assert_eq!(card_by_id("arcane-parry")["kind"]["priority"], 4);
         assert_eq!(
             cards
                 .iter()

@@ -90,7 +90,7 @@ test("signed-in shared seat links apply saved settings to cursor play", async ({
 
   await page.keyboard.press("Enter");
   await expect.poll(() => sharedActions(page)).toEqual([
-    { type: "movePiece", pieceId: "player-wizard", to: { q: 0, r: 2 } },
+    { type: "movePiece", pieceId: "player-hero", to: { q: 0, r: 2 } },
   ]);
 });
 
@@ -132,12 +132,12 @@ test("signed-out settings save local board mode for shared seat links", async ({
   await page.keyboard.press("Enter");
 
   await expect.poll(() => sharedActions(page)).toEqual([
-    { type: "movePiece", pieceId: "player-wizard", to: { q: 0, r: 2 } },
+    { type: "movePiece", pieceId: "player-hero", to: { q: 0, r: 2 } },
   ]);
   expect(apiRequests).not.toContain("/api/preferences");
 });
 
-test("shared cursor initializes to the opponent seat Wizard and does not confirm off-turn", async ({
+test("shared cursor initializes to the opponent seat Hero and does not confirm off-turn", async ({
   page,
 }) => {
   await installSharedWebSocket(page);
@@ -156,7 +156,7 @@ test("shared cursor initializes to the opponent seat Wizard and does not confirm
 
   await page.keyboard.press("q");
   await expect(
-    page.locator('.hex-tile.keyboard-focused[aria-label="q 0, r -3, occupied by your wizard"]'),
+    page.locator('.hex-tile.keyboard-focused[aria-label="q 0, r -3, occupied by your hero"]'),
   ).toBeVisible();
 
   await page.keyboard.press("Enter");
@@ -293,8 +293,8 @@ function sharedMatchResponse(viewerSide = "player") {
     mode: "shared",
     status: "active",
     viewerSide,
-    viewerWizardType: viewerSide === "player" ? "runekeeper" : "pyromancer",
-    opponentWizardType: viewerSide === "player" ? "pyromancer" : "runekeeper",
+    viewerHeroType: viewerSide === "player" ? "runekeeper" : "pyromancer",
+    opponentHeroType: viewerSide === "player" ? "pyromancer" : "runekeeper",
     viewerReady: true,
     opponentReady: true,
     activeSide: "player",
@@ -331,10 +331,10 @@ function participant(side, activeSide, position) {
     side,
     mana: 5,
     maxMana: 5,
-    wizard: {
-      id: `${side}-wizard`,
+    hero: {
+      id: `${side}-hero`,
       side,
-      wizardType: side === "player" ? "runekeeper" : "pyromancer",
+      heroType: side === "player" ? "runekeeper" : "pyromancer",
       hp: 20,
       maxHp: 20,
       attack: 1,
@@ -397,7 +397,7 @@ function authUser() {
     email: "player@local.dev",
     displayName: "Rune Player",
     avatar: { symbol: "sparkles", color: "emerald" },
-    preferredWizardType: "runekeeper",
+    preferredHeroType: "runekeeper",
     boardVisualMode: "2d",
     progressionSummary: {
       totalXp: 0,
@@ -427,7 +427,7 @@ function systemDeck() {
   return {
     id: "balanced-starter",
     name: "Balanced Starter",
-    wizardType: "runekeeper",
+    heroType: "runekeeper",
     cards: [],
     legality: {
       legal: true,
@@ -452,7 +452,7 @@ function progression() {
       runeSlots: 1,
     },
     runes: [],
-    wizards: [],
+    heroes: [],
     skillTrees: [],
     loadouts: [],
   };

@@ -12,7 +12,7 @@ import type {
   SharedMatchResponse,
   SystemDeckListResponse,
   Unit,
-  Wizard,
+  Hero,
 } from "./types";
 
 export type LoadState =
@@ -73,9 +73,9 @@ export type UnitContextMenu =
     }
   | null;
 
-export type BoardWizard = Wizard & { pieceType: "wizard"; name: string };
+export type BoardHero = Hero & { pieceType: "hero"; name: string };
 export type BoardUnit = Unit & { pieceType: "unit"; hp?: never; maxHp?: never };
-export type BoardPiece = BoardWizard | BoardUnit;
+export type BoardPiece = BoardHero | BoardUnit;
 
 export type AccountProps = {
   currentUser: AuthUser | null;

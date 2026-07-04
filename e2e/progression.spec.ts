@@ -4,7 +4,7 @@ const EXPERIENCED_EMAIL = "experienced@local.dev";
 const EXPERIENCED_PASSWORD = "experienced";
 const AUTH_TOKEN = "experienced-e2e-token";
 
-test("selects wizard specs and resets them", async ({ page }) => {
+test("selects hero specs and resets them", async ({ page }) => {
   await mockExperiencedAccountApi(page);
   await signInExperiencedAccount(page);
 
@@ -62,7 +62,7 @@ async function signInExperiencedAccount(page) {
   await page.getByLabel("Password").fill(EXPERIENCED_PASSWORD);
   await page.getByRole("button", { name: /Sign In/ }).click();
   await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
-  await expect(page.getByLabel("Wizard skill tree")).toBeVisible();
+  await expect(page.getByLabel("Hero skill tree")).toBeVisible();
 }
 
 async function mockExperiencedAccountApi(page) {
@@ -97,27 +97,27 @@ async function mockExperiencedAccountApi(page) {
       return;
     }
 
-    const skillMatch = url.pathname.match(/^\/api\/progression\/wizards\/([^/]+)\/skills\/([^/]+)$/);
+    const skillMatch = url.pathname.match(/^\/api\/progression\/heroes\/([^/]+)\/skills\/([^/]+)$/);
     if (skillMatch && request.method() === "POST") {
-      const [, wizardType, nodeId] = skillMatch;
-      progression = unlockSkill(progression, wizardType, decodeURIComponent(nodeId));
+      const [, heroType, nodeId] = skillMatch;
+      progression = unlockSkill(progression, heroType, decodeURIComponent(nodeId));
       await route.fulfill({ json: progression });
       return;
     }
 
-    const respecMatch = url.pathname.match(/^\/api\/progression\/wizards\/([^/]+)\/respec$/);
+    const respecMatch = url.pathname.match(/^\/api\/progression\/heroes\/([^/]+)\/respec$/);
     if (respecMatch && request.method() === "POST") {
-      const [, wizardType] = respecMatch;
-      progression = respecWizard(progression, wizardType);
+      const [, heroType] = respecMatch;
+      progression = respecHero(progression, heroType);
       await route.fulfill({ json: progression });
       return;
     }
 
-    const loadoutMatch = url.pathname.match(/^\/api\/progression\/wizards\/([^/]+)\/loadout$/);
+    const loadoutMatch = url.pathname.match(/^\/api\/progression\/heroes\/([^/]+)\/loadout$/);
     if (loadoutMatch && request.method() === "PATCH") {
-      const [, wizardType] = loadoutMatch;
+      const [, heroType] = loadoutMatch;
       const body = JSON.parse(request.postData() ?? "{}");
-      progression = saveLoadout(progression, wizardType, body.runeIds ?? []);
+      progression = saveLoadout(progression, heroType, body.runeIds ?? []);
       await route.fulfill({ json: progression });
       return;
     }
@@ -133,57 +133,66 @@ function experiencedUser() {
     email: EXPERIENCED_EMAIL,
     displayName: "Experienced",
     avatar: { symbol: "sparkles", color: "emerald" },
-    preferredWizardType: "runekeeper",
+    preferredHeroType: "runekeeper",
     boardVisualMode: "3d",
     progressionSummary: experiencedProgression().account,
   };
 }
 
-function unlockSkill(progression, wizardType, nodeId) {
+function unlockSkill(progression, heroType, nodeId) {
   return {
     ...progression,
-    wizards: progression.wizards.map((wizard) => {
-      if (wizard.wizardType !== wizardType || wizard.unlockedSkillIds.includes(nodeId)) {
-        return wizard;
+    heroes: progression.heroes.map((hero) => {
+      if (hero.heroType !== heroType || hero.unlockedSkillIds.includes(nodeId)) {
+        return hero;
       }
-      const unlockedSkillIds = [...wizard.unlockedSkillIds, nodeId];
+      const unlockedSkillIds = [...hero.unlockedSkillIds, nodeId];
       return {
-        ...wizard,
+        ...hero,
         unlockedSkillIds,
         spentSkillPoints: unlockedSkillIds.length,
-        availableSkillPoints: wizard.totalSkillPoints - unlockedSkillIds.length,
+        availableSkillPoints: hero.totalSkillPoints - unlockedSkillIds.length,
       };
     }),
   };
 }
 
-function respecWizard(progression, wizardType) {
+function respecHero(progression, heroType) {
   return {
     ...progression,
-    wizards: progression.wizards.map((wizard) =>
-      wizard.wizardType === wizardType
+    heroes: progression.heroes.map((hero) =>
+      hero.heroType === heroType
         ? {
-            ...wizard,
+            ...hero,
             unlockedSkillIds: [],
             spentSkillPoints: 0,
-            availableSkillPoints: wizard.totalSkillPoints,
+            availableSkillPoints: hero.totalSkillPoints,
           }
-        : wizard,
+        : hero,
     ),
   };
 }
 
-function saveLoadout(progression, wizardType, runeIds) {
+function saveLoadout(progression, heroType, runeIds) {
   return {
     ...progression,
     loadouts: progression.loadouts.map((loadout) =>
-      loadout.wizardType === wizardType ? { ...loadout, runeIds } : loadout,
+      loadout.heroType === heroType ? { ...loadout, runeIds } : loadout,
     ),
   };
 }
 
 function experiencedProgression() {
-  const wizardTypes = ["runekeeper", "pyromancer", "chronomancer", "warden", "battlemage"];
+  const heroTypes = [
+    "runekeeper",
+    "pyromancer",
+    "chronomancer",
+    "warden",
+    "battlemage",
+    "barbarian",
+    "archer",
+    "builder",
+  ];
   return {
     account: {
       totalXp: 20_000,
@@ -198,14 +207,14 @@ function experiencedProgression() {
       {
         id: "vitality",
         name: "Vitality Rune",
-        text: "Wizard starts with +2 max HP.",
+        text: "Hero starts with +2 max HP.",
         unlockLevel: 2,
         unlocked: true,
       },
       {
         id: "force",
         name: "Force Rune",
-        text: "Wizard starts with +1 attack.",
+        text: "Hero starts with +1 attack.",
         unlockLevel: 4,
         unlocked: true,
       },
@@ -231,8 +240,8 @@ function experiencedProgression() {
         unlocked: true,
       },
     ],
-    wizards: wizardTypes.map((wizardType) => ({
-      wizardType,
+    heroes: heroTypes.map((heroType) => ({
+      heroType,
       xp: 20_000,
       level: 20,
       currentLevelXp: 19_000,
@@ -247,7 +256,7 @@ function experiencedProgression() {
     skillTrees: [
       skillTree("runekeeper", [
         ["runekeeper-runic-balance", "Runic Balance", "The root of Runekeeper mastery.", true, null],
-        ["runekeeper-steady-glyph", "Steady Glyph", "Wizard starts with +1 max HP.", false, "runekeeper-runic-balance"],
+        ["runekeeper-steady-glyph", "Steady Glyph", "Hero starts with +1 max HP.", false, "runekeeper-runic-balance"],
         ["runekeeper-channel-stone", "Channel Stone", "Gain +1 mana from controlled hexes.", false, "runekeeper-runic-balance"],
         [
           "runekeeper-warding-script",
@@ -260,7 +269,7 @@ function experiencedProgression() {
       ]),
       skillTree("pyromancer", [
         ["pyromancer-ember-path", "Ember Path", "The root of Pyromancer mastery.", true, null],
-        ["pyromancer-heated-focus", "Heated Focus", "Wizard starts with +1 attack.", false, "pyromancer-ember-path"],
+        ["pyromancer-heated-focus", "Heated Focus", "Hero starts with +1 attack.", false, "pyromancer-ember-path"],
         ["pyromancer-kindling-reserve", "Kindling Reserve", "Gain +1 mana from controlled hexes.", false, "pyromancer-ember-path"],
         ["pyromancer-scorching-script", "Scorching Script", "Damaging spells deal +1 damage.", false, "pyromancer-heated-focus"],
         [
@@ -273,19 +282,19 @@ function experiencedProgression() {
       ]),
       skillTree("chronomancer", [
         ["chronomancer-time-thread", "Time Thread", "The root of Chronomancer mastery.", true, null],
-        ["chronomancer-quick-step", "Quick Step", "Wizard starts with +1 max AP.", false, "chronomancer-time-thread"],
+        ["chronomancer-quick-step", "Quick Step", "Hero starts with +1 max AP.", false, "chronomancer-time-thread"],
         ["chronomancer-stored-moment", "Stored Moment", "Gain +1 mana from controlled hexes.", false, "chronomancer-time-thread"],
         ["chronomancer-early-loop", "Early Loop", "Draw +1 opening hand card.", false, "chronomancer-quick-step"],
-        ["chronomancer-temporal-guard", "Temporal Guard", "Wizard starts with +1 max HP.", false, "chronomancer-stored-moment"],
+        ["chronomancer-temporal-guard", "Temporal Guard", "Hero starts with +1 max HP.", false, "chronomancer-stored-moment"],
       ]),
       skillTree("warden", [
         ["warden-stone-oath", "Stone Oath", "The root of Warden mastery.", true, null],
-        ["warden-stone-skin", "Stone Skin", "Wizard starts with +2 max HP.", false, "warden-stone-oath"],
+        ["warden-stone-skin", "Stone Skin", "Hero starts with +2 max HP.", false, "warden-stone-oath"],
         ["warden-guard-drill", "Guard Drill", "Summoned units enter with +1 armor.", false, "warden-stone-oath"],
         [
           "warden-anchored-stance",
           "Anchored Stance",
-          "Wizard starts with +1 max HP and gains +1 mana from controlled hexes.",
+          "Hero starts with +1 max HP and gains +1 mana from controlled hexes.",
           false,
           "warden-stone-skin",
         ],
@@ -293,8 +302,8 @@ function experiencedProgression() {
       ]),
       skillTree("battlemage", [
         ["battlemage-duelist-oath", "Duelist Oath", "The root of Battlemage mastery.", true, null],
-        ["battlemage-weapon-drill", "Weapon Drill", "Wizard starts with +1 attack.", false, "battlemage-duelist-oath"],
-        ["battlemage-iron-focus", "Iron Focus", "Wizard starts with +1 max HP.", false, "battlemage-duelist-oath"],
+        ["battlemage-weapon-drill", "Weapon Drill", "Hero starts with +1 attack.", false, "battlemage-duelist-oath"],
+        ["battlemage-iron-focus", "Iron Focus", "Hero starts with +1 max HP.", false, "battlemage-duelist-oath"],
         ["battlemage-battle-rhythm", "Battle Rhythm", "Gain +1 mana from controlled hexes.", false, "battlemage-weapon-drill"],
         [
           "battlemage-frontline-command",
@@ -304,14 +313,41 @@ function experiencedProgression() {
           "battlemage-iron-focus",
         ],
       ]),
+      skillTree("barbarian", [
+        ["barbarian-fury-path", "Fury Path", "The root of Barbarian mastery.", true, null],
+        ["barbarian-brutal-stamina", "Brutal Stamina", "Hero starts with +2 max HP.", false, "barbarian-fury-path"],
+        ["barbarian-weapon-practice", "Weapon Practice", "Hero starts with +1 attack.", false, "barbarian-fury-path"],
+        ["barbarian-battle-hunger", "Battle Hunger", "Gain +1 mana from controlled hexes.", false, "barbarian-weapon-practice"],
+        ["barbarian-warband-hide", "Warband Hide", "Summoned units enter with +1 armor.", false, "barbarian-brutal-stamina"],
+        ["barbarian-opening-rage", "Opening Rage", "Draw +1 opening hand card.", false, "barbarian-brutal-stamina"],
+        ["barbarian-deep-cuts", "Deep Cuts", "Damaging spells deal +1 damage.", false, "barbarian-weapon-practice"],
+      ]),
+      skillTree("archer", [
+        ["archer-long-watch", "Long Watch", "The root of Archer mastery.", true, null],
+        ["archer-fleet-footing", "Fleet Footing", "Hero starts with +1 max AP.", false, "archer-long-watch"],
+        ["archer-keen-shot", "Keen Shot", "Damaging spells deal +1 damage.", false, "archer-long-watch"],
+        ["archer-scout-cache", "Scout Cache", "Draw +1 opening hand card.", false, "archer-fleet-footing"],
+        ["archer-trail-rations", "Trail Rations", "Gain +1 mana from controlled hexes.", false, "archer-keen-shot"],
+        ["archer-screening-line", "Screening Line", "First summoned unit each match enters with +1 armor.", false, "archer-fleet-footing"],
+        ["archer-light-armor", "Light Armor", "Hero starts with +1 max HP.", false, "archer-keen-shot"],
+      ]),
+      skillTree("builder", [
+        ["builder-foundation-plan", "Foundation Plan", "The root of Builder mastery.", true, null],
+        ["builder-reinforced-frame", "Reinforced Frame", "Hero starts with +2 max HP.", false, "builder-foundation-plan"],
+        ["builder-supply-cache", "Supply Cache", "Gain +1 mana from controlled hexes.", false, "builder-foundation-plan"],
+        ["builder-work-crew-drill", "Work Crew Drill", "Summoned units enter with +1 armor.", false, "builder-reinforced-frame"],
+        ["builder-first-wall", "First Wall", "First summoned unit each match enters with +1 armor.", false, "builder-reinforced-frame"],
+        ["builder-field-manual", "Field Manual", "Draw +1 opening hand card.", false, "builder-supply-cache"],
+        ["builder-tool-ready", "Tool Ready", "Hero starts with +1 max AP.", false, "builder-supply-cache"],
+      ]),
     ],
-    loadouts: wizardTypes.map((wizardType) => ({ wizardType, runeIds: [] })),
+    loadouts: heroTypes.map((heroType) => ({ heroType, runeIds: [] })),
   };
 }
 
-function skillTree(wizardType, nodes) {
+function skillTree(heroType, nodes) {
   return {
-    wizardType,
+    heroType,
     nodes: nodes.map(([id, name, text, root, prerequisiteId]) => ({
       id,
       name,

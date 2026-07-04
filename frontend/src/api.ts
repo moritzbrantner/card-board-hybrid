@@ -22,7 +22,7 @@ import type {
   SharedMatchResponse,
   SystemDeckListResponse,
   HexCoord,
-  WizardType,
+  HeroType,
   AccountProfile,
   GeneratedAvatar,
   AccountPreferences,
@@ -82,11 +82,11 @@ export function updateProfile(
   displayName: string,
   handle: string,
   avatar: GeneratedAvatar,
-  preferredWizardType: WizardType,
+  preferredHeroType: HeroType,
 ) {
   return request<AccountProfile>("/api/profile", {
     method: "PATCH",
-    body: JSON.stringify({ displayName, handle, avatar, preferredWizardType }),
+    body: JSON.stringify({ displayName, handle, avatar, preferredHeroType }),
   });
 }
 
@@ -109,23 +109,23 @@ export function updatePreferences(preferences: UpdatePreferencesRequest) {
   });
 }
 
-export function unlockWizardSkill(wizardType: WizardType, nodeId: string) {
+export function unlockHeroSkill(heroType: HeroType, nodeId: string) {
   return request<ProgressionResponse>(
-    `/api/progression/wizards/${encodeURIComponent(wizardType)}/skills/${encodeURIComponent(nodeId)}`,
+    `/api/progression/heroes/${encodeURIComponent(heroType)}/skills/${encodeURIComponent(nodeId)}`,
     { method: "POST" },
   );
 }
 
-export function respecWizardSkills(wizardType: WizardType) {
+export function respecHeroSkills(heroType: HeroType) {
   return request<ProgressionResponse>(
-    `/api/progression/wizards/${encodeURIComponent(wizardType)}/respec`,
+    `/api/progression/heroes/${encodeURIComponent(heroType)}/respec`,
     { method: "POST" },
   );
 }
 
-export function saveWizardRuneLoadout(wizardType: WizardType, runeIds: string[]) {
+export function saveHeroRuneLoadout(heroType: HeroType, runeIds: string[]) {
   return request<ProgressionResponse>(
-    `/api/progression/wizards/${encodeURIComponent(wizardType)}/loadout`,
+    `/api/progression/heroes/${encodeURIComponent(heroType)}/loadout`,
     {
       method: "PATCH",
       body: JSON.stringify({ runeIds }),
@@ -160,7 +160,7 @@ export function updateDeck(
   cards: DeckCardCount[],
   isDefault = false,
   configuration?: {
-    wizardType: WizardType;
+    heroType: HeroType;
     runeIds: string[];
   },
 ) {
@@ -207,7 +207,7 @@ function matchAction(matchId: string, action: MatchActionRequest) {
 }
 
 export function createMatch(options?: {
-  wizardType?: WizardType;
+  heroType?: HeroType;
   playerDeck?: DeckChoice;
   playerDeckId?: number;
   aiOpponent?: SoloAiOpponentSelection;
@@ -219,10 +219,10 @@ export function createMatch(options?: {
   });
 }
 
-export function createSharedMatch(wizardType: WizardType) {
+export function createSharedMatch(heroType: HeroType) {
   return request<CreateSharedMatchResponse>("/api/shared-matches", {
     method: "POST",
-    body: JSON.stringify({ wizardType }),
+    body: JSON.stringify({ heroType }),
   });
 }
 
@@ -235,7 +235,7 @@ export function loadSharedMatch(matchId: string, seatToken: string) {
 export function joinSharedMatch(
   matchId: string,
   seatToken: string,
-  wizardType: WizardType,
+  heroType: HeroType,
   deckRecipeId?: number,
   runeIds?: string[],
   deckChoice?: DeckChoice,
@@ -244,7 +244,7 @@ export function joinSharedMatch(
     `/api/shared-matches/${encodeURIComponent(matchId)}/seats/${encodeURIComponent(seatToken)}/join`,
     {
       method: "POST",
-      body: JSON.stringify({ wizardType, deckRecipeId, runeIds, deckChoice }),
+      body: JSON.stringify({ heroType, deckRecipeId, runeIds, deckChoice }),
     },
   );
 }

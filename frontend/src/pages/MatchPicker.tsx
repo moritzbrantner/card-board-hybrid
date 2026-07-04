@@ -7,7 +7,7 @@ import {
   loadDecks,
   loadProgression,
   loadSystemDecks,
-  saveWizardRuneLoadout,
+  saveHeroRuneLoadout,
   updateDeck,
 } from "../api";
 import type { AccountProps, DeckLoadState, ProgressionLoadState, SystemDeckLoadState } from "../appTypes";
@@ -19,9 +19,9 @@ import {
   systemDeckToLoadout,
   type HomeLoadout,
 } from "../deckHelpers";
-import { defaultRuneIdsForWizard, wizardTypeLabel } from "../labels";
-import type { ProgressionResponse, WizardType } from "../types";
-import { WIZARD_OPTIONS } from "../wizards";
+import { defaultRuneIdsForHero, heroTypeLabel } from "../labels";
+import type { ProgressionResponse, HeroType } from "../types";
+import { HERO_OPTIONS } from "../heroes";
 
 export function PlayPage({
   onNavigate,
@@ -42,7 +42,7 @@ export function PlayPage({
   );
   const [selectedLoadoutId, setSelectedLoadoutId] = useState("system:balanced-starter");
   const [selectedAiDeck, setSelectedAiDeck] = useState<string>("system:balanced-starter");
-  const [selectedAiWizardType, setSelectedAiWizardType] = useState<WizardType>("runekeeper");
+  const [selectedAiHeroType, setSelectedAiHeroType] = useState<HeroType>("runekeeper");
   const [selectedRuneIds, setSelectedRuneIds] = useState<string[]>([]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -104,9 +104,9 @@ export function PlayPage({
             ? systemDeckLoadState.response.decks.find((deck) => `system:${deck.id}` === selectedLoadoutId)
             : null;
           setSelectedRuneIds(
-            defaultRuneIdsForWizard(
+            defaultRuneIdsForHero(
               progression,
-              selectedSystemDeck?.wizardType ?? currentUser.preferredWizardType,
+              selectedSystemDeck?.heroType ?? currentUser.preferredHeroType,
             ),
           );
         }
@@ -161,9 +161,9 @@ export function PlayPage({
     setBusy(true);
     setNotice(null);
     try {
-      const aiOpponent = aiSelectionFromValue(selectedAiDeck, selectedAiWizardType);
+      const aiOpponent = aiSelectionFromValue(selectedAiDeck, selectedAiHeroType);
       const created = await createMatch({
-        wizardType: selectedLoadout.wizardType,
+        heroType: selectedLoadout.heroType,
         playerDeck: selectedLoadout.deckChoice,
         ...(aiOpponent ? { aiOpponent } : {}),
         ...(selectedRuneIds.length > 0 ? { runeIds: selectedRuneIds } : {}),
@@ -184,12 +184,12 @@ export function PlayPage({
     setBusy(true);
     setNotice(null);
     try {
-      const created = await createSharedMatch(selectedLoadout.wizardType);
+      const created = await createSharedMatch(selectedLoadout.heroType);
       sessionStorage.setItem(
         `rune-lanes-invite:${created.matchId}`,
         `${window.location.origin}${created.inviteSeatUrl}`,
       );
-      sessionStorage.setItem(`rune-lanes-wizard:${created.matchId}`, selectedLoadout.wizardType);
+      sessionStorage.setItem(`rune-lanes-hero:${created.matchId}`, selectedLoadout.heroType);
       sessionStorage.setItem(`rune-lanes-runes:${created.matchId}`, JSON.stringify(selectedRuneIds));
       sessionStorage.setItem(
         `rune-lanes-deck-choice:${created.matchId}`,
@@ -231,7 +231,7 @@ export function PlayPage({
     setSelectedRuneIds(runeIds);
     try {
       if (selectedLoadout.kind === "system") {
-        const updated = await saveWizardRuneLoadout(selectedLoadout.wizardType, runeIds);
+        const updated = await saveHeroRuneLoadout(selectedLoadout.heroType, runeIds);
         setProgressionLoadState({ status: "ready", progression: updated });
         setNotice(null);
         return;
@@ -245,7 +245,7 @@ export function PlayPage({
         selectedLoadout.deck.name,
         selectedLoadout.deck.cards,
         selectedLoadout.deck.isDefault,
-        { wizardType: selectedLoadout.deck.wizardType, runeIds },
+        { heroType: selectedLoadout.deck.heroType, runeIds },
       );
       setDeckLoadState((current) => {
         if (current?.status !== "ready") {
@@ -281,7 +281,7 @@ export function PlayPage({
             <div className="selected-loadout-summary">
               <span>Selected</span>
               <strong>{selectedLoadout.name}</strong>
-              <small>{wizardTypeLabel(selectedLoadout.wizardType)} · {selectedLoadout.cardCount} cards</small>
+              <small>{heroTypeLabel(selectedLoadout.heroType)} · {selectedLoadout.cardCount} cards</small>
             </div>
           ) : null}
           {!currentUser ? (
@@ -390,7 +390,7 @@ export function PlayPage({
               {progressionLoadState?.status === "ready" && selectedLoadout ? (
                 <RuneSelector
                   progression={progressionLoadState.progression}
-                  wizardType={selectedLoadout.wizardType}
+                  heroType={selectedLoadout.heroType}
                   selectedRuneIds={selectedRuneIds}
                   onChange={(runeIds) => void handleRuneChange(runeIds)}
                 />
@@ -417,15 +417,15 @@ export function PlayPage({
                 </label>
                 {selectedAiDeckIsAccount ? (
                   <label>
-                  AI Wizard
+                  AI Hero
                   <select
-                    value={selectedAiWizardType}
-                    onChange={(event) => setSelectedAiWizardType(event.target.value as WizardType)}
+                    value={selectedAiHeroType}
+                    onChange={(event) => setSelectedAiHeroType(event.target.value as HeroType)}
                     disabled={busy}
                   >
-                    {WIZARD_OPTIONS.map((wizard) => (
-                      <option key={wizard.id} value={wizard.id}>
-                        {wizard.name}
+                    {HERO_OPTIONS.map((hero) => (
+                      <option key={hero.id} value={hero.id}>
+                        {hero.name}
                       </option>
                     ))}
                   </select>
@@ -460,7 +460,7 @@ export const MatchPicker = PlayPage;
 
 function runeIdsForHomeLoadout(loadout: HomeLoadout, progression: ProgressionResponse | null) {
   if (loadout.kind === "system" && progression) {
-    return defaultRuneIdsForWizard(progression, loadout.wizardType);
+    return defaultRuneIdsForHero(progression, loadout.heroType);
   }
   return loadout.runeIds;
 }

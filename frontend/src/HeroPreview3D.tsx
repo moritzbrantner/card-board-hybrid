@@ -3,24 +3,27 @@ import { Suspense, useEffect, useState } from "react";
 import { Box3, Object3D, Vector3 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { BOARD_MODEL_MANIFEST, type BoardModelManifest } from "./board3dModelManifest";
-import type { WizardType } from "./types";
+import type { HeroType } from "./types";
 
-type WizardPreview3DProps = {
-  wizardType: WizardType;
+type HeroPreview3DProps = {
+  heroType: HeroType;
   label: string;
 };
 
-const WIZARD_COLORS: Record<WizardType, { body: string; accent: string }> = {
+const HERO_COLORS: Record<HeroType, { body: string; accent: string }> = {
   runekeeper: { body: "#58b7a1", accent: "#d9b84f" },
   pyromancer: { body: "#d1665a", accent: "#ffd08a" },
   chronomancer: { body: "#7aa7d9", accent: "#b6f0ff" },
   warden: { body: "#77b36f", accent: "#e8f5d6" },
   battlemage: { body: "#b06ad9", accent: "#f0d7ff" },
+  barbarian: { body: "#b75343", accent: "#f2c66d" },
+  archer: { body: "#4f9a71", accent: "#e9f4a3" },
+  builder: { body: "#c49b54", accent: "#e7eef4" },
 };
 
-export function WizardPreview3D({ wizardType, label }: WizardPreview3DProps) {
+export function HeroPreview3D({ heroType, label }: HeroPreview3DProps) {
   return (
-    <div className="wizard-preview-3d" aria-label={`${label} 3D preview`}>
+    <div className="hero-preview-3d" aria-label={`${label} 3D preview`}>
       <Canvas
         camera={{ position: [0, 1.35, 3.35], fov: 34, near: 0.1, far: 20 }}
         dpr={[1, 1.6]}
@@ -30,17 +33,17 @@ export function WizardPreview3D({ wizardType, label }: WizardPreview3DProps) {
         <ambientLight intensity={0.9} />
         <directionalLight position={[2, 4, 3]} intensity={1.8} />
         <pointLight position={[-2, 2.2, 2.2]} intensity={0.8} />
-        <Suspense fallback={<ProceduralWizard wizardType={wizardType} />}>
-          <WizardModelOrFallback wizardType={wizardType} />
+        <Suspense fallback={<ProceduralHero heroType={heroType} />}>
+          <HeroModelOrFallback heroType={heroType} />
         </Suspense>
       </Canvas>
     </div>
   );
 }
 
-function WizardModelOrFallback({ wizardType }: { wizardType: WizardType }) {
+function HeroModelOrFallback({ heroType }: { heroType: HeroType }) {
   const manifest: BoardModelManifest = BOARD_MODEL_MANIFEST;
-  const entry = manifest.wizards[wizardType];
+  const entry = manifest.heroes[heroType];
   const [model, setModel] = useState<Object3D | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -75,18 +78,18 @@ function WizardModelOrFallback({ wizardType }: { wizardType: WizardType }) {
     return () => {
       cancelled = true;
     };
-  }, [entry, wizardType]);
+  }, [entry, heroType]);
 
   if (failed || !model) {
-    return <ProceduralWizard wizardType={wizardType} />;
+    return <ProceduralHero heroType={heroType} />;
   }
 
   return <primitive object={model} rotation={[0, -0.42, 0]} />;
 }
 
-function ProceduralWizard({ wizardType }: { wizardType: WizardType }) {
-  const colors = WIZARD_COLORS[wizardType];
-  const staffTilt = wizardType === "chronomancer" ? -0.3 : 0.16;
+function ProceduralHero({ heroType }: { heroType: HeroType }) {
+  const colors = HERO_COLORS[heroType];
+  const staffTilt = heroType === "chronomancer" ? -0.3 : 0.16;
 
   return (
     <group rotation={[0, -0.38, 0]}>

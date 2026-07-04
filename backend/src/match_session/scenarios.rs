@@ -86,8 +86,8 @@ fn base_match() -> MatchState {
 
     reset_player(&mut game, Side::Player);
     reset_player(&mut game, Side::Opponent);
-    game.player.wizard.position = hex(0, 1);
-    game.opponent.wizard.position = hex(1, -1);
+    game.player.hero.position = hex(0, 1);
+    game.opponent.hero.position = hex(1, -1);
     game
 }
 
@@ -95,8 +95,8 @@ fn reset_player(game: &mut MatchState, side: Side) {
     let player = game.player_mut(side);
     player.mana = 8;
     player.max_mana = 8;
-    player.wizard.ap_remaining = player.wizard.max_ap;
-    player.wizard.has_attacked = false;
+    player.hero.ap_remaining = player.hero.max_ap;
+    player.hero.has_attacked = false;
     player.hand.clear();
     player.deck.clear();
     player.discard.clear();
@@ -176,7 +176,7 @@ fn priority_response() -> MatchState {
         side: Side::Opponent,
         priority: 0,
         action: StackAction::Attack {
-            attacker_id: "opponent-wizard".to_string(),
+            attacker_id: "opponent-hero".to_string(),
             target_id: "player-unit".to_string(),
         },
     });
@@ -353,7 +353,7 @@ mod tests {
         game.apply_action(MatchActionRequest::PlayCard {
             card_id: "scenario-runic-insight".to_string(),
             target: ActionTarget::Piece {
-                piece_id: "player-wizard".to_string(),
+                piece_id: "player-hero".to_string(),
             },
         })
         .expect("draw spell should work");

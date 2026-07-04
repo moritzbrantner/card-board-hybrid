@@ -76,7 +76,7 @@ describe("createBoardAnimationCue", () => {
       event: {
         type: "pieceAttacked",
         side: "player",
-        attackerId: "player-wizard",
+        attackerId: "player-hero",
         targetId: "unit-1",
         damageToTarget: 2,
         counterDamageToAttacker: 1,
@@ -85,9 +85,9 @@ describe("createBoardAnimationCue", () => {
     });
 
     expect(cue?.pieces).toEqual([
-      { pieceId: "player-wizard", kind: "attack" },
+      { pieceId: "player-hero", kind: "attack" },
       { pieceId: "unit-1", kind: "damage", amount: 2 },
-      { pieceId: "player-wizard", kind: "damage", amount: 1 },
+      { pieceId: "player-hero", kind: "damage", amount: 1 },
     ]);
   });
 
@@ -153,10 +153,10 @@ function matchWithoutUnits(): MatchState {
       side: "player",
       mana: 1,
       maxMana: 1,
-      wizard: {
-        id: "player-wizard",
+      hero: {
+        id: "player-hero",
         side: "player",
-        wizardType: "runekeeper",
+        heroType: "runekeeper",
         hp: 20,
         maxHp: 20,
         attack: 2,
@@ -175,10 +175,10 @@ function matchWithoutUnits(): MatchState {
       side: "opponent",
       mana: 1,
       maxMana: 1,
-      wizard: {
-        id: "opponent-wizard",
+      hero: {
+        id: "opponent-hero",
         side: "opponent",
-        wizardType: "pyromancer",
+        heroType: "pyromancer",
         hp: 20,
         maxHp: 20,
         attack: 2,

@@ -458,12 +458,12 @@ button {
 }
 
 .loadout-card-model,
-.wizard-preview-3d {
+.hero-preview-3d {
   display: block;
   min-width: 0;
 }
 
-.wizard-preview-3d {
+.hero-preview-3d {
   width: 100%;
   height: 132px;
   overflow: hidden;
@@ -741,7 +741,7 @@ button {
   gap: 10px;
 }
 
-.wizard-picker {
+.hero-picker {
   display: grid;
   gap: 10px;
   margin: 0;
@@ -749,7 +749,7 @@ button {
   padding: 0;
 }
 
-.wizard-picker legend {
+.hero-picker legend {
   margin-bottom: 8px;
   color: var(--muted);
   font-size: 0.84rem;
@@ -757,13 +757,13 @@ button {
   text-transform: uppercase;
 }
 
-.wizard-options {
+.hero-options {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 10px;
 }
 
-.wizard-option {
+.hero-option {
   display: grid;
   gap: 10px;
   min-height: 166px;
@@ -776,7 +776,7 @@ button {
   text-align: left;
 }
 
-.wizard-option.selected {
+.hero-option.selected {
   border-color: var(--gold);
   background:
     linear-gradient(145deg, rgba(217, 184, 79, 0.16), transparent 68%),
@@ -784,41 +784,41 @@ button {
   box-shadow: 0 0 0 2px rgba(217, 184, 79, 0.18);
 }
 
-.wizard-option-header,
-.wizard-stat-row {
+.hero-option-header,
+.hero-stat-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.wizard-option-header > span {
+.hero-option-header > span {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.wizard-option-header strong {
+.hero-option-header strong {
   overflow-wrap: anywhere;
   line-height: 1.05;
 }
 
-.wizard-option-header span span,
-.wizard-option-text {
+.hero-option-header span span,
+.hero-option-text {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 800;
 }
 
-.wizard-option-text {
+.hero-option-text {
   line-height: 1.35;
 }
 
-.wizard-stat-row {
+.hero-stat-row {
   justify-content: start;
 }
 
-.wizard-stat-row span {
+.hero-stat-row span {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1050,7 +1050,7 @@ h1 {
 .icon-button:disabled,
 .primary-button:disabled,
 .secondary-link:disabled,
-.wizard-option:disabled,
+.hero-option:disabled,
 .hex-tile:disabled,
 .card-button:disabled {
   cursor: not-allowed;
@@ -1095,7 +1095,7 @@ h1 {
   color: var(--red);
 }
 
-.wizard-type-pill {
+.hero-type-pill {
   color: #fffaf0;
   font-weight: 800;
 }
@@ -1643,11 +1643,11 @@ h1 {
   color: var(--red);
 }
 
-.piece-token.wizard {
+.piece-token.hero {
   color: var(--blue);
 }
 
-.piece-token.opponent.wizard {
+.piece-token.opponent.hero {
   color: #df8277;
 }
 
@@ -1695,6 +1695,18 @@ h1 {
 
 .piece-token.battlemage {
   color: #d9b84f;
+}
+
+.piece-token.barbarian {
+  color: #b75343;
+}
+
+.piece-token.archer {
+  color: #4f9a71;
+}
+
+.piece-token.builder {
+  color: #c49b54;
 }
 
 .piece-token .piece-token-portrait {
@@ -2313,7 +2325,7 @@ h1 {
 
 .profile-fields label,
 .avatar-controls legend,
-.preferred-wizard-control span,
+.preferred-hero-control span,
 .board-visual-mode-control legend {
   color: var(--muted);
   font-size: 0.76rem;
@@ -2322,7 +2334,7 @@ h1 {
 }
 
 .profile-fields input,
-.preferred-wizard-control select {
+.preferred-hero-control select {
   min-height: 42px;
   min-width: 0;
   border: 1px solid var(--line);
@@ -2334,12 +2346,12 @@ h1 {
 }
 
 :root[data-theme="light"] .profile-fields input,
-:root[data-theme="light"] .preferred-wizard-control select {
+:root[data-theme="light"] .preferred-hero-control select {
   color: #17201d;
   background: rgba(255, 255, 255, 0.72);
 }
 
-.preferred-wizard-control select {
+.preferred-hero-control select {
   width: min(360px, 100%);
 }
 
@@ -2357,7 +2369,7 @@ h1 {
   gap: 12px;
 }
 
-.preferred-wizard-control {
+.preferred-hero-control {
   display: grid;
   grid-column: 1 / -1;
   gap: 8px;
@@ -2477,7 +2489,7 @@ h1 {
 }
 
 .progression-summary span,
-.wizard-progression-heading span,
+.hero-progression-heading span,
 .rune-loadout-editor h3 {
   color: var(--muted);
   font-size: 0.75rem;
@@ -2516,13 +2528,13 @@ h1 {
   font-weight: 800;
 }
 
-.wizard-progression-tabs {
+.hero-progression-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.wizard-progression-tabs button,
+.hero-progression-tabs button,
 .rune-grid button {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -2532,32 +2544,32 @@ h1 {
   text-align: left;
 }
 
-.wizard-progression-tabs button {
+.hero-progression-tabs button {
   min-height: 38px;
   padding: 0 12px;
   font-weight: 900;
 }
 
-.wizard-progression-tabs button.active,
+.hero-progression-tabs button.active,
 .rune-grid button.selected {
   border-color: var(--gold);
   background: rgba(217, 184, 79, 0.14);
 }
 
-.wizard-progression-detail,
+.hero-progression-detail,
 .rune-loadout-editor {
   display: grid;
   gap: 12px;
 }
 
-.wizard-progression-heading {
+.hero-progression-heading {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   align-items: center;
 }
 
-.wizard-progression-heading h3,
+.hero-progression-heading h3,
 .rune-loadout-editor h3 {
   margin: 0;
 }
@@ -2580,7 +2592,7 @@ h1 {
 }
 
 .rune-grid button:disabled,
-.wizard-progression-tabs button:disabled {
+.hero-progression-tabs button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -3291,7 +3303,7 @@ h1 {
 }
 
 .deck-filter-grid select,
-.preferred-wizard-control select {
+.preferred-hero-control select {
   min-width: 0;
   min-height: 36px;
   border: 1px solid var(--line);

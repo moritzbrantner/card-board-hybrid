@@ -235,7 +235,7 @@ function authUser() {
     email: "player@local.dev",
     displayName: "Rune Player",
     avatar: { symbol: "sparkles", color: "emerald" },
-    preferredWizardType: "runekeeper",
+    preferredHeroType: "runekeeper",
     boardVisualMode: "2d",
     progressionSummary: {
       totalXp: 0,

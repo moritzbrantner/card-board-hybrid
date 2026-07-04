@@ -5,10 +5,10 @@ import type {
   CatalogCard,
   Rarity,
   Unit,
-  Wizard,
-  WizardType,
+  Hero,
+  HeroType,
 } from "./types";
-import { WIZARD_OPTIONS } from "./wizards";
+import { HERO_OPTIONS } from "./heroes";
 
 export type VisualIdentityStatus = "resolved" | "legacyNameFallback" | "unknown";
 
@@ -44,20 +44,20 @@ export type UnitVisualIdentity = {
     | null;
 };
 
-export type WizardVisualIdentity = {
+export type HeroVisualIdentity = {
   status: "resolved";
-  wizardType: WizardType;
+  heroType: HeroType;
   name: string;
   portraitPath: string;
   portraitAlt: string;
-  accentClass: WizardType;
+  accentClass: HeroType;
   fallbackLabel: string;
 };
 
 export type MatchVisualCatalog = {
   card(card: Card | CatalogCard | CardSummary): CardVisualIdentity;
   unit(unit: Unit): UnitVisualIdentity;
-  wizard(wizard: Wizard): WizardVisualIdentity;
+  hero(hero: Hero): HeroVisualIdentity;
 };
 
 export function createMatchVisualCatalog(cards: CatalogCard[]): MatchVisualCatalog {
@@ -116,17 +116,17 @@ export function createMatchVisualCatalog(cards: CatalogCard[]): MatchVisualCatal
         baseStats: null,
       };
     },
-    wizard(wizard) {
+    hero(hero) {
       const option =
-        WIZARD_OPTIONS.find((candidate) => candidate.id === wizard.wizardType) ??
-        WIZARD_OPTIONS[0];
+        HERO_OPTIONS.find((candidate) => candidate.id === hero.heroType) ??
+        HERO_OPTIONS[0];
       return {
         status: "resolved",
-        wizardType: wizard.wizardType,
+        heroType: hero.heroType,
         name: option.name,
-        portraitPath: `/wizard-art/${wizard.wizardType}.svg`,
+        portraitPath: `/hero-art/${hero.heroType}.svg`,
         portraitAlt: `${option.name} portrait`,
-        accentClass: wizard.wizardType,
+        accentClass: hero.heroType,
         fallbackLabel: option.token,
       };
     },

@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::match_session::{
-    MatchProgressionEffects, MatchProgressionLoadout, MatchState, Side, WizardType,
+    MatchProgressionEffects, MatchProgressionLoadout, MatchState, Side, HeroType,
 };
 
 const COMPLETION_XP: i64 = 100;
@@ -29,8 +29,8 @@ pub struct ProgressionSummary {
 pub struct ProgressionResponse {
     pub account: ProgressionSummary,
     pub runes: Vec<RuneDefinition>,
-    pub wizards: Vec<WizardProgression>,
-    pub skill_trees: Vec<WizardSkillTree>,
+    pub heroes: Vec<HeroProgression>,
+    pub skill_trees: Vec<HeroSkillTree>,
     pub loadouts: Vec<SavedRuneLoadout>,
 }
 
@@ -46,8 +46,8 @@ pub struct RuneDefinition {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WizardProgression {
-    pub wizard_type: WizardType,
+pub struct HeroProgression {
+    pub hero_type: HeroType,
     pub xp: i64,
     pub level: u32,
     pub current_level_xp: i64,
@@ -62,8 +62,8 @@ pub struct WizardProgression {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WizardSkillTree {
-    pub wizard_type: WizardType,
+pub struct HeroSkillTree {
+    pub hero_type: HeroType,
     pub nodes: Vec<SkillNodeDefinition>,
 }
 
@@ -80,7 +80,7 @@ pub struct SkillNodeDefinition {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedRuneLoadout {
-    pub wizard_type: WizardType,
+    pub hero_type: HeroType,
     pub rune_ids: Vec<String>,
 }
 
@@ -165,14 +165,14 @@ impl<'a> ProgressionModule<'a> {
                 ..rune
             })
             .collect();
-        let mut wizards = Vec::new();
-        for wizard_type in wizard_types() {
-            wizards.push(self.wizard_progression(user_id, wizard_type)?);
+        let mut heroes = Vec::new();
+        for hero_type in hero_types() {
+            heroes.push(self.hero_progression(user_id, hero_type)?);
         }
         Ok(ProgressionResponse {
             account,
             runes,
-            wizards,
+            heroes,
             skill_trees: skill_trees(),
             loadouts: self.load_saved_loadouts(user_id)?,
         })
@@ -188,16 +188,16 @@ impl<'a> ProgressionModule<'a> {
     pub fn unlock_skill(
         &mut self,
         user_id: i64,
-        wizard_type: WizardType,
+        hero_type: HeroType,
         node_id: &str,
     ) -> Result<ProgressionResponse, ProgressionError> {
-        let Some(node) = skill_node(wizard_type, node_id) else {
+        let Some(node) = skill_node(hero_type, node_id) else {
             return Err(ProgressionError::UnknownSkill(node_id.to_string()));
         };
         if node.root {
             return Err(ProgressionError::SkillAlreadyUnlocked(node_id.to_string()));
         }
-        let progression = self.wizard_progression(user_id, wizard_type)?;
+        let progression = self.hero_progression(user_id, hero_type)?;
         if progression
             .unlocked_skill_ids
             .iter()
@@ -209,7 +209,7 @@ impl<'a> ProgressionModule<'a> {
             return Err(ProgressionError::NotEnoughSkillPoints);
         }
         if let Some(prerequisite_id) = node.prerequisite_id {
-            let prerequisite_unlocked = prerequisite_id == root_skill_id(wizard_type)
+            let prerequisite_unlocked = prerequisite_id == root_skill_id(hero_type)
                 || progression
                     .unlocked_skill_ids
                     .iter()
@@ -223,25 +223,25 @@ impl<'a> ProgressionModule<'a> {
 
         self.connection.execute(
             "
-            INSERT INTO wizard_skill_unlocks (user_id, wizard_type, node_id, unlocked_at)
+            INSERT INTO hero_skill_unlocks (user_id, hero_type, node_id, unlocked_at)
             VALUES (?1, ?2, ?3, unixepoch())
             ",
-            params![user_id, wizard_type_to_db(wizard_type), node_id],
+            params![user_id, hero_type_to_db(hero_type), node_id],
         )?;
         self.load_for_user(user_id)
     }
 
-    pub fn respec_wizard(
+    pub fn respec_hero(
         &mut self,
         user_id: i64,
-        wizard_type: WizardType,
+        hero_type: HeroType,
     ) -> Result<ProgressionResponse, ProgressionError> {
         self.connection.execute(
             "
-            DELETE FROM wizard_skill_unlocks
-            WHERE user_id = ?1 AND wizard_type = ?2
+            DELETE FROM hero_skill_unlocks
+            WHERE user_id = ?1 AND hero_type = ?2
             ",
-            params![user_id, wizard_type_to_db(wizard_type)],
+            params![user_id, hero_type_to_db(hero_type)],
         )?;
         self.load_for_user(user_id)
     }
@@ -249,20 +249,20 @@ impl<'a> ProgressionModule<'a> {
     pub fn save_rune_loadout(
         &mut self,
         user_id: i64,
-        wizard_type: WizardType,
+        hero_type: HeroType,
         request: SaveRuneLoadoutRequest,
     ) -> Result<ProgressionResponse, ProgressionError> {
         self.validate_rune_ids(user_id, &request.rune_ids)?;
         let rune_ids_json = serde_json::to_string(&request.rune_ids)?;
         self.connection.execute(
             "
-            INSERT INTO wizard_rune_loadouts (user_id, wizard_type, rune_ids_json, updated_at)
+            INSERT INTO hero_rune_loadouts (user_id, hero_type, rune_ids_json, updated_at)
             VALUES (?1, ?2, ?3, unixepoch())
-            ON CONFLICT(user_id, wizard_type) DO UPDATE SET
+            ON CONFLICT(user_id, hero_type) DO UPDATE SET
                 rune_ids_json = excluded.rune_ids_json,
                 updated_at = unixepoch()
             ",
-            params![user_id, wizard_type_to_db(wizard_type), rune_ids_json],
+            params![user_id, hero_type_to_db(hero_type), rune_ids_json],
         )?;
         self.load_for_user(user_id)
     }
@@ -270,7 +270,7 @@ impl<'a> ProgressionModule<'a> {
     pub fn match_loadout(
         &mut self,
         user_id: Option<i64>,
-        wizard_type: WizardType,
+        hero_type: HeroType,
         requested_rune_ids: Option<Vec<String>>,
     ) -> Result<MatchProgressionLoadout, ProgressionError> {
         let Some(user_id) = user_id else {
@@ -279,11 +279,11 @@ impl<'a> ProgressionModule<'a> {
         let rune_ids = match requested_rune_ids {
             Some(rune_ids) => rune_ids,
             None => self
-                .saved_rune_ids(user_id, wizard_type)?
+                .saved_rune_ids(user_id, hero_type)?
                 .unwrap_or_default(),
         };
         self.validate_rune_ids(user_id, &rune_ids)?;
-        let skill_ids = self.active_skill_ids(user_id, wizard_type)?;
+        let skill_ids = self.active_skill_ids(user_id, hero_type)?;
         Ok(MatchProgressionLoadout {
             rune_ids: rune_ids.clone(),
             skill_ids: skill_ids.clone(),
@@ -301,19 +301,19 @@ impl<'a> ProgressionModule<'a> {
             .map_err(ProgressionError::from)
     }
 
-    fn wizard_progression(
+    fn hero_progression(
         &self,
         user_id: i64,
-        wizard_type: WizardType,
-    ) -> Result<WizardProgression, ProgressionError> {
-        let xp = self.wizard_xp(user_id, wizard_type)?;
+        hero_type: HeroType,
+    ) -> Result<HeroProgression, ProgressionError> {
+        let xp = self.hero_xp(user_id, hero_type)?;
         let level_summary = summary_for_xp(xp);
-        let unlocked_skill_ids = self.unlocked_skill_ids(user_id, wizard_type)?;
+        let unlocked_skill_ids = self.unlocked_skill_ids(user_id, hero_type)?;
         let spent_skill_points = unlocked_skill_ids.len();
         let total_skill_points = level_summary.level.saturating_sub(1) as usize;
         let available_skill_points = total_skill_points.saturating_sub(spent_skill_points);
-        Ok(WizardProgression {
-            wizard_type,
+        Ok(HeroProgression {
+            hero_type,
             xp,
             level: level_summary.level,
             current_level_xp: level_summary.current_level_xp,
@@ -327,15 +327,15 @@ impl<'a> ProgressionModule<'a> {
         })
     }
 
-    fn wizard_xp(&self, user_id: i64, wizard_type: WizardType) -> Result<i64, ProgressionError> {
+    fn hero_xp(&self, user_id: i64, hero_type: HeroType) -> Result<i64, ProgressionError> {
         self.connection
             .query_row(
                 "
                 SELECT xp
-                FROM wizard_mastery
-                WHERE user_id = ?1 AND wizard_type = ?2
+                FROM hero_mastery
+                WHERE user_id = ?1 AND hero_type = ?2
                 ",
-                params![user_id, wizard_type_to_db(wizard_type)],
+                params![user_id, hero_type_to_db(hero_type)],
                 |row| row.get(0),
             )
             .optional()
@@ -346,18 +346,18 @@ impl<'a> ProgressionModule<'a> {
     fn unlocked_skill_ids(
         &self,
         user_id: i64,
-        wizard_type: WizardType,
+        hero_type: HeroType,
     ) -> Result<Vec<String>, ProgressionError> {
         let mut statement = self.connection.prepare(
             "
             SELECT node_id
-            FROM wizard_skill_unlocks
-            WHERE user_id = ?1 AND wizard_type = ?2
+            FROM hero_skill_unlocks
+            WHERE user_id = ?1 AND hero_type = ?2
             ORDER BY unlocked_at ASC, node_id ASC
             ",
         )?;
         let rows = statement
-            .query_map(params![user_id, wizard_type_to_db(wizard_type)], |row| {
+            .query_map(params![user_id, hero_type_to_db(hero_type)], |row| {
                 row.get::<_, String>(0)
             })?;
         let mut node_ids = Vec::new();
@@ -370,20 +370,20 @@ impl<'a> ProgressionModule<'a> {
     fn active_skill_ids(
         &self,
         user_id: i64,
-        wizard_type: WizardType,
+        hero_type: HeroType,
     ) -> Result<Vec<String>, ProgressionError> {
-        let mut skill_ids = vec![root_skill_id(wizard_type).to_string()];
-        skill_ids.extend(self.unlocked_skill_ids(user_id, wizard_type)?);
+        let mut skill_ids = vec![root_skill_id(hero_type).to_string()];
+        skill_ids.extend(self.unlocked_skill_ids(user_id, hero_type)?);
         Ok(skill_ids)
     }
 
     fn load_saved_loadouts(&self, user_id: i64) -> Result<Vec<SavedRuneLoadout>, ProgressionError> {
         let mut loadouts = Vec::new();
-        for wizard_type in wizard_types() {
+        for hero_type in hero_types() {
             loadouts.push(SavedRuneLoadout {
-                wizard_type,
+                hero_type,
                 rune_ids: self
-                    .saved_rune_ids(user_id, wizard_type)?
+                    .saved_rune_ids(user_id, hero_type)?
                     .unwrap_or_default(),
             });
         }
@@ -393,17 +393,17 @@ impl<'a> ProgressionModule<'a> {
     fn saved_rune_ids(
         &self,
         user_id: i64,
-        wizard_type: WizardType,
+        hero_type: HeroType,
     ) -> Result<Option<Vec<String>>, ProgressionError> {
         let rune_ids_json: Option<String> = self
             .connection
             .query_row(
                 "
                 SELECT rune_ids_json
-                FROM wizard_rune_loadouts
-                WHERE user_id = ?1 AND wizard_type = ?2
+                FROM hero_rune_loadouts
+                WHERE user_id = ?1 AND hero_type = ?2
                 ",
-                params![user_id, wizard_type_to_db(wizard_type)],
+                params![user_id, hero_type_to_db(hero_type)],
                 |row| row.get(0),
             )
             .optional()?;
@@ -454,38 +454,90 @@ pub fn migrate(connection: &Connection) -> Result<(), ProgressionError> {
             match_id TEXT NOT NULL,
             user_id INTEGER NOT NULL,
             account_xp INTEGER NOT NULL,
-            wizard_type TEXT NOT NULL,
-            wizard_xp INTEGER NOT NULL,
+            hero_type TEXT NOT NULL,
+            hero_xp INTEGER NOT NULL,
             won INTEGER NOT NULL,
             awarded_at INTEGER NOT NULL,
             PRIMARY KEY (match_id, user_id),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
-        CREATE TABLE IF NOT EXISTS wizard_mastery (
+        CREATE TABLE IF NOT EXISTS hero_mastery (
             user_id INTEGER NOT NULL,
-            wizard_type TEXT NOT NULL,
+            hero_type TEXT NOT NULL,
             xp INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (user_id, wizard_type),
+            PRIMARY KEY (user_id, hero_type),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
-        CREATE TABLE IF NOT EXISTS wizard_skill_unlocks (
+        CREATE TABLE IF NOT EXISTS hero_skill_unlocks (
             user_id INTEGER NOT NULL,
-            wizard_type TEXT NOT NULL,
+            hero_type TEXT NOT NULL,
             node_id TEXT NOT NULL,
             unlocked_at INTEGER NOT NULL,
-            PRIMARY KEY (user_id, wizard_type, node_id),
+            PRIMARY KEY (user_id, hero_type, node_id),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
-        CREATE TABLE IF NOT EXISTS wizard_rune_loadouts (
+        CREATE TABLE IF NOT EXISTS hero_rune_loadouts (
             user_id INTEGER NOT NULL,
-            wizard_type TEXT NOT NULL,
+            hero_type TEXT NOT NULL,
             rune_ids_json TEXT NOT NULL,
             updated_at INTEGER NOT NULL,
-            PRIMARY KEY (user_id, wizard_type),
+            PRIMARY KEY (user_id, hero_type),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
         ",
     )?;
+    if table_exists(connection, "wizard_mastery")? {
+        connection.execute_batch(
+            "
+            INSERT OR IGNORE INTO hero_mastery (user_id, hero_type, xp)
+            SELECT user_id, wizard_type, xp
+            FROM wizard_mastery;
+            DROP TABLE wizard_mastery;
+            ",
+        )?;
+    }
+    if table_exists(connection, "wizard_skill_unlocks")? {
+        connection.execute_batch(
+            "
+            INSERT OR IGNORE INTO hero_skill_unlocks (user_id, hero_type, node_id, unlocked_at)
+            SELECT user_id, wizard_type, node_id, unlocked_at
+            FROM wizard_skill_unlocks;
+            DROP TABLE wizard_skill_unlocks;
+            ",
+        )?;
+    }
+    if table_exists(connection, "wizard_rune_loadouts")? {
+        connection.execute_batch(
+            "
+            INSERT OR IGNORE INTO hero_rune_loadouts (user_id, hero_type, rune_ids_json, updated_at)
+            SELECT user_id, wizard_type, rune_ids_json, updated_at
+            FROM wizard_rune_loadouts;
+            DROP TABLE wizard_rune_loadouts;
+            ",
+        )?;
+    }
+    if column_exists(connection, "match_xp_awards", "wizard_type")? {
+        add_column_if_missing(connection, "match_xp_awards", "hero_type", "TEXT NOT NULL DEFAULT 'runekeeper'")?;
+        connection.execute(
+            "
+            UPDATE match_xp_awards
+            SET hero_type = COALESCE(wizard_type, hero_type)
+            ",
+            [],
+        )?;
+        drop_column_if_exists(connection, "match_xp_awards", "wizard_type")?;
+    }
+    if column_exists(connection, "match_xp_awards", "wizard_xp")? {
+        add_column_if_missing(connection, "match_xp_awards", "hero_xp", "INTEGER NOT NULL DEFAULT 0")?;
+        connection.execute(
+            "
+            UPDATE match_xp_awards
+            SET hero_xp = COALESCE(wizard_xp, hero_xp)
+            ",
+            [],
+        )?;
+        drop_column_if_exists(connection, "match_xp_awards", "wizard_xp")?;
+    }
     Ok(())
 }
 
@@ -494,17 +546,17 @@ pub fn seed_experienced_local_mastery(
     connection: &Connection,
     user_id: i64,
 ) -> Result<(), ProgressionError> {
-    for wizard_type in wizard_types() {
+    for hero_type in hero_types() {
         connection.execute(
             "
-            INSERT INTO wizard_mastery (user_id, wizard_type, xp)
+            INSERT INTO hero_mastery (user_id, hero_type, xp)
             VALUES (?1, ?2, ?3)
-            ON CONFLICT(user_id, wizard_type) DO UPDATE SET
+            ON CONFLICT(user_id, hero_type) DO UPDATE SET
                 xp = excluded.xp
             ",
             params![
                 user_id,
-                wizard_type_to_db(wizard_type),
+                hero_type_to_db(hero_type),
                 crate::identity::EXPERIENCED_LOCAL_XP
             ],
         )?;
@@ -543,7 +595,7 @@ pub fn award_completed_match(
                 vec![AwardParticipant {
                     user_id,
                     side: Side::Player,
-                    wizard_type: match_state.player.wizard.wizard_type,
+                    hero_type: match_state.player.hero.hero_type,
                 }]
             })
             .unwrap_or_default()
@@ -558,8 +610,8 @@ pub fn award_completed_match(
                 match_id,
                 user_id,
                 account_xp,
-                wizard_type,
-                wizard_xp,
+                hero_type,
+                hero_xp,
                 won,
                 awarded_at
             )
@@ -569,7 +621,7 @@ pub fn award_completed_match(
                 match_id,
                 participant.user_id,
                 xp,
-                wizard_type_to_db(participant.wizard_type),
+                hero_type_to_db(participant.hero_type),
                 won
             ],
         )?;
@@ -586,14 +638,14 @@ pub fn award_completed_match(
         )?;
         connection.execute(
             "
-            INSERT INTO wizard_mastery (user_id, wizard_type, xp)
+            INSERT INTO hero_mastery (user_id, hero_type, xp)
             VALUES (?1, ?2, ?3)
-            ON CONFLICT(user_id, wizard_type) DO UPDATE SET
-                xp = wizard_mastery.xp + excluded.xp
+            ON CONFLICT(user_id, hero_type) DO UPDATE SET
+                xp = hero_mastery.xp + excluded.xp
             ",
             params![
                 participant.user_id,
-                wizard_type_to_db(participant.wizard_type),
+                hero_type_to_db(participant.hero_type),
                 xp
             ],
         )?;
@@ -637,14 +689,14 @@ fn rune_definitions() -> Vec<RuneDefinition> {
         RuneDefinition {
             id: "vitality",
             name: "Vitality Rune",
-            text: "Wizard starts with +2 max HP.",
+            text: "Hero starts with +2 max HP.",
             unlock_level: 2,
             unlocked: false,
         },
         RuneDefinition {
             id: "force",
             name: "Force Rune",
-            text: "Wizard starts with +1 attack.",
+            text: "Hero starts with +1 attack.",
             unlock_level: 4,
             unlocked: false,
         },
@@ -722,39 +774,60 @@ fn apply_effect_for_id(effects: &mut MatchProgressionEffects, id: &str) {
         "battlemage-iron-focus" => effects.max_hp_delta += 1,
         "battlemage-battle-rhythm" => effects.mana_delta += 1,
         "battlemage-frontline-command" => effects.summoned_unit_armor_delta += 1,
+        "barbarian-brutal-stamina" => effects.max_hp_delta += 2,
+        "barbarian-weapon-practice" => effects.attack_delta += 1,
+        "barbarian-battle-hunger" => effects.mana_delta += 1,
+        "barbarian-warband-hide" => effects.summoned_unit_armor_delta += 1,
+        "barbarian-opening-rage" => effects.opening_hand_delta += 1,
+        "barbarian-deep-cuts" => effects.spell_damage_delta += 1,
+        "archer-fleet-footing" => effects.max_ap_delta += 1,
+        "archer-keen-shot" => effects.spell_damage_delta += 1,
+        "archer-scout-cache" => effects.opening_hand_delta += 1,
+        "archer-trail-rations" => effects.mana_delta += 1,
+        "archer-screening-line" => effects.first_summoned_unit_armor_delta += 1,
+        "archer-light-armor" => effects.max_hp_delta += 1,
+        "builder-reinforced-frame" => effects.max_hp_delta += 2,
+        "builder-supply-cache" => effects.mana_delta += 1,
+        "builder-work-crew-drill" => effects.summoned_unit_armor_delta += 1,
+        "builder-first-wall" => effects.first_summoned_unit_armor_delta += 1,
+        "builder-field-manual" => effects.opening_hand_delta += 1,
+        "builder-tool-ready" => effects.max_ap_delta += 1,
         _ => {}
     }
 }
 
-fn skill_trees() -> Vec<WizardSkillTree> {
-    wizard_types()
+fn skill_trees() -> Vec<HeroSkillTree> {
+    hero_types()
         .into_iter()
-        .map(|wizard_type| WizardSkillTree {
-            wizard_type,
-            nodes: skill_nodes(wizard_type),
+        .map(|hero_type| HeroSkillTree {
+            hero_type,
+            nodes: skill_nodes(hero_type),
         })
         .collect()
 }
 
-fn skill_node(wizard_type: WizardType, node_id: &str) -> Option<SkillNodeDefinition> {
-    skill_nodes(wizard_type)
+fn skill_node(hero_type: HeroType, node_id: &str) -> Option<SkillNodeDefinition> {
+    skill_nodes(hero_type)
         .into_iter()
         .find(|node| node.id == node_id)
 }
 
-fn root_skill_id(wizard_type: WizardType) -> &'static str {
-    match wizard_type {
-        WizardType::Runekeeper => "runekeeper-runic-balance",
-        WizardType::Pyromancer => "pyromancer-ember-path",
-        WizardType::Chronomancer => "chronomancer-time-thread",
-        WizardType::Warden => "warden-stone-oath",
-        WizardType::Battlemage => "battlemage-duelist-oath",
+fn root_skill_id(hero_type: HeroType) -> &'static str {
+    match hero_type {
+        HeroType::Runekeeper => "runekeeper-runic-balance",
+        HeroType::Pyromancer => "pyromancer-ember-path",
+        HeroType::Chronomancer => "chronomancer-time-thread",
+        HeroType::Warden => "warden-stone-oath",
+        HeroType::Battlemage => "battlemage-duelist-oath",
+        HeroType::Barbarian => "barbarian-fury-path",
+        HeroType::Archer => "archer-long-watch",
+        HeroType::Builder => "builder-foundation-plan",
     }
 }
 
-fn skill_nodes(wizard_type: WizardType) -> Vec<SkillNodeDefinition> {
-    match wizard_type {
-        WizardType::Runekeeper => vec![
+fn skill_nodes(hero_type: HeroType) -> Vec<SkillNodeDefinition> {
+    match hero_type {
+        HeroType::Runekeeper => vec![
             skill(
                 "runekeeper-runic-balance",
                 "Runic Balance",
@@ -765,7 +838,7 @@ fn skill_nodes(wizard_type: WizardType) -> Vec<SkillNodeDefinition> {
             skill(
                 "runekeeper-steady-glyph",
                 "Steady Glyph",
-                "Wizard starts with +1 max HP.",
+                "Hero starts with +1 max HP.",
                 false,
                 Some("runekeeper-runic-balance"),
             ),
@@ -791,7 +864,7 @@ fn skill_nodes(wizard_type: WizardType) -> Vec<SkillNodeDefinition> {
                 Some("runekeeper-channel-stone"),
             ),
         ],
-        WizardType::Pyromancer => vec![
+        HeroType::Pyromancer => vec![
             skill(
                 "pyromancer-ember-path",
                 "Ember Path",
@@ -802,7 +875,7 @@ fn skill_nodes(wizard_type: WizardType) -> Vec<SkillNodeDefinition> {
             skill(
                 "pyromancer-heated-focus",
                 "Heated Focus",
-                "Wizard starts with +1 attack.",
+                "Hero starts with +1 attack.",
                 false,
                 Some("pyromancer-ember-path"),
             ),
@@ -828,7 +901,7 @@ fn skill_nodes(wizard_type: WizardType) -> Vec<SkillNodeDefinition> {
                 Some("pyromancer-kindling-reserve"),
             ),
         ],
-        WizardType::Chronomancer => vec![
+        HeroType::Chronomancer => vec![
             skill(
                 "chronomancer-time-thread",
                 "Time Thread",
@@ -839,7 +912,7 @@ fn skill_nodes(wizard_type: WizardType) -> Vec<SkillNodeDefinition> {
             skill(
                 "chronomancer-quick-step",
                 "Quick Step",
-                "Wizard starts with +1 max AP.",
+                "Hero starts with +1 max AP.",
                 false,
                 Some("chronomancer-time-thread"),
             ),
@@ -860,12 +933,12 @@ fn skill_nodes(wizard_type: WizardType) -> Vec<SkillNodeDefinition> {
             skill(
                 "chronomancer-temporal-guard",
                 "Temporal Guard",
-                "Wizard starts with +1 max HP.",
+                "Hero starts with +1 max HP.",
                 false,
                 Some("chronomancer-stored-moment"),
             ),
         ],
-        WizardType::Warden => vec![
+        HeroType::Warden => vec![
             skill(
                 "warden-stone-oath",
                 "Stone Oath",
@@ -876,7 +949,7 @@ fn skill_nodes(wizard_type: WizardType) -> Vec<SkillNodeDefinition> {
             skill(
                 "warden-stone-skin",
                 "Stone Skin",
-                "Wizard starts with +2 max HP.",
+                "Hero starts with +2 max HP.",
                 false,
                 Some("warden-stone-oath"),
             ),
@@ -890,7 +963,7 @@ fn skill_nodes(wizard_type: WizardType) -> Vec<SkillNodeDefinition> {
             skill(
                 "warden-anchored-stance",
                 "Anchored Stance",
-                "Wizard starts with +1 max HP and gains +1 mana from controlled hexes.",
+                "Hero starts with +1 max HP and gains +1 mana from controlled hexes.",
                 false,
                 Some("warden-stone-skin"),
             ),
@@ -902,7 +975,7 @@ fn skill_nodes(wizard_type: WizardType) -> Vec<SkillNodeDefinition> {
                 Some("warden-guard-drill"),
             ),
         ],
-        WizardType::Battlemage => vec![
+        HeroType::Battlemage => vec![
             skill(
                 "battlemage-duelist-oath",
                 "Duelist Oath",
@@ -913,14 +986,14 @@ fn skill_nodes(wizard_type: WizardType) -> Vec<SkillNodeDefinition> {
             skill(
                 "battlemage-weapon-drill",
                 "Weapon Drill",
-                "Wizard starts with +1 attack.",
+                "Hero starts with +1 attack.",
                 false,
                 Some("battlemage-duelist-oath"),
             ),
             skill(
                 "battlemage-iron-focus",
                 "Iron Focus",
-                "Wizard starts with +1 max HP.",
+                "Hero starts with +1 max HP.",
                 false,
                 Some("battlemage-duelist-oath"),
             ),
@@ -938,6 +1011,33 @@ fn skill_nodes(wizard_type: WizardType) -> Vec<SkillNodeDefinition> {
                 false,
                 Some("battlemage-iron-focus"),
             ),
+        ],
+        HeroType::Barbarian => vec![
+            skill("barbarian-fury-path", "Fury Path", "The root of Barbarian mastery.", true, None),
+            skill("barbarian-brutal-stamina", "Brutal Stamina", "Hero starts with +2 max HP.", false, Some("barbarian-fury-path")),
+            skill("barbarian-weapon-practice", "Weapon Practice", "Hero starts with +1 attack.", false, Some("barbarian-fury-path")),
+            skill("barbarian-battle-hunger", "Battle Hunger", "Gain +1 mana from controlled hexes.", false, Some("barbarian-weapon-practice")),
+            skill("barbarian-warband-hide", "Warband Hide", "Summoned units enter with +1 armor.", false, Some("barbarian-brutal-stamina")),
+            skill("barbarian-opening-rage", "Opening Rage", "Draw +1 opening hand card.", false, Some("barbarian-brutal-stamina")),
+            skill("barbarian-deep-cuts", "Deep Cuts", "Damaging spells deal +1 damage.", false, Some("barbarian-weapon-practice")),
+        ],
+        HeroType::Archer => vec![
+            skill("archer-long-watch", "Long Watch", "The root of Archer mastery.", true, None),
+            skill("archer-fleet-footing", "Fleet Footing", "Hero starts with +1 max AP.", false, Some("archer-long-watch")),
+            skill("archer-keen-shot", "Keen Shot", "Damaging spells deal +1 damage.", false, Some("archer-long-watch")),
+            skill("archer-scout-cache", "Scout Cache", "Draw +1 opening hand card.", false, Some("archer-fleet-footing")),
+            skill("archer-trail-rations", "Trail Rations", "Gain +1 mana from controlled hexes.", false, Some("archer-keen-shot")),
+            skill("archer-screening-line", "Screening Line", "First summoned unit each match enters with +1 armor.", false, Some("archer-fleet-footing")),
+            skill("archer-light-armor", "Light Armor", "Hero starts with +1 max HP.", false, Some("archer-keen-shot")),
+        ],
+        HeroType::Builder => vec![
+            skill("builder-foundation-plan", "Foundation Plan", "The root of Builder mastery.", true, None),
+            skill("builder-reinforced-frame", "Reinforced Frame", "Hero starts with +2 max HP.", false, Some("builder-foundation-plan")),
+            skill("builder-supply-cache", "Supply Cache", "Gain +1 mana from controlled hexes.", false, Some("builder-foundation-plan")),
+            skill("builder-work-crew-drill", "Work Crew Drill", "Summoned units enter with +1 armor.", false, Some("builder-reinforced-frame")),
+            skill("builder-first-wall", "First Wall", "First summoned unit each match enters with +1 armor.", false, Some("builder-reinforced-frame")),
+            skill("builder-field-manual", "Field Manual", "Draw +1 opening hand card.", false, Some("builder-supply-cache")),
+            skill("builder-tool-ready", "Tool Ready", "Hero starts with +1 max AP.", false, Some("builder-supply-cache")),
         ],
     }
 }
@@ -961,7 +1061,7 @@ fn skill(
 struct AwardParticipant {
     user_id: i64,
     side: Side,
-    wizard_type: WizardType,
+    hero_type: HeroType,
 }
 
 fn shared_participants(
@@ -985,14 +1085,14 @@ fn shared_participants(
         let Some(side) = side_from_db(&side) else {
             continue;
         };
-        let wizard_type = match side {
-            Side::Player => match_state.player.wizard.wizard_type,
-            Side::Opponent => match_state.opponent.wizard.wizard_type,
+        let hero_type = match side {
+            Side::Player => match_state.player.hero.hero_type,
+            Side::Opponent => match_state.opponent.hero.hero_type,
         };
         participants.push(AwardParticipant {
             user_id,
             side,
-            wizard_type,
+            hero_type,
         });
     }
     Ok(participants)
@@ -1006,23 +1106,29 @@ fn side_from_db(value: &str) -> Option<Side> {
     }
 }
 
-fn wizard_types() -> Vec<WizardType> {
+fn hero_types() -> Vec<HeroType> {
     vec![
-        WizardType::Runekeeper,
-        WizardType::Pyromancer,
-        WizardType::Chronomancer,
-        WizardType::Warden,
-        WizardType::Battlemage,
+        HeroType::Runekeeper,
+        HeroType::Pyromancer,
+        HeroType::Chronomancer,
+        HeroType::Warden,
+        HeroType::Battlemage,
+        HeroType::Barbarian,
+        HeroType::Archer,
+        HeroType::Builder,
     ]
 }
 
-fn wizard_type_to_db(wizard_type: WizardType) -> &'static str {
-    match wizard_type {
-        WizardType::Runekeeper => "runekeeper",
-        WizardType::Pyromancer => "pyromancer",
-        WizardType::Chronomancer => "chronomancer",
-        WizardType::Warden => "warden",
-        WizardType::Battlemage => "battlemage",
+fn hero_type_to_db(hero_type: HeroType) -> &'static str {
+    match hero_type {
+        HeroType::Runekeeper => "runekeeper",
+        HeroType::Pyromancer => "pyromancer",
+        HeroType::Chronomancer => "chronomancer",
+        HeroType::Warden => "warden",
+        HeroType::Battlemage => "battlemage",
+        HeroType::Barbarian => "barbarian",
+        HeroType::Archer => "archer",
+        HeroType::Builder => "builder",
     }
 }
 
@@ -1047,6 +1153,44 @@ fn add_column_if_missing(
     Ok(())
 }
 
+fn table_exists(connection: &Connection, table: &str) -> Result<bool, ProgressionError> {
+    let exists: Option<i64> = connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![table],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(exists.is_some())
+}
+
+fn column_exists(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, ProgressionError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for existing in columns {
+        if existing? == column {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn drop_column_if_exists(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<(), ProgressionError> {
+    if column_exists(connection, table, column)? {
+        let _ = connection.execute(&format!("ALTER TABLE {table} DROP COLUMN {column}"), []);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -1067,6 +1211,72 @@ mod tests {
     }
 
     #[test]
+    fn new_hero_skill_trees_have_seven_nodes_and_apply_effects() {
+        let trees = skill_trees();
+        for hero_type in [HeroType::Barbarian, HeroType::Archer, HeroType::Builder] {
+            let tree = trees
+                .iter()
+                .find(|candidate| candidate.hero_type == hero_type)
+                .expect("new hero tree should exist");
+            assert_eq!(tree.nodes.len(), 7);
+        }
+
+        let barbarian_effects = effects_for(
+            &[],
+            &[
+                "barbarian-brutal-stamina".to_string(),
+                "barbarian-weapon-practice".to_string(),
+                "barbarian-battle-hunger".to_string(),
+                "barbarian-warband-hide".to_string(),
+                "barbarian-opening-rage".to_string(),
+                "barbarian-deep-cuts".to_string(),
+            ],
+        );
+        assert_eq!(barbarian_effects.max_hp_delta, 2);
+        assert_eq!(barbarian_effects.attack_delta, 1);
+        assert_eq!(barbarian_effects.mana_delta, 1);
+        assert_eq!(barbarian_effects.summoned_unit_armor_delta, 1);
+        assert_eq!(barbarian_effects.opening_hand_delta, 1);
+        assert_eq!(barbarian_effects.spell_damage_delta, 1);
+
+        let archer_effects = effects_for(
+            &[],
+            &[
+                "archer-fleet-footing".to_string(),
+                "archer-keen-shot".to_string(),
+                "archer-scout-cache".to_string(),
+                "archer-trail-rations".to_string(),
+                "archer-screening-line".to_string(),
+                "archer-light-armor".to_string(),
+            ],
+        );
+        assert_eq!(archer_effects.max_ap_delta, 1);
+        assert_eq!(archer_effects.spell_damage_delta, 1);
+        assert_eq!(archer_effects.opening_hand_delta, 1);
+        assert_eq!(archer_effects.mana_delta, 1);
+        assert_eq!(archer_effects.first_summoned_unit_armor_delta, 1);
+        assert_eq!(archer_effects.max_hp_delta, 1);
+
+        let builder_effects = effects_for(
+            &[],
+            &[
+                "builder-reinforced-frame".to_string(),
+                "builder-supply-cache".to_string(),
+                "builder-work-crew-drill".to_string(),
+                "builder-first-wall".to_string(),
+                "builder-field-manual".to_string(),
+                "builder-tool-ready".to_string(),
+            ],
+        );
+        assert_eq!(builder_effects.max_hp_delta, 2);
+        assert_eq!(builder_effects.mana_delta, 1);
+        assert_eq!(builder_effects.summoned_unit_armor_delta, 1);
+        assert_eq!(builder_effects.first_summoned_unit_armor_delta, 1);
+        assert_eq!(builder_effects.opening_hand_delta, 1);
+        assert_eq!(builder_effects.max_ap_delta, 1);
+    }
+
+    #[test]
     fn match_loadout_rejects_locked_and_duplicate_runes() {
         let mut connection = Connection::open_in_memory().expect("in-memory database should open");
         identity::migrate(&connection).expect("identity schema should migrate");
@@ -1076,7 +1286,7 @@ mod tests {
         let mut progression = ProgressionModule::new(&mut connection);
         let locked = progression.match_loadout(
             Some(1),
-            WizardType::Runekeeper,
+            HeroType::Runekeeper,
             Some(vec!["vitality".to_string()]),
         );
         assert!(matches!(locked, Err(ProgressionError::LockedRune(_))));
@@ -1085,33 +1295,33 @@ mod tests {
         let mut progression = ProgressionModule::new(&mut connection);
         let duplicate = progression.match_loadout(
             Some(2),
-            WizardType::Runekeeper,
+            HeroType::Runekeeper,
             Some(vec!["vitality".to_string(), "vitality".to_string()]),
         );
         assert!(matches!(duplicate, Err(ProgressionError::DuplicateRune(_))));
     }
 
     #[test]
-    fn skill_unlock_spends_wizard_mastery_points_and_respec_restores_them() {
+    fn skill_unlock_spends_hero_mastery_points_and_respec_restores_them() {
         let mut connection = Connection::open_in_memory().expect("in-memory database should open");
         identity::migrate(&connection).expect("identity schema should migrate");
         migrate(&connection).expect("progression schema should migrate");
         insert_user(&connection, 1, 0);
         connection
             .execute(
-                "INSERT INTO wizard_mastery (user_id, wizard_type, xp) VALUES (1, 'pyromancer', 300)",
+                "INSERT INTO hero_mastery (user_id, hero_type, xp) VALUES (1, 'pyromancer', 300)",
                 [],
             )
-            .expect("wizard mastery should insert");
+            .expect("hero mastery should insert");
 
         let mut progression = ProgressionModule::new(&mut connection);
         let response = progression
-            .unlock_skill(1, WizardType::Pyromancer, "pyromancer-heated-focus")
+            .unlock_skill(1, HeroType::Pyromancer, "pyromancer-heated-focus")
             .expect("skill should unlock");
         let pyromancer = response
-            .wizards
+            .heroes
             .iter()
-            .find(|wizard| wizard.wizard_type == WizardType::Pyromancer)
+            .find(|hero| hero.hero_type == HeroType::Pyromancer)
             .expect("pyromancer progression should be present");
         assert_eq!(pyromancer.available_skill_points, 1);
         assert!(
@@ -1122,19 +1332,19 @@ mod tests {
         );
 
         let response = progression
-            .respec_wizard(1, WizardType::Pyromancer)
+            .respec_hero(1, HeroType::Pyromancer)
             .expect("respec should succeed");
         let pyromancer = response
-            .wizards
+            .heroes
             .iter()
-            .find(|wizard| wizard.wizard_type == WizardType::Pyromancer)
+            .find(|hero| hero.hero_type == HeroType::Pyromancer)
             .expect("pyromancer progression should be present");
         assert_eq!(pyromancer.available_skill_points, 2);
         assert!(pyromancer.unlocked_skill_ids.is_empty());
     }
 
     #[test]
-    fn completed_match_awards_account_and_wizard_xp_once() {
+    fn completed_match_awards_account_and_hero_xp_once() {
         let path = test_db_path("progression-award");
         let mut store = SqliteMatchStore::new(&path).expect("store should open");
         store
@@ -1148,7 +1358,7 @@ mod tests {
             )
             .expect("user should insert");
         let mut stored = store
-            .create_match_for_user(WizardType::Pyromancer, Some(1))
+            .create_match_for_user(HeroType::Pyromancer, Some(1))
             .expect("match should create");
         let frames = stored.state.forfeit_recording(Side::Player, 0);
         store
@@ -1169,21 +1379,21 @@ mod tests {
                 row.get(0)
             })
             .expect("total xp should load");
-        let wizard_xp: i64 = store
+        let hero_xp: i64 = store
             .connection_mut()
             .query_row(
-                "SELECT xp FROM wizard_mastery WHERE user_id = 1 AND wizard_type = 'pyromancer'",
+                "SELECT xp FROM hero_mastery WHERE user_id = 1 AND hero_type = 'pyromancer'",
                 [],
                 |row| row.get(0),
             )
-            .expect("wizard xp should load");
+            .expect("hero xp should load");
         let award_count: i64 = store
             .connection_mut()
             .query_row("SELECT COUNT(*) FROM match_xp_awards", [], |row| row.get(0))
             .expect("award count should load");
 
         assert_eq!(total_xp, 150);
-        assert_eq!(wizard_xp, 150);
+        assert_eq!(hero_xp, 150);
         assert_eq!(award_count, 1);
 
         let _ = std::fs::remove_file(path);

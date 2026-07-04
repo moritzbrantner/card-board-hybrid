@@ -11,7 +11,7 @@ import type {
 } from "./types";
 import type { AnimatedPieceSnapshot, BoardAnimationCue, PieceAnimation } from "./boardAnimations";
 import type { BoardPiece } from "./appTypes";
-import { viewerSideLabel, wizardTypeLabel } from "./labels";
+import { viewerSideLabel, heroTypeLabel } from "./labels";
 
 export function groupTilesByColumn(tiles: HexTile[]) {
   const columns = new Map<number, HexTile[]>();
@@ -41,10 +41,10 @@ export function piecesForAnimation(pieces: BoardPiece[], animation: BoardAnimati
 }
 
 export function animatedSnapshotToBoardPiece(piece: AnimatedPieceSnapshot): BoardPiece {
-  return piece.pieceType === "wizard"
+  return piece.pieceType === "hero"
     ? {
         ...piece,
-        name: wizardTypeLabel(piece.wizardType),
+        name: heroTypeLabel(piece.heroType),
       }
     : piece;
 }
@@ -88,18 +88,18 @@ export function pieceAnimationFeedback(animation?: PieceAnimation) {
 }
 
 export function pieceAt(match: MatchState, coord: HexCoord): BoardPiece | null {
-  if (sameCoord(match.player.wizard.position, coord)) {
+  if (sameCoord(match.player.hero.position, coord)) {
     return {
-      ...match.player.wizard,
-      pieceType: "wizard",
-      name: wizardTypeLabel(match.player.wizard.wizardType),
+      ...match.player.hero,
+      pieceType: "hero",
+      name: heroTypeLabel(match.player.hero.heroType),
     };
   }
-  if (sameCoord(match.opponent.wizard.position, coord)) {
+  if (sameCoord(match.opponent.hero.position, coord)) {
     return {
-      ...match.opponent.wizard,
-      pieceType: "wizard",
-      name: wizardTypeLabel(match.opponent.wizard.wizardType),
+      ...match.opponent.hero,
+      pieceType: "hero",
+      name: heroTypeLabel(match.opponent.hero.heroType),
     };
   }
 
@@ -133,7 +133,7 @@ export function tileAt(match: MatchState, coord: HexCoord) {
 }
 
 export function pieceStatLabel(piece: BoardPiece) {
-  if (piece.pieceType === "wizard") {
+  if (piece.pieceType === "hero") {
     return `${piece.attack}/${piece.hp} AP ${piece.apRemaining}`;
   }
 
@@ -141,18 +141,18 @@ export function pieceStatLabel(piece: BoardPiece) {
 }
 
 export function pieceById(match: MatchState, pieceId: string): BoardPiece | null {
-  if (match.player.wizard.id === pieceId) {
+  if (match.player.hero.id === pieceId) {
     return {
-      ...match.player.wizard,
-      pieceType: "wizard",
-      name: wizardTypeLabel(match.player.wizard.wizardType),
+      ...match.player.hero,
+      pieceType: "hero",
+      name: heroTypeLabel(match.player.hero.heroType),
     };
   }
-  if (match.opponent.wizard.id === pieceId) {
+  if (match.opponent.hero.id === pieceId) {
     return {
-      ...match.opponent.wizard,
-      pieceType: "wizard",
-      name: wizardTypeLabel(match.opponent.wizard.wizardType),
+      ...match.opponent.hero,
+      pieceType: "hero",
+      name: heroTypeLabel(match.opponent.hero.heroType),
     };
   }
 
@@ -194,14 +194,14 @@ export function cardFanStyle(index: number, total: number): CardFanStyle {
 export function piecesInMatch(match: MatchState): BoardPiece[] {
   return [
     {
-      ...match.player.wizard,
-      pieceType: "wizard",
-      name: wizardTypeLabel(match.player.wizard.wizardType),
+      ...match.player.hero,
+      pieceType: "hero",
+      name: heroTypeLabel(match.player.hero.heroType),
     },
     {
-      ...match.opponent.wizard,
-      pieceType: "wizard",
-      name: wizardTypeLabel(match.opponent.wizard.wizardType),
+      ...match.opponent.hero,
+      pieceType: "hero",
+      name: heroTypeLabel(match.opponent.hero.heroType),
     },
     ...match.board.units.map((unit) => ({ ...unit, pieceType: "unit" as const })),
   ];
@@ -231,7 +231,7 @@ export function isPlayableCard(match: MatchState, viewerSide: Side, card: Card) 
       match.prioritySide === viewerSide &&
       card.kind.type === "spell" &&
       participant.mana >= card.cost &&
-      participant.wizard.apRemaining > 0 &&
+      participant.hero.apRemaining > 0 &&
       card.kind.priority > pending.priority
     );
   }
@@ -240,7 +240,7 @@ export function isPlayableCard(match: MatchState, viewerSide: Side, card: Card) 
     match.phase !== "matchOver" &&
     match.activeSide === viewerSide &&
     participant.mana >= card.cost &&
-    participant.wizard.apRemaining > 0
+    participant.hero.apRemaining > 0
   );
 }
 
@@ -280,7 +280,7 @@ export function isLegalCardTarget(
   }
 
   if (card.kind.type === "unit") {
-    return !piece && distance(participant.wizard.position, coord) === 1;
+    return !piece && distance(participant.hero.position, coord) === 1;
   }
 
   if (card.kind.type === "item") {
@@ -288,11 +288,11 @@ export function isLegalCardTarget(
       !!piece &&
       piece.pieceType === "unit" &&
       piece.side === viewerSide &&
-      distance(participant.wizard.position, piece.position) <= card.kind.range
+      distance(participant.hero.position, piece.position) <= card.kind.range
     );
   }
 
-  if (!piece || distance(participant.wizard.position, piece.position) > card.kind.range) {
+  if (!piece || distance(participant.hero.position, piece.position) > card.kind.range) {
     return false;
   }
 
@@ -305,11 +305,11 @@ export function isLegalCardTarget(
     case "areaDamage":
       return piece.side === opponentSide;
     case "draw":
-      return piece.side === viewerSide && piece.pieceType === "wizard";
+      return piece.side === viewerSide && piece.pieceType === "hero";
     case "lineDamage":
       return (
         piece.side === opponentSide &&
-        lineDirection(participant.wizard.position, piece.position) !== null
+        lineDirection(participant.hero.position, piece.position) !== null
       );
   }
 }

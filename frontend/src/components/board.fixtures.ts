@@ -7,7 +7,7 @@ import type {
   MatchState,
   StackItem,
   Unit,
-  Wizard,
+  Hero,
 } from "../types";
 
 const emptyProgression: MatchProgressionLoadout = {
@@ -41,7 +41,7 @@ export const sparkJoltCard: Card = {
   name: "Spark Jolt",
   rarity: "basic",
   cost: 1,
-  text: "Priority 3. Range 2. Deal 1 damage to an enemy unit or wizard.",
+  text: "Priority 3. Range 2. Deal 1 damage to an enemy unit or hero.",
   kind: { type: "spell", range: 2, priority: 3, effect: { type: "damage", amount: 1 } },
 };
 
@@ -69,8 +69,8 @@ export const catalogCards: CatalogCard[] = [
 export function storyMatch(options: {
   hand?: Card[];
   units?: Unit[];
-  playerWizard?: HexCoord;
-  opponentWizard?: HexCoord;
+  playerHero?: HexCoord;
+  opponentHero?: HexCoord;
   actionStack?: StackItem[];
   prioritySide?: "player" | "opponent" | null;
 } = {}): MatchState {
@@ -85,7 +85,7 @@ export function storyMatch(options: {
       side: "player",
       mana: 8,
       maxMana: 8,
-      wizard: wizard("player-wizard", "player", options.playerWizard ?? { q: 0, r: 1 }),
+      hero: hero("player-hero", "player", options.playerHero ?? { q: 0, r: 1 }),
       progression: emptyProgression,
       hand,
       handCount: hand.length,
@@ -96,7 +96,7 @@ export function storyMatch(options: {
       side: "opponent",
       mana: 8,
       maxMana: 8,
-      wizard: wizard("opponent-wizard", "opponent", options.opponentWizard ?? { q: 1, r: 1 }),
+      hero: hero("opponent-hero", "opponent", options.opponentHero ?? { q: 1, r: 1 }),
       progression: emptyProgression,
       handCount: 3,
       deckCount: 25,
@@ -138,8 +138,8 @@ export const pendingAttackStack: StackItem = {
   priority: 0,
   action: {
     type: "attack",
-    attackerId: "opponent-wizard",
-    targetId: "player-wizard",
+    attackerId: "opponent-hero",
+    targetId: "player-hero",
   },
 };
 
@@ -153,11 +153,11 @@ function catalogCard(card: Card, copyCount: number, artPath: string): CatalogCar
   };
 }
 
-function wizard(id: string, side: "player" | "opponent", position: HexCoord): Wizard {
+function hero(id: string, side: "player" | "opponent", position: HexCoord): Hero {
   return {
     id,
     side,
-    wizardType: side === "player" ? "runekeeper" : "pyromancer",
+    heroType: side === "player" ? "runekeeper" : "pyromancer",
     hp: side === "player" ? 20 : 18,
     maxHp: side === "player" ? 20 : 18,
     attack: side === "player" ? 1 : 2,

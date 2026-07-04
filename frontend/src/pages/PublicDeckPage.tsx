@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { loadCatalog, loadPublicDeck } from "../api";
 import type { AccountProps, CatalogLoadState } from "../appTypes";
 import { AccountActions, ShellMessage } from "../components/common";
-import { wizardTypeLabel } from "../labels";
+import { heroTypeLabel } from "../labels";
 import type { DeckRules, PublicDeckRecipeResponse } from "../types";
 import { DeckVisualCardGrid } from "./decks/DeckVisualCardGrid";
 import { deckStats, deckVisualCards } from "./decks/deckDesignerModel";
@@ -81,7 +81,7 @@ export function PublicDeckPage({
   const { owner, deck } = deckLoadState.response;
   const rules = publicDeckRulesFallback(deck.legality.totalCards);
   const visualCards = deckVisualCards(catalogLoadState.cards, deck.cards, rules);
-  const stats = deckStats(deck.legality, rules, deck.wizardType, deck.runeIds, null);
+  const stats = deckStats(deck.legality, rules, deck.heroType, deck.runeIds, null);
 
   return (
     <main className="app-shell deck-shell">
@@ -109,7 +109,7 @@ export function PublicDeckPage({
           </div>
           <div className="deck-stat-grid">
             <DetailStat label="Status" value={stats.statusLabel} />
-            <DetailStat label="Wizard" value={wizardTypeLabel(deck.wizardType)} />
+            <DetailStat label="Hero" value={heroTypeLabel(deck.heroType)} />
             <DetailStat label="Cards" value={`${deck.legality.totalCards}`} />
             <DetailStat label="Runes" value={stats.runeNames.join(", ") || "None"} />
           </div>

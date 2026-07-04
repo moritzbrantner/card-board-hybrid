@@ -1,4 +1,4 @@
-import { WIZARD_OPTIONS } from "./wizards";
+import { HERO_OPTIONS } from "./heroes";
 import type {
   Card,
   CatalogCard,
@@ -8,7 +8,7 @@ import type {
   ReplayEvent,
   Side,
   StackItem,
-  WizardType,
+  HeroType,
 } from "./types";
 
 export function kindSummary(card: Card | CatalogCard) {
@@ -154,7 +154,7 @@ export function eventTitle(event: ReplayEvent) {
 export function eventDetail(event: ReplayEvent) {
   switch (event.type) {
     case "matchCreated":
-      return "The wizards enter the hex arena.";
+      return "The heroes enter the hex arena.";
     case "turnStarted":
       return `Round ${event.round} ${sideLabel(event.side).toLocaleLowerCase()} turn.`;
     case "turnEnded":
@@ -194,16 +194,16 @@ export function eventDetail(event: ReplayEvent) {
   }
 }
 
-export function wizardOptionByType(wizardType: WizardType) {
-  return WIZARD_OPTIONS.find((wizard) => wizard.id === wizardType) ?? WIZARD_OPTIONS[0];
+export function heroOptionByType(heroType: HeroType) {
+  return HERO_OPTIONS.find((hero) => hero.id === heroType) ?? HERO_OPTIONS[0];
 }
 
-export function isWizardType(value: string | null): value is WizardType {
-  return WIZARD_OPTIONS.some((wizard) => wizard.id === value);
+export function isHeroType(value: string | null): value is HeroType {
+  return HERO_OPTIONS.some((hero) => hero.id === value);
 }
 
-export function defaultRuneIdsForWizard(progression: ProgressionResponse, wizardType: WizardType) {
-  return progression.loadouts.find((loadout) => loadout.wizardType === wizardType)?.runeIds ?? [];
+export function defaultRuneIdsForHero(progression: ProgressionResponse, heroType: HeroType) {
+  return progression.loadouts.find((loadout) => loadout.heroType === heroType)?.runeIds ?? [];
 }
 
 export function parseRuneIds(value: string) {
@@ -246,12 +246,12 @@ export function parseDeckChoice(value: string | null): DeckChoice | null {
   }
 }
 
-export function wizardTypeLabel(wizardType: WizardType) {
-  return wizardOptionByType(wizardType).name;
+export function heroTypeLabel(heroType: HeroType) {
+  return heroOptionByType(heroType).name;
 }
 
-export function wizardTokenLabel(wizardType: WizardType) {
-  return wizardOptionByType(wizardType).token;
+export function heroTokenLabel(heroType: HeroType) {
+  return heroOptionByType(heroType).token;
 }
 
 export function avatarSymbolLabel(symbol: string) {

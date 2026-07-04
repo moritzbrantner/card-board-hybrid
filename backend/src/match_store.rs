@@ -14,15 +14,15 @@ use crate::deck_library::{self, DeckLibraryError, DeckRecipeSnapshot};
 use crate::identity;
 use crate::match_session::{
     Card, MatchActionRequest, MatchProgressionLoadout, MatchState, RecordedReplayFrame,
-    ReplayEvent, Side, WizardType,
+    ReplayEvent, Side, HeroType,
 };
 use crate::progression;
 
 pub const MATCH_DATABASE_PATH_ENV: &str = "RUNE_LANES_DB_PATH";
 
 type ReadySharedLoadouts = (
-    WizardType,
-    WizardType,
+    HeroType,
+    HeroType,
     DeckRecipeSnapshot,
     DeckRecipeSnapshot,
     MatchProgressionLoadout,
@@ -75,7 +75,7 @@ pub struct StoredSharedSeat {
     pub side: Side,
     pub seat_token: String,
     pub participant_user_id: Option<i64>,
-    pub wizard_type: Option<WizardType>,
+    pub hero_type: Option<HeroType>,
     pub deck_recipe_name: Option<String>,
     pub deck_recipe_snapshot: Option<DeckRecipeSnapshot>,
     pub progression_loadout: MatchProgressionLoadout,
@@ -217,7 +217,7 @@ impl SqliteMatchStore {
                 match_id TEXT NOT NULL,
                 side TEXT NOT NULL,
                 seat_token TEXT NOT NULL UNIQUE,
-                wizard_type TEXT,
+                hero_type TEXT,
                 joined_at INTEGER,
                 last_seen_at INTEGER,
                 disconnected_at INTEGER,
@@ -246,6 +246,8 @@ impl SqliteMatchStore {
         )?;
         add_column_if_missing(&connection, "matches", "owner_user_id", "INTEGER")?;
         add_column_if_missing(&connection, "shared_matches", "creator_user_id", "INTEGER")?;
+        let had_legacy_seat_hero = column_exists(&connection, "match_seats", "wizard_type")?;
+        add_column_if_missing(&connection, "match_seats", "hero_type", "TEXT")?;
         add_column_if_missing(&connection, "match_seats", "participant_user_id", "INTEGER")?;
         add_column_if_missing(&connection, "match_seats", "deck_recipe_name", "TEXT")?;
         add_column_if_missing(
@@ -260,6 +262,8 @@ impl SqliteMatchStore {
             "progression_loadout_json",
             "TEXT",
         )?;
+        discard_legacy_hero_matches(&connection, had_legacy_seat_hero)?;
+        drop_column_if_exists(&connection, "match_seats", "wizard_type")?;
 
         Ok(Self { connection })
     }
@@ -274,15 +278,15 @@ impl SqliteMatchStore {
     )]
     pub fn create_match_for_user(
         &mut self,
-        player_wizard_type: WizardType,
+        player_hero_type: HeroType,
         owner_user_id: Option<i64>,
     ) -> Result<StoredMatch, MatchStoreError> {
         let starter = deck_library::starter_deck_snapshot();
         let player_deck = deck_library::deck_from_snapshot(Side::Player, &starter)?;
         let opponent_deck = deck_library::deck_from_snapshot(Side::Opponent, &starter)?;
         self.create_match_for_user_with_decks(
-            player_wizard_type,
-            WizardType::Runekeeper,
+            player_hero_type,
+            HeroType::Runekeeper,
             player_deck,
             opponent_deck,
             MatchProgressionLoadout::default(),
@@ -297,8 +301,8 @@ impl SqliteMatchStore {
     )]
     pub fn create_match_for_user_with_decks(
         &mut self,
-        player_wizard_type: WizardType,
-        opponent_wizard_type: WizardType,
+        player_hero_type: HeroType,
+        opponent_hero_type: HeroType,
         player_deck: Vec<Card>,
         opponent_deck: Vec<Card>,
         player_progression: MatchProgressionLoadout,
@@ -308,8 +312,8 @@ impl SqliteMatchStore {
         for attempt in 0..8 {
             let id = readable_match_id(attempt);
             let state = MatchState::new_with_progression_loadouts(
-                player_wizard_type,
-                opponent_wizard_type,
+                player_hero_type,
+                opponent_hero_type,
                 player_deck.clone(),
                 opponent_deck.clone(),
                 player_progression.clone(),
@@ -346,8 +350,8 @@ impl SqliteMatchStore {
 
         let id = readable_match_id(99);
         let state = MatchState::new_with_progression_loadouts(
-            player_wizard_type,
-            opponent_wizard_type,
+            player_hero_type,
+            opponent_hero_type,
             player_deck,
             opponent_deck,
             player_progression,
@@ -530,7 +534,7 @@ impl SqliteMatchStore {
         &mut self,
         id: &str,
         seat_token: &str,
-        wizard_type: WizardType,
+        hero_type: HeroType,
         deck_recipe: DeckRecipeSnapshot,
         progression_loadout: MatchProgressionLoadout,
         participant_user_id: Option<i64>,
@@ -546,7 +550,7 @@ impl SqliteMatchStore {
         transaction.execute(
             "
             UPDATE match_seats
-            SET wizard_type = ?3,
+            SET hero_type = ?3,
                 deck_recipe_name = ?4,
                 deck_recipe_snapshot_json = ?5,
                 participant_user_id = COALESCE(participant_user_id, ?6),
@@ -559,7 +563,7 @@ impl SqliteMatchStore {
             params![
                 id,
                 seat_token,
-                wizard_type.to_db(),
+                hero_type.to_db(),
                 deck_recipe.name,
                 serde_json::to_string(&deck_recipe)?,
                 participant_user_id,
@@ -568,8 +572,8 @@ impl SqliteMatchStore {
         )?;
 
         if let Some((
-            player_wizard_type,
-            opponent_wizard_type,
+            player_hero_type,
+            opponent_hero_type,
             player_recipe,
             opponent_recipe,
             player_progression,
@@ -579,8 +583,8 @@ impl SqliteMatchStore {
             let player_deck = deck_library::deck_from_snapshot(Side::Player, &player_recipe)?;
             let opponent_deck = deck_library::deck_from_snapshot(Side::Opponent, &opponent_recipe)?;
             let state = MatchState::new_shared_with_progression_loadouts(
-                player_wizard_type,
-                opponent_wizard_type,
+                player_hero_type,
+                opponent_hero_type,
                 player_deck,
                 opponent_deck,
                 player_progression,
@@ -1025,7 +1029,7 @@ impl SqliteMatchStore {
                 side,
                 seat_token,
                 participant_user_id,
-                wizard_type,
+                hero_type,
                 deck_recipe_name,
                 deck_recipe_snapshot_json,
                 progression_loadout_json,
@@ -1038,7 +1042,7 @@ impl SqliteMatchStore {
         )?;
         let rows = statement.query_map(params![match_id], |row| {
             let side = row.get::<_, String>(0)?;
-            let wizard_type = row.get::<_, Option<String>>(3)?;
+            let hero_type = row.get::<_, Option<String>>(3)?;
             let snapshot_json = row.get::<_, Option<String>>(5)?;
             let progression_loadout_json = row.get::<_, Option<String>>(6)?;
             let deck_recipe_snapshot = snapshot_json
@@ -1068,7 +1072,7 @@ impl SqliteMatchStore {
                 side: side_from_db(&side).expect("stored side should be valid"),
                 seat_token: row.get(1)?,
                 participant_user_id: row.get(2)?,
-                wizard_type: wizard_type.as_deref().and_then(wizard_type_from_db),
+                hero_type: hero_type.as_deref().and_then(hero_type_from_db),
                 deck_recipe_name: row.get(4)?,
                 deck_recipe_snapshot,
                 progression_loadout,
@@ -1115,7 +1119,7 @@ impl Side {
     }
 }
 
-impl WizardType {
+impl HeroType {
     fn to_db(self) -> &'static str {
         match self {
             Self::Runekeeper => "runekeeper",
@@ -1123,6 +1127,9 @@ impl WizardType {
             Self::Chronomancer => "chronomancer",
             Self::Warden => "warden",
             Self::Battlemage => "battlemage",
+            Self::Barbarian => "barbarian",
+            Self::Archer => "archer",
+            Self::Builder => "builder",
         }
     }
 }
@@ -1135,13 +1142,16 @@ fn side_from_db(value: &str) -> Option<Side> {
     }
 }
 
-fn wizard_type_from_db(value: &str) -> Option<WizardType> {
+fn hero_type_from_db(value: &str) -> Option<HeroType> {
     match value {
-        "runekeeper" => Some(WizardType::Runekeeper),
-        "pyromancer" => Some(WizardType::Pyromancer),
-        "chronomancer" => Some(WizardType::Chronomancer),
-        "warden" => Some(WizardType::Warden),
-        "battlemage" => Some(WizardType::Battlemage),
+        "runekeeper" => Some(HeroType::Runekeeper),
+        "pyromancer" => Some(HeroType::Pyromancer),
+        "chronomancer" => Some(HeroType::Chronomancer),
+        "warden" => Some(HeroType::Warden),
+        "battlemage" => Some(HeroType::Battlemage),
+        "barbarian" => Some(HeroType::Barbarian),
+        "archer" => Some(HeroType::Archer),
+        "builder" => Some(HeroType::Builder),
         _ => None,
     }
 }
@@ -1151,7 +1161,7 @@ fn insert_shared_seat(
     match_id: &str,
     side: Side,
     seat_token: &str,
-    wizard_type: Option<WizardType>,
+    hero_type: Option<HeroType>,
     joined: bool,
 ) -> Result<(), MatchStoreError> {
     let joined_expr = if joined { "unixepoch()" } else { "NULL" };
@@ -1162,7 +1172,7 @@ fn insert_shared_seat(
                 match_id,
                 side,
                 seat_token,
-                wizard_type,
+                hero_type,
                 joined_at,
                 last_seen_at
             )
@@ -1173,7 +1183,7 @@ fn insert_shared_seat(
             match_id,
             side.to_db(),
             seat_token,
-            wizard_type.map(WizardType::to_db)
+            hero_type.map(HeroType::to_db)
         ],
     )?;
     Ok(())
@@ -1185,7 +1195,7 @@ fn ready_shared_loadouts(
 ) -> Result<Option<ReadySharedLoadouts>, MatchStoreError> {
     let mut statement = transaction.prepare(
         "
-        SELECT side, wizard_type, deck_recipe_snapshot_json, progression_loadout_json, joined_at
+        SELECT side, hero_type, deck_recipe_snapshot_json, progression_loadout_json, joined_at
         FROM match_seats
         WHERE match_id = ?1
         ",
@@ -1200,18 +1210,18 @@ fn ready_shared_loadouts(
         ))
     })?;
 
-    let mut player_wizard_type = None;
-    let mut opponent_wizard_type = None;
+    let mut player_hero_type = None;
+    let mut opponent_hero_type = None;
     let mut player_deck = None;
     let mut opponent_deck = None;
     let mut player_progression = None;
     let mut opponent_progression = None;
     for row in rows {
-        let (side, wizard_type, deck_snapshot_json, progression_loadout_json, joined_at) = row?;
+        let (side, hero_type, deck_snapshot_json, progression_loadout_json, joined_at) = row?;
         if joined_at.is_none() {
             continue;
         }
-        let Some(wizard_type) = wizard_type.as_deref().and_then(wizard_type_from_db) else {
+        let Some(hero_type) = hero_type.as_deref().and_then(hero_type_from_db) else {
             continue;
         };
         let Some(deck_snapshot_json) = deck_snapshot_json else {
@@ -1225,12 +1235,12 @@ fn ready_shared_loadouts(
             .unwrap_or_default();
         match side_from_db(&side) {
             Some(Side::Player) => {
-                player_wizard_type = Some(wizard_type);
+                player_hero_type = Some(hero_type);
                 player_deck = Some(deck_snapshot);
                 player_progression = Some(progression_loadout);
             }
             Some(Side::Opponent) => {
-                opponent_wizard_type = Some(wizard_type);
+                opponent_hero_type = Some(hero_type);
                 opponent_deck = Some(deck_snapshot);
                 opponent_progression = Some(progression_loadout);
             }
@@ -1240,23 +1250,23 @@ fn ready_shared_loadouts(
 
     Ok(
         match (
-            player_wizard_type,
-            opponent_wizard_type,
+            player_hero_type,
+            opponent_hero_type,
             player_deck,
             opponent_deck,
             player_progression,
             opponent_progression,
         ) {
             (
-                Some(player_wizard_type),
-                Some(opponent_wizard_type),
+                Some(player_hero_type),
+                Some(opponent_hero_type),
                 Some(player_deck),
                 Some(opponent_deck),
                 Some(player_progression),
                 Some(opponent_progression),
             ) => Some((
-                player_wizard_type,
-                opponent_wizard_type,
+                player_hero_type,
+                opponent_hero_type,
                 player_deck,
                 opponent_deck,
                 player_progression,
@@ -1285,6 +1295,58 @@ fn add_column_if_missing(
         &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
         [],
     )?;
+    Ok(())
+}
+
+fn column_exists(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, MatchStoreError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for existing in columns {
+        if existing? == column {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn drop_column_if_exists(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<(), MatchStoreError> {
+    if column_exists(connection, table, column)? {
+        let _ = connection.execute(&format!("ALTER TABLE {table} DROP COLUMN {column}"), []);
+    }
+    Ok(())
+}
+
+fn discard_legacy_hero_matches(
+    connection: &Connection,
+    had_legacy_seat_hero: bool,
+) -> Result<(), MatchStoreError> {
+    let has_legacy_snapshots = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM matches WHERE snapshot_json LIKE '%\"wizard\"%' OR snapshot_json LIKE '%wizardType%' LIMIT 1)",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? == 1;
+
+    if had_legacy_seat_hero || has_legacy_snapshots {
+        connection.execute_batch(
+            "
+            DELETE FROM match_replay_frames;
+            DELETE FROM match_actions;
+            DELETE FROM match_seats;
+            DELETE FROM shared_matches;
+            DELETE FROM matches;
+            ",
+        )?;
+    }
+
     Ok(())
 }
 
@@ -1428,7 +1490,7 @@ mod tests {
         let created = {
             let mut store = SqliteMatchStore::new(&path).expect("store should open");
             store
-                .create_match_for_user(WizardType::default(), None)
+                .create_match_for_user(HeroType::default(), None)
                 .expect("match should be created")
         };
 
@@ -1512,7 +1574,7 @@ mod tests {
             .join_shared_match(
                 &created.match_id,
                 &created.player_token,
-                WizardType::Chronomancer,
+                HeroType::Chronomancer,
                 deck_library::starter_deck_snapshot(),
                 MatchProgressionLoadout::default(),
                 Some(1),
@@ -1522,7 +1584,7 @@ mod tests {
             .join_shared_match(
                 &created.match_id,
                 &created.opponent_token,
-                WizardType::Pyromancer,
+                HeroType::Pyromancer,
                 deck_library::starter_deck_snapshot(),
                 MatchProgressionLoadout::default(),
                 Some(2),

@@ -214,7 +214,7 @@ impl Serialize for PublicPlayerState<'_> {
         state.serialize_field("side", &self.player.side)?;
         state.serialize_field("mana", &self.player.mana)?;
         state.serialize_field("maxMana", &self.player.max_mana)?;
-        state.serialize_field("wizard", &self.player.wizard)?;
+        state.serialize_field("hero", &self.player.hero)?;
         state.serialize_field("progression", &self.player.progression)?;
         if self.expose_hand {
             state.serialize_field("hand", &self.player.hand)?;
@@ -246,7 +246,7 @@ pub struct PlayerState {
     pub side: Side,
     pub mana: u8,
     pub max_mana: u8,
-    pub wizard: Wizard,
+    pub hero: Hero,
     #[serde(default)]
     pub progression: MatchProgressionLoadout,
     pub hand: Vec<Card>,
@@ -294,11 +294,11 @@ pub struct MatchProgressionEffects {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Wizard {
+pub struct Hero {
     pub id: String,
     pub side: Side,
     #[serde(default)]
-    pub wizard_type: WizardType,
+    pub hero_type: HeroType,
     pub hp: i32,
     pub max_hp: i32,
     pub attack: i32,
@@ -310,47 +310,65 @@ pub struct Wizard {
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum WizardType {
+pub enum HeroType {
     #[default]
     Runekeeper,
     Pyromancer,
     Chronomancer,
     Warden,
     Battlemage,
+    Barbarian,
+    Archer,
+    Builder,
 }
 
-struct WizardProfile {
+struct HeroProfile {
     max_hp: i32,
     attack: i32,
     max_ap: u8,
 }
 
-impl WizardType {
-    fn profile(self) -> WizardProfile {
+impl HeroType {
+    fn profile(self) -> HeroProfile {
         match self {
-            Self::Runekeeper => WizardProfile {
+            Self::Runekeeper => HeroProfile {
                 max_hp: 20,
                 attack: 1,
                 max_ap: 3,
             },
-            Self::Pyromancer => WizardProfile {
+            Self::Pyromancer => HeroProfile {
                 max_hp: 18,
                 attack: 2,
                 max_ap: 3,
             },
-            Self::Chronomancer => WizardProfile {
+            Self::Chronomancer => HeroProfile {
                 max_hp: 16,
                 attack: 1,
                 max_ap: 4,
             },
-            Self::Warden => WizardProfile {
+            Self::Warden => HeroProfile {
                 max_hp: 24,
                 attack: 1,
                 max_ap: 2,
             },
-            Self::Battlemage => WizardProfile {
+            Self::Battlemage => HeroProfile {
                 max_hp: 20,
                 attack: 2,
+                max_ap: 2,
+            },
+            Self::Barbarian => HeroProfile {
+                max_hp: 22,
+                attack: 3,
+                max_ap: 2,
+            },
+            Self::Archer => HeroProfile {
+                max_hp: 16,
+                attack: 2,
+                max_ap: 4,
+            },
+            Self::Builder => HeroProfile {
+                max_hp: 24,
+                attack: 1,
                 max_ap: 2,
             },
         }
@@ -637,16 +655,16 @@ impl Error for MatchError {}
 impl MatchState {
     #[allow(dead_code, reason = "kept as the default rules-engine constructor")]
     pub fn new() -> Self {
-        Self::new_with_player_wizard_type(WizardType::default())
+        Self::new_with_player_hero_type(HeroType::default())
     }
 
-    pub fn new_with_player_wizard_type(player_wizard_type: WizardType) -> Self {
+    pub fn new_with_player_hero_type(player_hero_type: HeroType) -> Self {
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos() as u64)
             .unwrap_or(1);
 
-        Self::new_with_seed_and_player_wizard_type(seed, player_wizard_type)
+        Self::new_with_seed_and_player_hero_type(seed, player_hero_type)
     }
 
     #[allow(
@@ -654,14 +672,14 @@ impl MatchState {
         reason = "kept as a progression-free constructor for tests and callers"
     )]
     pub fn new_with_loadouts(
-        player_wizard_type: WizardType,
-        opponent_wizard_type: WizardType,
+        player_hero_type: HeroType,
+        opponent_hero_type: HeroType,
         player_deck: Vec<Card>,
         opponent_deck: Vec<Card>,
     ) -> Self {
         Self::new_with_progression_loadouts(
-            player_wizard_type,
-            opponent_wizard_type,
+            player_hero_type,
+            opponent_hero_type,
             player_deck,
             opponent_deck,
             MatchProgressionLoadout::default(),
@@ -670,8 +688,8 @@ impl MatchState {
     }
 
     pub fn new_with_progression_loadouts(
-        player_wizard_type: WizardType,
-        opponent_wizard_type: WizardType,
+        player_hero_type: HeroType,
+        opponent_hero_type: HeroType,
         player_deck: Vec<Card>,
         opponent_deck: Vec<Card>,
         player_progression: MatchProgressionLoadout,
@@ -682,10 +700,10 @@ impl MatchState {
             .map(|duration| duration.as_nanos() as u64)
             .unwrap_or(1);
 
-        Self::new_with_seed_wizard_types_mode_and_decks(
+        Self::new_with_seed_hero_types_mode_and_decks(
             seed,
-            player_wizard_type,
-            opponent_wizard_type,
+            player_hero_type,
+            opponent_hero_type,
             MatchMode::Solo,
             player_deck,
             opponent_deck,
@@ -698,19 +716,19 @@ impl MatchState {
         dead_code,
         reason = "kept as the default shared rules-engine constructor"
     )]
-    pub fn new_shared_with_wizard_types(
-        player_wizard_type: WizardType,
-        opponent_wizard_type: WizardType,
+    pub fn new_shared_with_hero_types(
+        player_hero_type: HeroType,
+        opponent_hero_type: HeroType,
     ) -> Self {
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos() as u64)
             .unwrap_or(1);
 
-        Self::new_with_seed_wizard_types_and_mode(
+        Self::new_with_seed_hero_types_and_mode(
             seed,
-            player_wizard_type,
-            opponent_wizard_type,
+            player_hero_type,
+            opponent_hero_type,
             MatchMode::Shared,
         )
     }
@@ -720,14 +738,14 @@ impl MatchState {
         reason = "kept as a progression-free constructor for tests and callers"
     )]
     pub fn new_shared_with_loadouts(
-        player_wizard_type: WizardType,
-        opponent_wizard_type: WizardType,
+        player_hero_type: HeroType,
+        opponent_hero_type: HeroType,
         player_deck: Vec<Card>,
         opponent_deck: Vec<Card>,
     ) -> Self {
         Self::new_shared_with_progression_loadouts(
-            player_wizard_type,
-            opponent_wizard_type,
+            player_hero_type,
+            opponent_hero_type,
             player_deck,
             opponent_deck,
             MatchProgressionLoadout::default(),
@@ -736,8 +754,8 @@ impl MatchState {
     }
 
     pub fn new_shared_with_progression_loadouts(
-        player_wizard_type: WizardType,
-        opponent_wizard_type: WizardType,
+        player_hero_type: HeroType,
+        opponent_hero_type: HeroType,
         player_deck: Vec<Card>,
         opponent_deck: Vec<Card>,
         player_progression: MatchProgressionLoadout,
@@ -748,10 +766,10 @@ impl MatchState {
             .map(|duration| duration.as_nanos() as u64)
             .unwrap_or(1);
 
-        Self::new_with_seed_wizard_types_mode_and_decks(
+        Self::new_with_seed_hero_types_mode_and_decks(
             seed,
-            player_wizard_type,
-            opponent_wizard_type,
+            player_hero_type,
+            opponent_hero_type,
             MatchMode::Shared,
             player_deck,
             opponent_deck,
@@ -799,22 +817,22 @@ impl MatchState {
         reason = "kept as the deterministic rules-engine test constructor"
     )]
     fn new_with_seed(seed: u64) -> Self {
-        Self::new_with_seed_and_player_wizard_type(seed, WizardType::default())
+        Self::new_with_seed_and_player_hero_type(seed, HeroType::default())
     }
 
-    fn new_with_seed_and_player_wizard_type(seed: u64, player_wizard_type: WizardType) -> Self {
-        Self::new_with_seed_wizard_types_and_mode(
+    fn new_with_seed_and_player_hero_type(seed: u64, player_hero_type: HeroType) -> Self {
+        Self::new_with_seed_hero_types_and_mode(
             seed,
-            player_wizard_type,
-            WizardType::Runekeeper,
+            player_hero_type,
+            HeroType::Runekeeper,
             MatchMode::Solo,
         )
     }
 
-    fn new_with_seed_wizard_types_and_mode(
+    fn new_with_seed_hero_types_and_mode(
         seed: u64,
-        player_wizard_type: WizardType,
-        opponent_wizard_type: WizardType,
+        player_hero_type: HeroType,
+        opponent_hero_type: HeroType,
         mode: MatchMode,
     ) -> Self {
         let player_deck = crate::deck_library::deck_from_snapshot(
@@ -827,10 +845,10 @@ impl MatchState {
             &crate::deck_library::starter_deck_snapshot(),
         )
         .expect("starter opponent deck should be valid");
-        Self::new_with_seed_wizard_types_mode_and_decks(
+        Self::new_with_seed_hero_types_mode_and_decks(
             seed,
-            player_wizard_type,
-            opponent_wizard_type,
+            player_hero_type,
+            opponent_hero_type,
             mode,
             player_deck,
             opponent_deck,
@@ -843,10 +861,10 @@ impl MatchState {
         clippy::too_many_arguments,
         reason = "test and store constructors pass mirrored player/opponent setup explicitly"
     )]
-    fn new_with_seed_wizard_types_mode_and_decks(
+    fn new_with_seed_hero_types_mode_and_decks(
         seed: u64,
-        player_wizard_type: WizardType,
-        opponent_wizard_type: WizardType,
+        player_hero_type: HeroType,
+        opponent_hero_type: HeroType,
         mode: MatchMode,
         player_deck: Vec<Card>,
         opponent_deck: Vec<Card>,
@@ -861,21 +879,21 @@ impl MatchState {
             player: PlayerState::new(
                 Side::Player,
                 seed ^ 0xA11C_E551_1234_5678,
-                player_wizard_type,
+                player_hero_type,
                 player_deck,
                 player_progression,
             ),
             opponent: PlayerState::new(
                 Side::Opponent,
                 seed ^ 0x0B0E_1234_9876_5432,
-                opponent_wizard_type,
+                opponent_hero_type,
                 opponent_deck,
                 opponent_progression,
             ),
             board: HexBoard::new(BOARD_RADIUS),
             action_stack: Vec::new(),
             priority_side: None,
-            log: vec!["The wizards enter the hex arena.".to_string()],
+            log: vec!["The heroes enter the hex arena.".to_string()],
             winner: None,
             next_stack_item_id: 1,
             next_unit_id: 1,
@@ -1140,7 +1158,7 @@ impl MatchState {
             if player.mana < card.cost {
                 return Err(MatchError::NotEnoughMana);
             }
-            if player.wizard.ap_remaining == 0 {
+            if player.hero.ap_remaining == 0 {
                 return Err(MatchError::NoActionPoints);
             }
         }
@@ -1168,11 +1186,11 @@ impl MatchState {
 
         match &card.kind {
             CardKind::Unit { .. } => {
-                let wizard_position = self.player_ref(side).wizard.position;
+                let hero_position = self.player_ref(side).hero.position;
                 let planned_unit_play = card_interactions::plan_unit_play(
                     &card,
                     target,
-                    wizard_position,
+                    hero_position,
                     &self.board,
                     |coord| self.is_occupied(coord),
                 )?;
@@ -1218,7 +1236,7 @@ impl MatchState {
                     .find(|unit| unit.id == piece_id)
                     .cloned()
                     .ok_or(MatchError::PieceNotFound)?;
-                let caster_position = self.player_ref(side).wizard.position;
+                let caster_position = self.player_ref(side).hero.position;
                 let planned_item_play = card_interactions::plan_item_play(
                     &card,
                     ActionTarget::Piece { piece_id },
@@ -1264,13 +1282,13 @@ impl MatchState {
                 let target = self
                     .piece_view(&piece_id)
                     .ok_or(MatchError::PieceNotFound)?;
-                let caster_position = self.player_ref(side).wizard.position;
+                let caster_position = self.player_ref(side).hero.position;
                 let planned_spell_play = card_interactions::plan_spell_play(
                     &card,
                     ActionTarget::Piece { piece_id },
                     side,
                     caster_position,
-                    &self.player_ref(side).wizard.id,
+                    &self.player_ref(side).hero.id,
                     &target,
                 )?;
                 self.spend_card_resources(side, &card_id, &card)?;
@@ -1329,12 +1347,12 @@ impl MatchState {
         if player.mana < card.cost {
             return Err(MatchError::NotEnoughMana);
         }
-        if player.wizard.ap_remaining == 0 {
+        if player.hero.ap_remaining == 0 {
             return Err(MatchError::NoActionPoints);
         }
 
         player.mana -= card.cost;
-        player.wizard.ap_remaining -= 1;
+        player.hero.ap_remaining -= 1;
         let card = player.hand.remove(hand_index);
         player.discard.push(card);
         player.discard_count = player.discard.len();
@@ -1531,8 +1549,8 @@ impl MatchState {
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) {
-        let wizard_position = self.player_ref(side).wizard.position;
-        if !card_interactions::can_resolve_unit_play(coord, wizard_position, &self.board, |coord| {
+        let hero_position = self.player_ref(side).hero.position;
+        if !card_interactions::can_resolve_unit_play(coord, hero_position, &self.board, |coord| {
             self.is_occupied(coord)
         }) {
             self.log
@@ -1588,13 +1606,13 @@ impl MatchState {
                 .insert(0, format!("{} had no legal target.", card.name));
             return;
         };
-        let caster_position = self.player_ref(side).wizard.position;
-        let caster_wizard_id = self.player_ref(side).wizard.id.clone();
+        let caster_position = self.player_ref(side).hero.position;
+        let caster_hero_id = self.player_ref(side).hero.id.clone();
         if card_interactions::validate_spell_target(
             side,
             effect,
             caster_position,
-            &caster_wizard_id,
+            &caster_hero_id,
             &target,
         )
         .is_err()
@@ -1610,7 +1628,7 @@ impl MatchState {
             &card,
             side,
             caster_position,
-            &caster_wizard_id,
+            &caster_hero_id,
             &target,
             &enemy_pieces,
             &progression,
@@ -1755,10 +1773,10 @@ impl MatchState {
             return Err(MatchError::OccupiedHex);
         }
 
-        if self.player.wizard.id == piece_id {
-            self.player.wizard.ap_remaining -= 1;
-        } else if self.opponent.wizard.id == piece_id {
-            self.opponent.wizard.ap_remaining -= 1;
+        if self.player.hero.id == piece_id {
+            self.player.hero.ap_remaining -= 1;
+        } else if self.opponent.hero.id == piece_id {
+            self.opponent.hero.ap_remaining -= 1;
         } else if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
             unit.ap_remaining -= 1;
         }
@@ -1810,10 +1828,10 @@ impl MatchState {
             return;
         }
 
-        if self.player.wizard.id == piece_id {
-            self.player.wizard.position = to;
-        } else if self.opponent.wizard.id == piece_id {
-            self.opponent.wizard.position = to;
+        if self.player.hero.id == piece_id {
+            self.player.hero.position = to;
+        } else if self.opponent.hero.id == piece_id {
+            self.opponent.hero.position = to;
         } else if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
             unit.position = to;
         }
@@ -2107,8 +2125,8 @@ impl MatchState {
         let mut drawn = None;
         {
             let player = self.player_mut(side);
-            player.wizard.ap_remaining = player.wizard.max_ap;
-            player.wizard.has_attacked = false;
+            player.hero.ap_remaining = player.hero.max_ap;
+            player.hero.has_attacked = false;
             if should_draw {
                 drawn = player.draw();
             } else {
@@ -2158,8 +2176,8 @@ impl MatchState {
     }
 
     fn solo_ai_view(&self) -> SoloAiView {
-        let opponent_wizard = PieceView::from(&self.opponent.wizard);
-        let player_wizard = PieceView::from(&self.player.wizard);
+        let opponent_hero = PieceView::from(&self.opponent.hero);
+        let player_hero = PieceView::from(&self.player.hero);
         let opponent_units: Vec<_> = self
             .board
             .units
@@ -2174,9 +2192,9 @@ impl MatchState {
             .filter(|unit| unit.side == Side::Player)
             .map(PieceView::from)
             .collect();
-        let mut opponent_pieces = vec![opponent_wizard.clone()];
+        let mut opponent_pieces = vec![opponent_hero.clone()];
         opponent_pieces.extend(opponent_units.clone());
-        let mut player_pieces = vec![player_wizard.clone()];
+        let mut player_pieces = vec![player_hero.clone()];
         player_pieces.extend(player_units.clone());
         let occupied_hexes = opponent_pieces
             .iter()
@@ -2192,8 +2210,8 @@ impl MatchState {
         }
 
         SoloAiView {
-            opponent_wizard,
-            player_wizard,
+            opponent_hero,
+            player_hero,
             opponent_pieces,
             player_pieces,
             opponent_units,
@@ -2209,7 +2227,7 @@ impl MatchState {
     }
 
     fn pieces_for_side(&self, side: Side) -> Vec<PieceView> {
-        let mut pieces = vec![PieceView::from(&self.player_ref(side).wizard)];
+        let mut pieces = vec![PieceView::from(&self.player_ref(side).hero)];
         pieces.extend(
             self.board
                 .units
@@ -2221,11 +2239,11 @@ impl MatchState {
     }
 
     fn piece_view(&self, piece_id: &str) -> Option<PieceView> {
-        if self.player.wizard.id == piece_id {
-            return Some(PieceView::from(&self.player.wizard));
+        if self.player.hero.id == piece_id {
+            return Some(PieceView::from(&self.player.hero));
         }
-        if self.opponent.wizard.id == piece_id {
-            return Some(PieceView::from(&self.opponent.wizard));
+        if self.opponent.hero.id == piece_id {
+            return Some(PieceView::from(&self.opponent.hero));
         }
         self.board
             .units
@@ -2235,14 +2253,14 @@ impl MatchState {
     }
 
     fn mark_attacker_spent(&mut self, piece_id: &str) {
-        if self.player.wizard.id == piece_id {
-            self.player.wizard.ap_remaining -= 1;
-            self.player.wizard.has_attacked = true;
+        if self.player.hero.id == piece_id {
+            self.player.hero.ap_remaining -= 1;
+            self.player.hero.has_attacked = true;
             return;
         }
-        if self.opponent.wizard.id == piece_id {
-            self.opponent.wizard.ap_remaining -= 1;
-            self.opponent.wizard.has_attacked = true;
+        if self.opponent.hero.id == piece_id {
+            self.opponent.hero.ap_remaining -= 1;
+            self.opponent.hero.has_attacked = true;
             return;
         }
         if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
@@ -2252,12 +2270,12 @@ impl MatchState {
     }
 
     fn damage_piece(&mut self, piece_id: &str, amount: i32) {
-        if self.player.wizard.id == piece_id {
-            self.player.wizard.hp -= amount;
+        if self.player.hero.id == piece_id {
+            self.player.hero.hp -= amount;
             return;
         }
-        if self.opponent.wizard.id == piece_id {
-            self.opponent.wizard.hp -= amount;
+        if self.opponent.hero.id == piece_id {
+            self.opponent.hero.hp -= amount;
             return;
         }
         if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
@@ -2294,13 +2312,13 @@ impl MatchState {
     }
 
     fn heal_piece(&mut self, piece_id: &str, amount: i32) {
-        if self.player.wizard.id == piece_id {
-            self.player.wizard.hp = (self.player.wizard.hp + amount).min(self.player.wizard.max_hp);
+        if self.player.hero.id == piece_id {
+            self.player.hero.hp = (self.player.hero.hp + amount).min(self.player.hero.max_hp);
             return;
         }
-        if self.opponent.wizard.id == piece_id {
-            self.opponent.wizard.hp =
-                (self.opponent.wizard.hp + amount).min(self.opponent.wizard.max_hp);
+        if self.opponent.hero.id == piece_id {
+            self.opponent.hero.hp =
+                (self.opponent.hero.hp + amount).min(self.opponent.hero.max_hp);
             return;
         }
         if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
@@ -2309,11 +2327,11 @@ impl MatchState {
     }
 
     fn piece_is_damaged(&self, piece_id: &str) -> bool {
-        if self.player.wizard.id == piece_id {
-            return self.player.wizard.hp < self.player.wizard.max_hp;
+        if self.player.hero.id == piece_id {
+            return self.player.hero.hp < self.player.hero.max_hp;
         }
-        if self.opponent.wizard.id == piece_id {
-            return self.opponent.wizard.hp < self.opponent.wizard.max_hp;
+        if self.opponent.hero.id == piece_id {
+            return self.opponent.hero.hp < self.opponent.hero.max_hp;
         }
         self.board
             .units
@@ -2429,7 +2447,7 @@ impl MatchState {
             return;
         }
 
-        let winner = match (self.player.wizard.hp <= 0, self.opponent.wizard.hp <= 0) {
+        let winner = match (self.player.hero.hp <= 0, self.opponent.hero.hp <= 0) {
             (true, true) => Some(Side::Player),
             (false, true) => Some(Side::Player),
             (true, false) => Some(Side::Opponent),
@@ -2446,8 +2464,8 @@ impl MatchState {
     }
 
     fn is_occupied(&self, coord: HexCoord) -> bool {
-        self.player.wizard.position == coord
-            || self.opponent.wizard.position == coord
+        self.player.hero.position == coord
+            || self.opponent.hero.position == coord
             || self.board.units.iter().any(|unit| unit.position == coord)
     }
 
@@ -2659,7 +2677,7 @@ impl PlayerState {
     fn new(
         side: Side,
         mut rng_seed: u64,
-        wizard_type: WizardType,
+        hero_type: HeroType,
         mut deck: Vec<Card>,
         progression: MatchProgressionLoadout,
     ) -> Self {
@@ -2670,7 +2688,7 @@ impl PlayerState {
             side,
             mana,
             max_mana: mana,
-            wizard: Wizard::new(side, wizard_type, &progression.effects),
+            hero: Hero::new(side, hero_type, &progression.effects),
             progression,
             hand: Vec::new(),
             deck_count: deck.len(),
@@ -2705,7 +2723,7 @@ impl PlayerState {
             "side": self.side,
             "mana": self.mana,
             "maxMana": self.max_mana,
-            "wizard": self.wizard,
+            "hero": self.hero,
             "progression": self.progression,
             "handCount": self.hand.len(),
             "deckCount": self.deck_count,
@@ -2752,25 +2770,25 @@ impl ReplayEvent {
     }
 }
 
-impl Wizard {
-    fn new(side: Side, wizard_type: WizardType, effects: &MatchProgressionEffects) -> Self {
+impl Hero {
+    fn new(side: Side, hero_type: HeroType, effects: &MatchProgressionEffects) -> Self {
         let (id, position) = match side {
             Side::Player => (
-                "player-wizard",
+                "player-hero",
                 HexCoord {
                     q: 0,
                     r: BOARD_RADIUS,
                 },
             ),
             Side::Opponent => (
-                "opponent-wizard",
+                "opponent-hero",
                 HexCoord {
                     q: 0,
                     r: -BOARD_RADIUS,
                 },
             ),
         };
-        let profile = wizard_type.profile();
+        let profile = hero_type.profile();
         let max_hp = (profile.max_hp + effects.max_hp_delta).max(1);
         let attack = (profile.attack + effects.attack_delta).max(0);
         let max_ap = (i16::from(profile.max_ap) + i16::from(effects.max_ap_delta)).max(1) as u8;
@@ -2778,7 +2796,7 @@ impl Wizard {
         Self {
             id: id.to_string(),
             side,
-            wizard_type,
+            hero_type,
             hp: max_hp,
             max_hp,
             attack,
@@ -2799,15 +2817,15 @@ fn mana_with_progression(base: u8, delta: i8) -> u8 {
     value.clamp(0, i16::from(MAX_MANA) + i16::from(delta.max(0))) as u8
 }
 
-impl From<&Wizard> for PieceView {
-    fn from(wizard: &Wizard) -> Self {
+impl From<&Hero> for PieceView {
+    fn from(hero: &Hero) -> Self {
         Self {
-            id: wizard.id.clone(),
-            side: wizard.side,
-            position: wizard.position,
-            attack: wizard.attack,
-            ap_remaining: wizard.ap_remaining,
-            has_attacked: wizard.has_attacked,
+            id: hero.id.clone(),
+            side: hero.side,
+            position: hero.position,
+            attack: hero.attack,
+            ap_remaining: hero.ap_remaining,
+            has_attacked: hero.has_attacked,
         }
     }
 }
@@ -2972,8 +2990,8 @@ mod tests {
         let action: MatchActionRequest = serde_json::from_str(
             r#"{
                 "type": "attack",
-                "attackerId": "player-wizard",
-                "targetId": "opponent-wizard"
+                "attackerId": "player-hero",
+                "targetId": "opponent-hero"
             }"#,
         )
         .expect("frontend attack payload should deserialize");
@@ -2983,7 +3001,7 @@ mod tests {
             MatchActionRequest::Attack {
                 attacker_id,
                 target_id
-            } if attacker_id == "player-wizard" && target_id == "opponent-wizard"
+            } if attacker_id == "player-hero" && target_id == "opponent-hero"
         ));
     }
 
@@ -3052,7 +3070,7 @@ mod tests {
             card_id,
             target: ActionTarget::Hex { coord: hex(0, 2) },
         })
-        .expect("unit should be playable next to wizard");
+        .expect("unit should be playable next to hero");
 
         let value = serde_json::to_value(&game).expect("match should serialize");
         assert_eq!(value["player"]["discardCount"], 1);
@@ -3103,7 +3121,7 @@ mod tests {
             card_id,
             target: ActionTarget::Hex { coord: hex(0, 2) },
         })
-        .expect("unit should be playable next to wizard");
+        .expect("unit should be playable next to hero");
 
         let snapshot = game.to_snapshot_json().expect("snapshot should serialize");
         let mut restored =
@@ -3131,25 +3149,43 @@ mod tests {
     }
 
     #[test]
-    fn wizards_start_on_opposite_centered_edges() {
+    fn heroes_start_on_opposite_centered_edges() {
         let game = MatchState::new_with_seed(7);
 
-        assert_eq!(game.player.wizard.position, hex(0, 3));
-        assert_eq!(game.opponent.wizard.position, hex(0, -3));
-        assert_eq!(game.player.wizard.hp, 20);
-        assert_eq!(game.player.wizard.attack, 1);
-        assert_eq!(game.player.wizard.ap_remaining, 3);
+        assert_eq!(game.player.hero.position, hex(0, 3));
+        assert_eq!(game.opponent.hero.position, hex(0, -3));
+        assert_eq!(game.player.hero.hp, 20);
+        assert_eq!(game.player.hero.attack, 1);
+        assert_eq!(game.player.hero.ap_remaining, 3);
     }
 
     #[test]
-    fn selected_wizard_type_sets_player_starting_stats() {
-        let game = MatchState::new_with_seed_and_player_wizard_type(7, WizardType::Pyromancer);
+    fn selected_hero_type_sets_player_starting_stats() {
+        let game = MatchState::new_with_seed_and_player_hero_type(7, HeroType::Pyromancer);
 
-        assert_eq!(game.player.wizard.wizard_type, WizardType::Pyromancer);
-        assert_eq!(game.player.wizard.hp, 18);
-        assert_eq!(game.player.wizard.attack, 2);
-        assert_eq!(game.player.wizard.ap_remaining, 3);
-        assert_eq!(game.opponent.wizard.wizard_type, WizardType::Runekeeper);
+        assert_eq!(game.player.hero.hero_type, HeroType::Pyromancer);
+        assert_eq!(game.player.hero.hp, 18);
+        assert_eq!(game.player.hero.attack, 2);
+        assert_eq!(game.player.hero.ap_remaining, 3);
+        assert_eq!(game.opponent.hero.hero_type, HeroType::Runekeeper);
+    }
+
+    #[test]
+    fn new_hero_types_set_player_starting_stats() {
+        let cases = [
+            (HeroType::Barbarian, 22, 3, 2),
+            (HeroType::Archer, 16, 2, 4),
+            (HeroType::Builder, 24, 1, 2),
+        ];
+
+        for (hero_type, hp, attack, ap) in cases {
+            let game = MatchState::new_with_seed_and_player_hero_type(7, hero_type);
+
+            assert_eq!(game.player.hero.hero_type, hero_type);
+            assert_eq!(game.player.hero.hp, hp);
+            assert_eq!(game.player.hero.attack, attack);
+            assert_eq!(game.player.hero.ap_remaining, ap);
+        }
     }
 
     #[test]
@@ -3184,13 +3220,13 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(starter_card_templates().len(), 34);
+        assert_eq!(starter_card_templates().len(), 43);
         assert_eq!(game.player.hand.len(), 4);
         assert_eq!(game.player.deck_count, 56);
     }
 
     #[test]
-    fn playing_a_unit_spends_mana_and_wizard_ap_and_summons_adjacent() {
+    fn playing_a_unit_spends_mana_and_hero_ap_and_summons_adjacent() {
         let mut game = MatchState::new_with_seed(7);
         let card = player_unit_card(&game, "ember-squire");
         let card_id = put_card_in_hand(&mut game, card);
@@ -3203,11 +3239,11 @@ mod tests {
                 },
                 3,
             )
-            .expect("unit should be playable next to wizard");
+            .expect("unit should be playable next to hero");
 
         let unit = game.board.units.first().expect("unit should be on board");
         assert_eq!(game.player.mana, 3);
-        assert_eq!(game.player.wizard.ap_remaining, 2);
+        assert_eq!(game.player.hero.ap_remaining, 2);
         assert_eq!(unit.position, hex(0, 2));
         assert_eq!(unit.template_id.as_deref(), Some("ember-squire"));
         assert_eq!(unit.ap_remaining, 1);
@@ -3252,7 +3288,7 @@ mod tests {
         let card = player_unit_card(&game, "ember-squire");
         let card_id = put_card_in_hand(&mut game, card);
         let initial_mana = game.player.mana;
-        let initial_wizard_ap = game.player.wizard.ap_remaining;
+        let initial_hero_ap = game.player.hero.ap_remaining;
 
         let result = game.apply_action(MatchActionRequest::PlayCard {
             card_id,
@@ -3261,7 +3297,7 @@ mod tests {
 
         assert_eq!(result, Err(MatchError::OccupiedHex));
         assert_eq!(game.player.mana, initial_mana);
-        assert_eq!(game.player.wizard.ap_remaining, initial_wizard_ap);
+        assert_eq!(game.player.hero.ap_remaining, initial_hero_ap);
         assert_eq!(game.board.units.len(), 1);
     }
 
@@ -3270,16 +3306,16 @@ mod tests {
         let mut game = MatchState::new_with_seed(7);
 
         game.apply_action(MatchActionRequest::MovePiece {
-            piece_id: "player-wizard".to_string(),
+            piece_id: "player-hero".to_string(),
             to: hex(0, 2),
         })
-        .expect("wizard can move one hex");
+        .expect("hero can move one hex");
 
-        assert_eq!(game.player.wizard.position, hex(0, 2));
-        assert_eq!(game.player.wizard.ap_remaining, 2);
+        assert_eq!(game.player.hero.position, hex(0, 2));
+        assert_eq!(game.player.hero.ap_remaining, 2);
 
         let result = game.apply_action(MatchActionRequest::MovePiece {
-            piece_id: "player-wizard".to_string(),
+            piece_id: "player-hero".to_string(),
             to: hex(0, 0),
         });
 
@@ -3352,7 +3388,7 @@ mod tests {
     fn spells_heal_buff_and_damage_with_caps() {
         let mut game = MatchState::new_with_seed(7);
         game.player.mana = 8;
-        game.player.wizard.ap_remaining = 3;
+        game.player.hero.ap_remaining = 3;
         game.board.units.push(Unit {
             id: "ally".to_string(),
             side: Side::Player,
@@ -3447,7 +3483,7 @@ mod tests {
             .expect("bolt exists");
         let bolt_id = put_card_in_hand(&mut game, bolt);
         game.player.mana = 5;
-        game.player.wizard.ap_remaining = 1;
+        game.player.hero.ap_remaining = 1;
         let damage_frames = game
             .apply_action_recording(
                 MatchActionRequest::PlayCard {
@@ -3470,7 +3506,7 @@ mod tests {
     fn item_cards_equip_passives_activate_and_drop_when_carrier_dies() {
         let mut game = MatchState::new_with_seed(7);
         game.player.mana = 8;
-        game.player.wizard.ap_remaining = 3;
+        game.player.hero.ap_remaining = 3;
         game.board.units.push(Unit {
             id: "ally".to_string(),
             side: Side::Player,
@@ -3572,7 +3608,7 @@ mod tests {
     fn item_cards_only_target_allied_units_in_range() {
         let mut game = MatchState::new_with_seed(7);
         game.player.mana = 8;
-        game.player.wizard.ap_remaining = 3;
+        game.player.hero.ap_remaining = 3;
         game.board.units.push(Unit {
             id: "ally-out-of-range".to_string(),
             side: Side::Player,
@@ -3607,7 +3643,7 @@ mod tests {
             .expect("item exists");
         let flask_id = put_card_in_hand(&mut game, flask);
         let initial_mana = game.player.mana;
-        let initial_wizard_ap = game.player.wizard.ap_remaining;
+        let initial_hero_ap = game.player.hero.ap_remaining;
 
         let enemy_result = game.apply_action(MatchActionRequest::PlayCard {
             card_id: flask_id.clone(),
@@ -3625,7 +3661,7 @@ mod tests {
         assert_eq!(enemy_result, Err(MatchError::InvalidTarget));
         assert_eq!(range_result, Err(MatchError::InvalidTarget));
         assert_eq!(game.player.mana, initial_mana);
-        assert_eq!(game.player.wizard.ap_remaining, initial_wizard_ap);
+        assert_eq!(game.player.hero.ap_remaining, initial_hero_ap);
         assert!(game.board.units.iter().all(|unit| unit.items.is_empty()));
     }
 
@@ -3723,7 +3759,7 @@ mod tests {
     fn draw_spells_target_the_caster_and_draw_cards() {
         let mut game = MatchState::new_with_seed(7);
         game.player.mana = 8;
-        game.player.wizard.ap_remaining = 3;
+        game.player.hero.ap_remaining = 3;
         let initial_hand = game.player.hand.len();
         let initial_deck = game.player.deck_count;
         let insight = starter_card_templates()
@@ -3737,7 +3773,7 @@ mod tests {
                 MatchActionRequest::PlayCard {
                     card_id: insight_id,
                     target: ActionTarget::Piece {
-                        piece_id: game.player.wizard.id.clone(),
+                        piece_id: game.player.hero.id.clone(),
                     },
                 },
                 30,
@@ -3810,7 +3846,7 @@ mod tests {
     fn area_damage_hits_enemies_near_the_target_only() {
         let mut game = MatchState::new_with_seed(7);
         game.player.mana = 8;
-        game.player.wizard.ap_remaining = 3;
+        game.player.hero.ap_remaining = 3;
         game.board.units.push(Unit {
             id: "enemy-center".to_string(),
             side: Side::Opponent,
@@ -3884,7 +3920,7 @@ mod tests {
     fn line_damage_hits_enemies_in_a_straight_line() {
         let mut game = MatchState::new_with_seed(7);
         game.player.mana = 8;
-        game.player.wizard.ap_remaining = 3;
+        game.player.hero.ap_remaining = 3;
         game.board.units.push(Unit {
             id: "enemy-front".to_string(),
             side: Side::Opponent,
@@ -3958,7 +3994,7 @@ mod tests {
     fn line_damage_rejects_non_straight_targets() {
         let mut game = MatchState::new_with_seed(7);
         game.player.mana = 8;
-        game.player.wizard.ap_remaining = 3;
+        game.player.hero.ap_remaining = 3;
         game.board.units.push(Unit {
             id: "enemy-offline".to_string(),
             side: Side::Opponent,
@@ -4020,10 +4056,10 @@ mod tests {
     fn solo_ai_actions_wait_for_player_priority_response() {
         let mut game = MatchState::new_with_seed(7);
         game.player.mana = 8;
-        game.player.wizard.ap_remaining = 3;
-        game.player.wizard.hp = 18;
-        game.opponent.wizard.position = hex(0, -1);
-        game.opponent.wizard.ap_remaining = 1;
+        game.player.hero.ap_remaining = 3;
+        game.player.hero.hp = 18;
+        game.opponent.hero.position = hex(0, -1);
+        game.opponent.hero.ap_remaining = 1;
         let salve = starter_card_templates()
             .into_iter()
             .find(|card| card.template_id == "quick-salve")
@@ -4041,26 +4077,26 @@ mod tests {
         game.apply_action(MatchActionRequest::PlayCard {
             card_id: salve_id,
             target: ActionTarget::Piece {
-                piece_id: game.player.wizard.id.clone(),
+                piece_id: game.player.hero.id.clone(),
             },
         })
         .expect("player can answer AI action with higher priority spell");
 
         assert_eq!(game.action_stack.len(), 2);
         assert_eq!(game.priority_side, Some(Side::Opponent));
-        assert_eq!(game.player.wizard.hp, 18);
+        assert_eq!(game.player.hero.hp, 18);
 
         game.apply_action(MatchActionRequest::AdvanceAi)
             .expect("AI should pass priority to resolve the response");
-        assert_eq!(game.player.wizard.hp, 20);
+        assert_eq!(game.player.hero.hp, 20);
         assert_eq!(game.priority_side, Some(Side::Player));
     }
 
     #[test]
     fn turn_start_mana_comes_from_controlled_hexes() {
         let mut game = MatchState::new_with_seed(7);
-        game.player.wizard.position = hex(0, 1);
-        game.opponent.wizard.position = hex(0, -1);
+        game.player.hero.position = hex(0, 1);
+        game.opponent.hero.position = hex(0, -1);
         game.player.mana = 0;
         game.player.max_mana = 0;
         game.opponent.mana = 0;
@@ -4078,10 +4114,10 @@ mod tests {
 
     #[test]
     fn shared_turn_start_refreshes_only_the_active_side_mana() {
-        let mut game = MatchState::new_with_seed_wizard_types_and_mode(
+        let mut game = MatchState::new_with_seed_hero_types_and_mode(
             7,
-            WizardType::Runekeeper,
-            WizardType::Pyromancer,
+            HeroType::Runekeeper,
+            HeroType::Pyromancer,
             MatchMode::Shared,
         );
         game.player.mana = 1;
@@ -4160,10 +4196,10 @@ mod tests {
 
     #[test]
     fn shared_matches_reject_inactive_side_actions() {
-        let mut game = MatchState::new_with_seed_wizard_types_and_mode(
+        let mut game = MatchState::new_with_seed_hero_types_and_mode(
             7,
-            WizardType::Runekeeper,
-            WizardType::Pyromancer,
+            HeroType::Runekeeper,
+            HeroType::Pyromancer,
             MatchMode::Shared,
         );
 
@@ -4175,10 +4211,10 @@ mod tests {
 
     #[test]
     fn shared_turns_pass_between_humans_without_running_ai() {
-        let mut game = MatchState::new_with_seed_wizard_types_and_mode(
+        let mut game = MatchState::new_with_seed_hero_types_and_mode(
             7,
-            WizardType::Runekeeper,
-            WizardType::Pyromancer,
+            HeroType::Runekeeper,
+            HeroType::Pyromancer,
             MatchMode::Shared,
         );
 
@@ -4187,7 +4223,7 @@ mod tests {
 
         assert_eq!(game.active_side, Side::Opponent);
         assert_eq!(game.round, 1);
-        assert_eq!(game.opponent.wizard.wizard_type, WizardType::Pyromancer);
+        assert_eq!(game.opponent.hero.hero_type, HeroType::Pyromancer);
 
         game.apply_action_recording_for_side(Side::Opponent, MatchActionRequest::EndTurn, 1)
             .expect("opponent can end their active turn");
@@ -4199,10 +4235,10 @@ mod tests {
 
     #[test]
     fn shared_round_start_resets_surviving_unit_armor_to_max_armor() {
-        let mut game = MatchState::new_with_seed_wizard_types_and_mode(
+        let mut game = MatchState::new_with_seed_hero_types_and_mode(
             7,
-            WizardType::Runekeeper,
-            WizardType::Pyromancer,
+            HeroType::Runekeeper,
+            HeroType::Pyromancer,
             MatchMode::Shared,
         );
         game.board.units.push(Unit {
@@ -4246,17 +4282,17 @@ mod tests {
 
     #[test]
     fn shared_spell_responses_require_higher_priority_and_resolve_lifo() {
-        let mut game = MatchState::new_with_seed_wizard_types_and_mode(
+        let mut game = MatchState::new_with_seed_hero_types_and_mode(
             7,
-            WizardType::Runekeeper,
-            WizardType::Pyromancer,
+            HeroType::Runekeeper,
+            HeroType::Pyromancer,
             MatchMode::Shared,
         );
         game.player.mana = 8;
         game.opponent.mana = 8;
-        game.player.wizard.ap_remaining = 3;
-        game.opponent.wizard.ap_remaining = 3;
-        game.opponent.wizard.position = hex(0, -2);
+        game.player.hero.ap_remaining = 3;
+        game.opponent.hero.ap_remaining = 3;
+        game.opponent.hero.position = hex(0, -2);
         game.board.units.push(Unit {
             id: "guard".to_string(),
             side: Side::Opponent,
@@ -4349,15 +4385,15 @@ mod tests {
 
     #[test]
     fn lower_priority_spells_cannot_answer_pending_actions() {
-        let mut game = MatchState::new_with_seed_wizard_types_and_mode(
+        let mut game = MatchState::new_with_seed_hero_types_and_mode(
             7,
-            WizardType::Runekeeper,
-            WizardType::Pyromancer,
+            HeroType::Runekeeper,
+            HeroType::Pyromancer,
             MatchMode::Shared,
         );
         game.player.mana = 8;
         game.opponent.mana = 8;
-        game.opponent.wizard.position = hex(0, -2);
+        game.opponent.hero.position = hex(0, -2);
         game.board.units.push(Unit {
             id: "guard".to_string(),
             side: Side::Opponent,
@@ -4411,7 +4447,7 @@ mod tests {
     }
 
     #[test]
-    fn wizard_death_ends_the_match() {
+    fn hero_death_ends_the_match() {
         let mut game = MatchState::new_with_seed(7);
         game.board.units.push(Unit {
             id: "player-unit".to_string(),
@@ -4430,9 +4466,9 @@ mod tests {
 
         game.apply_action(MatchActionRequest::Attack {
             attacker_id: "player-unit".to_string(),
-            target_id: "opponent-wizard".to_string(),
+            target_id: "opponent-hero".to_string(),
         })
-        .expect("wizard can be attacked when adjacent");
+        .expect("hero can be attacked when adjacent");
 
         assert_eq!(game.phase, Phase::MatchOver);
         assert_eq!(game.winner, Some(Side::Player));

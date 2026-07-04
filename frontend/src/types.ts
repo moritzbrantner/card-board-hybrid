@@ -126,7 +126,7 @@ export type DeckRecipeSummary = {
   id: number;
   name: string;
   isDefault: boolean;
-  wizardType: WizardType;
+  heroType: HeroType;
   runeIds: string[];
   cards: DeckCardCount[];
   legality: DeckLegality;
@@ -154,7 +154,7 @@ export type PublicDeckRecipeResponse = {
 export type SystemDeckRecipe = {
   id: string;
   name: string;
-  wizardType: WizardType;
+  heroType: HeroType;
   cards: DeckCardCount[];
   legality: DeckLegality;
 };
@@ -185,7 +185,7 @@ export type SoloAiOpponentSelection =
   | {
       source: "account";
       deckId: number;
-      wizardType: WizardType;
+      heroType: HeroType;
     };
 
 export type AuthUser = {
@@ -194,7 +194,7 @@ export type AuthUser = {
   email: string;
   displayName: string;
   avatar: GeneratedAvatar;
-  preferredWizardType: WizardType;
+  preferredHeroType: HeroType;
   boardVisualMode: BoardVisualMode;
   progressionSummary: ProgressionSummary;
 };
@@ -273,8 +273,8 @@ export type RuneDefinition = {
   unlocked: boolean;
 };
 
-export type WizardProgression = {
-  wizardType: WizardType;
+export type HeroProgression = {
+  heroType: HeroType;
   xp: number;
   level: number;
   currentLevelXp: number;
@@ -287,8 +287,8 @@ export type WizardProgression = {
   unlockedSkillIds: string[];
 };
 
-export type WizardSkillTree = {
-  wizardType: WizardType;
+export type HeroSkillTree = {
+  heroType: HeroType;
   nodes: SkillNodeDefinition[];
 };
 
@@ -301,15 +301,15 @@ export type SkillNodeDefinition = {
 };
 
 export type SavedRuneLoadout = {
-  wizardType: WizardType;
+  heroType: HeroType;
   runeIds: string[];
 };
 
 export type ProgressionResponse = {
   account: ProgressionSummary;
   runes: RuneDefinition[];
-  wizards: WizardProgression[];
-  skillTrees: WizardSkillTree[];
+  heroes: HeroProgression[];
+  skillTrees: HeroSkillTree[];
   loadouts: SavedRuneLoadout[];
 };
 
@@ -330,10 +330,10 @@ export type MatchProgressionLoadout = {
   effects: MatchProgressionEffects;
 };
 
-export type Wizard = {
+export type Hero = {
   id: string;
   side: Side;
-  wizardType: WizardType;
+  heroType: HeroType;
   hp: number;
   maxHp: number;
   attack: number;
@@ -343,12 +343,15 @@ export type Wizard = {
   hasAttacked: boolean;
 };
 
-export type WizardType =
+export type HeroType =
   | "runekeeper"
   | "pyromancer"
   | "chronomancer"
   | "warden"
-  | "battlemage";
+  | "battlemage"
+  | "barbarian"
+  | "archer"
+  | "builder";
 
 export type Unit = {
   id: string;
@@ -395,7 +398,7 @@ export type MatchParticipantState = {
   side: Side;
   mana: number;
   maxMana: number;
-  wizard: Wizard;
+  hero: Hero;
   progression: MatchProgressionLoadout;
   hand?: Card[];
   handCount: number;
@@ -483,8 +486,8 @@ export type SharedMatchResponse = {
   mode: "shared";
   status: SharedMatchStatus;
   viewerSide: Side;
-  viewerWizardType: WizardType | null;
-  opponentWizardType: WizardType | null;
+  viewerHeroType: HeroType | null;
+  opponentHeroType: HeroType | null;
   viewerReady: boolean;
   opponentReady: boolean;
   activeSide: Side | null;

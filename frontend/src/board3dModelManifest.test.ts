@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { resolveBoardModel, type BoardModelManifest } from "./board3dModelManifest";
-import type { Unit, Wizard } from "./types";
+import type { Unit, Hero } from "./types";
 
 const manifest = {
-  wizards: {
-    runekeeper: { kind: "gltf", path: "/models/wizards/runekeeper.glb", scale: 0.8 },
+  heroes: {
+    runekeeper: { kind: "gltf", path: "/models/heroes/runekeeper.glb", scale: 0.8 },
   },
   units: {
     "ember-squire": { kind: "gltf", path: "/models/units/ember-squire.glb", scale: 0.7 },
@@ -12,10 +12,10 @@ const manifest = {
 } satisfies BoardModelManifest;
 
 describe("3D board model manifest", () => {
-  it("resolves known Wizard and Unit model entries", () => {
-    expect(resolveBoardModel(makeWizard("runekeeper"), manifest)).toEqual({
+  it("resolves known Hero and Unit model entries", () => {
+    expect(resolveBoardModel(makeHero("runekeeper"), manifest)).toEqual({
       status: "available",
-      entry: manifest.wizards.runekeeper,
+      entry: manifest.heroes.runekeeper,
     });
     expect(resolveBoardModel(makeUnit("ember-squire"), manifest)).toEqual({
       status: "available",
@@ -24,7 +24,7 @@ describe("3D board model manifest", () => {
   });
 
   it("returns explicit fallback state for missing model assets", () => {
-    expect(resolveBoardModel(makeWizard("pyromancer"), manifest)).toEqual({
+    expect(resolveBoardModel(makeHero("pyromancer"), manifest)).toEqual({
       status: "fallback",
       reason: "missing-manifest",
     });
@@ -35,13 +35,13 @@ describe("3D board model manifest", () => {
   });
 });
 
-function makeWizard(wizardType: Wizard["wizardType"]): Wizard & { pieceType: "wizard"; name: string } {
+function makeHero(heroType: Hero["heroType"]): Hero & { pieceType: "hero"; name: string } {
   return {
-    pieceType: "wizard",
-    id: `wizard-${wizardType}`,
+    pieceType: "hero",
+    id: `hero-${heroType}`,
     side: "player",
-    name: wizardType,
-    wizardType,
+    name: heroType,
+    heroType,
     hp: 20,
     maxHp: 20,
     attack: 1,

@@ -225,7 +225,7 @@ test("signed-in dashboard shows account, match, and deck summaries", async ({ pa
   await expect(page.getByText("Welcome back, Rune Player.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Account Progression" })).toBeVisible();
   await expect(page.getByText("Next level in 60 XP")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Preferred Wizard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Preferred Hero" })).toBeVisible();
   await expect(page.getByText("Runekeeper")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Deck Library" })).toBeVisible();
   await expect(page.getByText("Default: Default Legal")).toBeVisible();
@@ -508,7 +508,7 @@ async function mockAuthApi(page, authRequests = []) {
             id: 10,
             name: "Arcane Draft",
             isDefault: false,
-            wizardType: "runekeeper",
+            heroType: "runekeeper",
             runeIds: [],
             cards: [],
             legality: {
@@ -553,7 +553,7 @@ function systemDeck() {
   return {
     id: "balanced-starter",
     name: "Balanced Starter",
-    wizardType: "runekeeper",
+    heroType: "runekeeper",
     cards: [],
     legality: {
       legal: true,
@@ -580,7 +580,7 @@ function authUser(email) {
     email,
     displayName: "Rune Player",
     avatar: { symbol: "spark", color: "emerald" },
-    preferredWizardType: "runekeeper",
+    preferredHeroType: "runekeeper",
     boardVisualMode: "2d",
     progressionSummary: {
       totalXp: 140,
@@ -609,9 +609,9 @@ function preferences() {
 function progression() {
   return {
     account: authUser("player@local.dev").progressionSummary,
-    wizards: [
+    heroes: [
       {
-        wizardType: "runekeeper",
+        heroType: "runekeeper",
         xp: 75,
         level: 2,
         currentLevelXp: 0,
@@ -627,8 +627,8 @@ function progression() {
     runes: [],
     skillTrees: [],
     loadouts: [
-      { wizardType: "runekeeper", runeIds: [] },
-      { wizardType: "pyromancer", runeIds: [] },
+      { heroType: "runekeeper", runeIds: [] },
+      { heroType: "pyromancer", runeIds: [] },
     ],
   };
 }
@@ -638,7 +638,7 @@ function deckRecipe(id, name, isDefault, legal) {
     id,
     name,
     isDefault,
-    wizardType: "runekeeper",
+    heroType: "runekeeper",
     runeIds: [],
     cards: [],
     legality: {
@@ -691,10 +691,10 @@ function participant(side) {
     side,
     mana: 5,
     maxMana: 5,
-    wizard: {
-      id: `${side}-wizard`,
+    hero: {
+      id: `${side}-hero`,
       side,
-      wizardType: side === "player" ? "runekeeper" : "pyromancer",
+      heroType: side === "player" ? "runekeeper" : "pyromancer",
       hp: 20,
       maxHp: 20,
       attack: 1,

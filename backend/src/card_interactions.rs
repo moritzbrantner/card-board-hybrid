@@ -83,7 +83,7 @@ pub(crate) fn plan_spell_play(
     target: ActionTarget,
     side: Side,
     caster_position: HexCoord,
-    caster_wizard_id: &str,
+    caster_hero_id: &str,
     target_piece: &PieceView,
 ) -> Result<PlannedSpellPlay, MatchError> {
     let CardKind::Spell { priority, .. } = &card.kind else {
@@ -98,7 +98,7 @@ pub(crate) fn plan_spell_play(
         return Err(MatchError::PieceNotFound);
     }
 
-    if !spell_target_is_legal(card, side, caster_position, caster_wizard_id, target_piece) {
+    if !spell_target_is_legal(card, side, caster_position, caster_hero_id, target_piece) {
         return Err(MatchError::InvalidTarget);
     }
 
@@ -138,13 +138,13 @@ pub(crate) fn legal_spell_targets<'a>(
     card: &Card,
     side: Side,
     caster_position: HexCoord,
-    caster_wizard_id: &str,
+    caster_hero_id: &str,
     candidates: impl IntoIterator<Item = &'a PieceView>,
 ) -> Vec<&'a PieceView> {
     candidates
         .into_iter()
         .filter(|target| {
-            spell_target_is_legal(card, side, caster_position, caster_wizard_id, target)
+            spell_target_is_legal(card, side, caster_position, caster_hero_id, target)
         })
         .collect()
 }
@@ -153,7 +153,7 @@ fn spell_target_is_legal(
     card: &Card,
     side: Side,
     caster_position: HexCoord,
-    caster_wizard_id: &str,
+    caster_hero_id: &str,
     target: &PieceView,
 ) -> bool {
     let CardKind::Spell { range, effect, .. } = &card.kind else {
@@ -161,14 +161,14 @@ fn spell_target_is_legal(
     };
 
     caster_position.distance(target.position) <= i32::from(*range)
-        && validate_spell_target(side, effect, caster_position, caster_wizard_id, target).is_ok()
+        && validate_spell_target(side, effect, caster_position, caster_hero_id, target).is_ok()
 }
 
 pub(crate) fn validate_spell_target(
     side: Side,
     effect: &SpellEffect,
     caster_position: HexCoord,
-    caster_wizard_id: &str,
+    caster_hero_id: &str,
     target: &PieceView,
 ) -> Result<(), MatchError> {
     match effect {
@@ -182,7 +182,7 @@ pub(crate) fn validate_spell_target(
         {
             Err(MatchError::InvalidTarget)
         }
-        SpellEffect::Draw { .. } if target.side != side || target.id != caster_wizard_id => {
+        SpellEffect::Draw { .. } if target.side != side || target.id != caster_hero_id => {
             Err(MatchError::InvalidTarget)
         }
         SpellEffect::LineDamage { .. }
@@ -190,7 +190,7 @@ pub(crate) fn validate_spell_target(
         {
             Err(MatchError::InvalidTarget)
         }
-        SpellEffect::Buff { .. } if target.id == caster_wizard_id => Err(MatchError::InvalidTarget),
+        SpellEffect::Buff { .. } if target.id == caster_hero_id => Err(MatchError::InvalidTarget),
         _ => Ok(()),
     }
 }
@@ -212,7 +212,7 @@ pub(crate) fn resolve_spell(
     card: &CardSummary,
     side: Side,
     caster_position: HexCoord,
-    caster_wizard_id: &str,
+    caster_hero_id: &str,
     target: &PieceView,
     enemy_pieces: &[PieceView],
     progression: &MatchProgressionLoadout,
@@ -221,7 +221,7 @@ pub(crate) fn resolve_spell(
         return Err(MatchError::InvalidTarget);
     };
 
-    validate_spell_target(side, effect, caster_position, caster_wizard_id, target)?;
+    validate_spell_target(side, effect, caster_position, caster_hero_id, target)?;
 
     let resolved = match effect {
         SpellEffect::Heal { amount } => ResolvedSpell {

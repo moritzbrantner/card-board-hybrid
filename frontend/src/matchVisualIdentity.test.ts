@@ -5,8 +5,8 @@ import type {
   CardSummary,
   CatalogCard,
   Unit,
-  Wizard,
-  WizardType,
+  Hero,
+  HeroType,
 } from "./types";
 
 const emberSquire = {
@@ -33,7 +33,7 @@ const sparkJolt = {
   name: "Spark Jolt",
   rarity: "basic",
   cost: 1,
-  text: "Priority 3. Range 2. Deal 1 damage to an enemy unit or wizard.",
+  text: "Priority 3. Range 2. Deal 1 damage to an enemy unit or hero.",
   kind: {
     type: "spell",
     range: 2,
@@ -144,21 +144,24 @@ describe("createMatchVisualCatalog", () => {
     expect(createMatchVisualCatalog([]).unit(unit).fallbackLabel).toBe("ASH");
   });
 
-  it("resolves every WizardType to a portrait path without catalog cards", () => {
+  it("resolves every HeroType to a portrait path without catalog cards", () => {
     const emptyCatalog = createMatchVisualCatalog([]);
-    const wizardTypes = [
+    const heroTypes = [
       "runekeeper",
       "pyromancer",
       "chronomancer",
       "warden",
       "battlemage",
-    ] satisfies WizardType[];
+      "barbarian",
+      "archer",
+      "builder",
+    ] satisfies HeroType[];
 
-    for (const wizardType of wizardTypes) {
-      expect(emptyCatalog.wizard(makeWizard(wizardType))).toMatchObject({
+    for (const heroType of heroTypes) {
+      expect(emptyCatalog.hero(makeHero(heroType))).toMatchObject({
         status: "resolved",
-        wizardType,
-        portraitPath: `/wizard-art/${wizardType}.svg`,
+        heroType,
+        portraitPath: `/hero-art/${heroType}.svg`,
       });
     }
   });
@@ -187,11 +190,11 @@ function makeUnit(overrides: { templateId?: string; name: string }): Unit {
   };
 }
 
-function makeWizard(wizardType: WizardType): Wizard {
+function makeHero(heroType: HeroType): Hero {
   return {
-    id: "wizard-player",
+    id: "hero-player",
     side: "player",
-    wizardType,
+    heroType,
     hp: 20,
     maxHp: 20,
     attack: 1,

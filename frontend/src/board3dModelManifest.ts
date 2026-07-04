@@ -1,7 +1,7 @@
-import type { Unit, Wizard, WizardType } from "./types";
+import type { Unit, Hero, HeroType } from "./types";
 
 type PieceWithIdentity =
-  | (Wizard & { pieceType: "wizard"; name: string })
+  | (Hero & { pieceType: "hero"; name: string })
   | (Unit & { pieceType: "unit" });
 
 export type BoardModelManifestEntry = {
@@ -11,7 +11,7 @@ export type BoardModelManifestEntry = {
 };
 
 export type BoardModelManifest = {
-  wizards: Partial<Record<WizardType, BoardModelManifestEntry>>;
+  heroes: Partial<Record<HeroType, BoardModelManifestEntry>>;
   units: Record<string, BoardModelManifestEntry>;
 };
 
@@ -26,10 +26,10 @@ export type ResolvedBoardModel =
     };
 
 export const BOARD_MODEL_MANIFEST = {
-  wizards: {
+  heroes: {
     runekeeper: {
       kind: "gltf",
-      path: "/models/wizards/runekeeper.glb",
+      path: "/models/heroes/runekeeper.glb",
       scale: 0.82,
     },
   },
@@ -47,8 +47,8 @@ export function resolveBoardModel(
   manifest: BoardModelManifest = BOARD_MODEL_MANIFEST,
 ): ResolvedBoardModel {
   const entry =
-    piece.pieceType === "wizard"
-      ? manifest.wizards[piece.wizardType]
+    piece.pieceType === "hero"
+      ? manifest.heroes[piece.heroType]
       : piece.templateId
         ? manifest.units[piece.templateId]
         : undefined;

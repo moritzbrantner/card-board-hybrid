@@ -24,16 +24,16 @@ import type { AccountProps, CatalogLoadState, DeckLoadState, ProgressionLoadStat
 import { AccountActions, ShellMessage } from "../components/common";
 import { RuneSelector } from "../components/loadoutControls";
 import { cardsFromCounts, countsFromCards, rarityLabel } from "../deckHelpers";
-import { defaultRuneIdsForWizard } from "../labels";
+import { defaultRuneIdsForHero } from "../labels";
 import type {
   AuthUser,
   CatalogCard,
   DeckLegality,
   DeckRecipeSummary,
   ProgressionResponse,
-  WizardType,
+  HeroType,
 } from "../types";
-import { WIZARD_OPTIONS } from "../wizards";
+import { HERO_OPTIONS } from "../heroes";
 import {
   cardCopyState,
   cardKindDetail,
@@ -58,8 +58,8 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
   const [cardCounts, setCardCounts] = useState<Record<string, number>>({});
   const [previewLegality, setPreviewLegality] = useState<DeckLegality | null>(null);
   const [defaultDeck, setDefaultDeck] = useState(false);
-  const [selectedWizardType, setSelectedWizardType] = useState<WizardType>(
-    currentUser.preferredWizardType,
+  const [selectedHeroType, setSelectedHeroType] = useState<HeroType>(
+    currentUser.preferredHeroType,
   );
   const [selectedRuneIds, setSelectedRuneIds] = useState<string[]>([]);
   const [progressionLoadState, setProgressionLoadState] = useState<ProgressionLoadState>({
@@ -116,7 +116,7 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
     setDefaultDeck(deck?.isDefault ?? false);
     setCardCounts(countsFromCards(deck?.cards ?? []));
     setPreviewLegality(deck?.legality ?? null);
-    setSelectedWizardType(deck?.wizardType ?? currentUser.preferredWizardType);
+    setSelectedHeroType(deck?.heroType ?? currentUser.preferredHeroType);
     setSelectedRuneIds(deck?.runeIds ?? []);
     setSelectedCardTemplateId(null);
     setNotice(null);
@@ -141,8 +141,8 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
     [catalogCards, selectedCardTemplateId],
   );
   const stats = useMemo(
-    () => deckStats(previewLegality, rules, selectedWizardType, selectedRuneIds, progression),
-    [previewLegality, rules, selectedWizardType, selectedRuneIds, progression],
+    () => deckStats(previewLegality, rules, selectedHeroType, selectedRuneIds, progression),
+    [previewLegality, rules, selectedHeroType, selectedRuneIds, progression],
   );
 
   useEffect(() => {
@@ -207,7 +207,7 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
     setNotice(null);
     try {
       const saved = await updateDeck(selectedDeckId, deckName, localCards, defaultDeck, {
-        wizardType: selectedWizardType,
+        heroType: selectedHeroType,
         runeIds: selectedRuneIds,
       });
       await reloadDecks(saved.id);
@@ -490,12 +490,12 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
         <aside className="deck-details-panel" aria-label="Deck details">
           <DeckStatsPanel
             stats={stats}
-            selectedWizardType={selectedWizardType}
+            selectedHeroType={selectedHeroType}
             selectedRuneIds={selectedRuneIds}
             progression={progressionLoadState.progression}
-            onWizardChange={(wizardType) => {
-              setSelectedWizardType(wizardType);
-              setSelectedRuneIds(defaultRuneIdsForWizard(progressionLoadState.progression, wizardType));
+            onHeroChange={(heroType) => {
+              setSelectedHeroType(heroType);
+              setSelectedRuneIds(defaultRuneIdsForHero(progressionLoadState.progression, heroType));
             }}
             onRuneChange={setSelectedRuneIds}
           />
@@ -533,17 +533,17 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
 
 function DeckStatsPanel({
   stats,
-  selectedWizardType,
+  selectedHeroType,
   selectedRuneIds,
   progression,
-  onWizardChange,
+  onHeroChange,
   onRuneChange,
 }: {
   stats: ReturnType<typeof deckStats>;
-  selectedWizardType: WizardType;
+  selectedHeroType: HeroType;
   selectedRuneIds: string[];
   progression: ProgressionResponse;
-  onWizardChange: (wizardType: WizardType) => void;
+  onHeroChange: (heroType: HeroType) => void;
   onRuneChange: (runeIds: string[]) => void;
 }) {
   return (
@@ -585,16 +585,16 @@ function DeckStatsPanel({
         </ul>
       ) : null}
 
-      <div className="deck-config-panel" aria-label="Wizard configuration">
-        <div className="preferred-wizard-control">
-          <span>Wizard</span>
+      <div className="deck-config-panel" aria-label="Hero configuration">
+        <div className="preferred-hero-control">
+          <span>Hero</span>
           <select
-            value={selectedWizardType}
-            onChange={(event) => onWizardChange(event.target.value as WizardType)}
+            value={selectedHeroType}
+            onChange={(event) => onHeroChange(event.target.value as HeroType)}
           >
-            {WIZARD_OPTIONS.map((wizard) => (
-              <option key={wizard.id} value={wizard.id}>
-                {wizard.name}
+            {HERO_OPTIONS.map((hero) => (
+              <option key={hero.id} value={hero.id}>
+                {hero.name}
               </option>
             ))}
           </select>
@@ -605,7 +605,7 @@ function DeckStatsPanel({
         </div>
         <RuneSelector
           progression={progression}
-          wizardType={selectedWizardType}
+          heroType={selectedHeroType}
           selectedRuneIds={selectedRuneIds}
           onChange={onRuneChange}
         />

@@ -1,9 +1,9 @@
 import { Heart, Layers, Sword, WandSparkles, Zap } from "lucide-react";
-import { WizardPreview3D } from "../WizardPreview3D";
-import { WIZARD_OPTIONS } from "../wizards";
-import { defaultRuneIdsForWizard, wizardOptionByType } from "../labels";
-import { runeNamesForLoadout, skillNamesForWizard, type HomeLoadout } from "../deckHelpers";
-import type { ProgressionResponse, RuneDefinition, WizardType } from "../types";
+import { HeroPreview3D } from "../HeroPreview3D";
+import { HERO_OPTIONS } from "../heroes";
+import { defaultRuneIdsForHero, heroOptionByType } from "../labels";
+import { runeNamesForLoadout, skillNamesForHero, type HomeLoadout } from "../deckHelpers";
+import type { ProgressionResponse, RuneDefinition, HeroType } from "../types";
 
 export function LoadoutCard({
   loadout,
@@ -18,13 +18,13 @@ export function LoadoutCard({
   onSelect: (loadout: HomeLoadout) => void;
   busy: boolean;
 }) {
-  const wizard = wizardOptionByType(loadout.wizardType);
+  const hero = heroOptionByType(loadout.heroType);
   const effectiveRuneIds =
     loadout.kind === "system" && progression
-      ? defaultRuneIdsForWizard(progression, loadout.wizardType)
+      ? defaultRuneIdsForHero(progression, loadout.heroType)
       : loadout.runeIds;
   const runeNames = runeNamesForLoadout(progression, effectiveRuneIds);
-  const skillNames = skillNamesForWizard(progression, loadout.wizardType);
+  const skillNames = skillNamesForHero(progression, loadout.heroType);
 
   return (
     <button
@@ -35,7 +35,7 @@ export function LoadoutCard({
       disabled={busy || !loadout.legal}
     >
       <span className="loadout-card-model">
-        <WizardPreview3D wizardType={loadout.wizardType} label={wizard?.name ?? "Wizard"} />
+        <HeroPreview3D heroType={loadout.heroType} label={hero?.name ?? "Hero"} />
       </span>
       <span className="loadout-card-body">
         <span className="loadout-card-heading">
@@ -45,18 +45,18 @@ export function LoadoutCard({
           </span>
           <WandSparkles size={18} />
         </span>
-        <span className="wizard-stat-row">
+        <span className="hero-stat-row">
           <span>
             <Heart size={13} />
-            {wizard?.hp ?? 0}
+            {hero?.hp ?? 0}
           </span>
           <span>
             <Sword size={13} />
-            {wizard?.attack ?? 0}
+            {hero?.attack ?? 0}
           </span>
           <span>
             <Zap size={13} />
-            {wizard?.ap ?? 0}
+            {hero?.ap ?? 0}
           </span>
           <span>
             <Layers size={13} />
@@ -64,7 +64,7 @@ export function LoadoutCard({
           </span>
         </span>
         <span className="loadout-detail-list">
-          <span>{wizard?.name ?? "Wizard"}</span>
+          <span>{hero?.name ?? "Hero"}</span>
           <span>{runeNames.length > 0 ? runeNames.join(", ") : "No runes equipped"}</span>
           <span>{skillNames.length > 0 ? skillNames.join(", ") : "Base skill only"}</span>
           {!loadout.legal ? <span>Draft deck cannot start a match</span> : null}
@@ -75,48 +75,48 @@ export function LoadoutCard({
 }
 
 
-export function WizardPicker({
-  selectedWizardType,
+export function HeroPicker({
+  selectedHeroType,
   busy,
   onSelect,
 }: {
-  selectedWizardType: WizardType;
+  selectedHeroType: HeroType;
   busy: boolean;
-  onSelect: (wizardType: WizardType) => void;
+  onSelect: (heroType: HeroType) => void;
 }) {
   return (
-    <fieldset className="wizard-picker" aria-label="Wizard type">
-      <legend>Wizard Type</legend>
-      <div className="wizard-options">
-        {WIZARD_OPTIONS.map((wizard) => (
+    <fieldset className="hero-picker" aria-label="Hero type">
+      <legend>Hero Type</legend>
+      <div className="hero-options">
+        {HERO_OPTIONS.map((hero) => (
           <button
-            key={wizard.id}
-            className={`wizard-option ${selectedWizardType === wizard.id ? "selected" : ""}`}
+            key={hero.id}
+            className={`hero-option ${selectedHeroType === hero.id ? "selected" : ""}`}
             type="button"
-            aria-pressed={selectedWizardType === wizard.id}
-            onClick={() => onSelect(wizard.id)}
+            aria-pressed={selectedHeroType === hero.id}
+            onClick={() => onSelect(hero.id)}
             disabled={busy}
           >
-            <span className="wizard-option-header">
+            <span className="hero-option-header">
               <span>
-                <strong>{wizard.name}</strong>
-                <span>{wizard.role}</span>
+                <strong>{hero.name}</strong>
+                <span>{hero.role}</span>
               </span>
               <WandSparkles size={18} />
             </span>
-            <span className="wizard-option-text">{wizard.text}</span>
-            <span className="wizard-stat-row">
+            <span className="hero-option-text">{hero.text}</span>
+            <span className="hero-stat-row">
               <span>
                 <Heart size={13} />
-                {wizard.hp}
+                {hero.hp}
               </span>
               <span>
                 <Sword size={13} />
-                {wizard.attack}
+                {hero.attack}
               </span>
               <span>
                 <Zap size={13} />
-                {wizard.ap}
+                {hero.ap}
               </span>
             </span>
           </button>
@@ -128,16 +128,16 @@ export function WizardPicker({
 
 export function RuneSelector({
   progression,
-  wizardType,
+  heroType,
   selectedRuneIds,
   onChange,
 }: {
   progression: ProgressionResponse;
-  wizardType: WizardType;
+  heroType: HeroType;
   selectedRuneIds: string[];
   onChange: (runeIds: string[]) => void;
 }) {
-  const wizard = wizardOptionByType(wizardType);
+  const hero = heroOptionByType(heroType);
   function toggleRune(rune: RuneDefinition) {
     if (!rune.unlocked) {
       return;
@@ -157,7 +157,7 @@ export function RuneSelector({
       <div>
         <span>Runes</span>
         <strong>
-          {wizard?.name ?? "Wizard"} · {selectedRuneIds.length}/{progression.account.runeSlots}
+          {hero?.name ?? "Hero"} · {selectedRuneIds.length}/{progression.account.runeSlots}
         </strong>
       </div>
       <div className="rune-grid compact">
@@ -187,16 +187,16 @@ export function RuneSelector({
 export function LobbySeatStatus({
   label,
   ready,
-  wizardName,
+  heroName,
 }: {
   label: string;
   ready: boolean;
-  wizardName: string | null;
+  heroName: string | null;
 }) {
   return (
     <div className={`lobby-seat-status ${ready ? "ready" : ""}`}>
       <span>{label}</span>
-      <strong>{ready ? (wizardName ?? "Ready") : "Choosing"}</strong>
+      <strong>{ready ? (heroName ?? "Ready") : "Choosing"}</strong>
     </div>
   );
 }

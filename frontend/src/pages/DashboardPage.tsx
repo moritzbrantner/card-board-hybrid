@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { loadDecks, loadProfileMatches, loadProgression } from "../api";
 import type { AccountProps, DeckLoadState, MatchArchiveLoadState, ProgressionLoadState } from "../appTypes";
 import { TopNav } from "../components/common";
-import { formatMatchStatus, formatUnixTime, wizardOptionByType } from "../labels";
-import type { MatchSummary, WizardType } from "../types";
+import { formatMatchStatus, formatUnixTime, heroOptionByType } from "../labels";
+import type { MatchSummary, HeroType } from "../types";
 
 export function DashboardPage({
   currentUser,
@@ -116,8 +116,8 @@ export function DashboardPage({
 
             <section className="dashboard-grid" aria-label="Account summary">
               <ProgressionSummaryCard progressionState={progressionState} />
-              <PreferredWizardCard
-                preferredWizardType={currentUser.preferredWizardType}
+              <PreferredHeroCard
+                preferredHeroType={currentUser.preferredHeroType}
                 progressionState={progressionState}
                 onNavigate={onNavigate}
               />
@@ -156,7 +156,7 @@ function SignedOutDashboard({ onNavigate }: { onNavigate: (to: string) => void }
       <div>
         <p className="eyebrow">Rune Lanes</p>
         <h1>Player Dashboard</h1>
-        <p>Track your wizards, deck recipes, and match history after signing in, or jump straight into a match.</p>
+        <p>Track your heroes, deck recipes, and match history after signing in, or jump straight into a match.</p>
       </div>
       <div className="dashboard-hero-actions">
         <button className="primary-button" type="button" onClick={() => onNavigate("/play")}>
@@ -210,31 +210,31 @@ function ProgressionSummaryCard({
   );
 }
 
-function PreferredWizardCard({
-  preferredWizardType,
+function PreferredHeroCard({
+  preferredHeroType,
   progressionState,
   onNavigate,
 }: {
-  preferredWizardType: WizardType;
+  preferredHeroType: HeroType;
   progressionState: ProgressionLoadState | null;
   onNavigate: (to: string) => void;
 }) {
-  const wizardOption = wizardOptionByType(preferredWizardType);
-  const wizardProgression =
+  const heroOption = heroOptionByType(preferredHeroType);
+  const heroProgression =
     progressionState?.status === "ready"
-      ? progressionState.progression.wizards.find((wizard) => wizard.wizardType === preferredWizardType)
+      ? progressionState.progression.heroes.find((hero) => hero.heroType === preferredHeroType)
       : null;
 
   return (
     <article className="dashboard-panel">
       <div className="dashboard-panel-heading">
         <Swords size={18} />
-        <h2>Preferred Wizard</h2>
+        <h2>Preferred Hero</h2>
       </div>
       <div className="dashboard-feature-row">
         <div>
-          <span>{wizardOption.role}</span>
-          <strong>{wizardOption.name}</strong>
+          <span>{heroOption.role}</span>
+          <strong>{heroOption.name}</strong>
         </div>
         <button className="secondary-link" type="button" onClick={() => onNavigate("/profile")}>
           Profile
@@ -242,17 +242,17 @@ function PreferredWizardCard({
       </div>
       {progressionState?.status === "loading" ? <p className="empty-state">Loading mastery.</p> : null}
       {progressionState?.status === "error" ? <p className="notice">{progressionState.message}</p> : null}
-      {wizardProgression ? (
+      {heroProgression ? (
         <>
           <div className="dashboard-stat-grid">
-            <DashboardStat label="Mastery" value={wizardProgression.level} />
-            <DashboardStat label="Skill Points" value={wizardProgression.availableSkillPoints} />
-            <DashboardStat label="Wizard XP" value={wizardProgression.xp} />
+            <DashboardStat label="Mastery" value={heroProgression.level} />
+            <DashboardStat label="Skill Points" value={heroProgression.availableSkillPoints} />
+            <DashboardStat label="Hero XP" value={heroProgression.xp} />
           </div>
           <DashboardProgressBar
-            label={`Next mastery level in ${wizardProgression.xpToNextLevel} XP`}
-            value={wizardProgression.xpIntoLevel}
-            max={wizardProgression.nextLevelXp - wizardProgression.currentLevelXp}
+            label={`Next mastery level in ${heroProgression.xpToNextLevel} XP`}
+            value={heroProgression.xpIntoLevel}
+            max={heroProgression.nextLevelXp - heroProgression.currentLevelXp}
           />
         </>
       ) : progressionState?.status === "ready" ? (

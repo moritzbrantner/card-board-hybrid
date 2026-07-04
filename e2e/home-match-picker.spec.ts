@@ -25,15 +25,15 @@ test("AI deck selection remains visible with system and legal account deck recip
   await expect(aiDeckSelector).not.toContainText("Needs More Basics");
 
   await aiDeckSelector.selectOption("account:101");
-  await page.getByLabel("AI Wizard").selectOption("chronomancer");
+  await page.getByLabel("AI Hero").selectOption("chronomancer");
   await page.getByRole("button", { name: "New Solo Match" }).click();
 
   await expect(page).toHaveURL(new RegExp(`/match/${MATCH_ID}$`));
   expect(matchRequests).toEqual([
     {
-      wizardType: "runekeeper",
+      heroType: "runekeeper",
       playerDeck: { source: "account", deckId: 102 },
-      aiOpponent: { source: "account", deckId: 101, wizardType: "chronomancer" },
+      aiOpponent: { source: "account", deckId: 101, heroType: "chronomancer" },
     },
   ]);
 });
@@ -65,7 +65,7 @@ test("signed-in players choose account deck recipes for solo match creation", as
   await expect(page).toHaveURL(new RegExp(`/match/${MATCH_ID}$`));
   expect(matchRequests).toEqual([
     {
-      wizardType: "pyromancer",
+      heroType: "pyromancer",
       playerDeck: { source: "account", deckId: 101 },
       aiOpponent: { source: "system", systemDeckId: "balanced-starter" },
     },
@@ -98,7 +98,7 @@ test("signed-in players without legal deck recipes create solo matches through t
   await expect(page).toHaveURL(new RegExp(`/match/${MATCH_ID}$`));
   expect(matchRequests).toEqual([
     {
-      wizardType: "runekeeper",
+      heroType: "runekeeper",
       playerDeck: { source: "system", systemDeckId: "balanced-starter" },
       aiOpponent: { source: "system", systemDeckId: "balanced-starter" },
     },
@@ -122,7 +122,7 @@ test("anonymous players create solo matches without account deck controls or vis
   await expect(page).toHaveURL(new RegExp(`/match/${MATCH_ID}$`));
   expect(matchRequests).toEqual([
     {
-      wizardType: "runekeeper",
+      heroType: "runekeeper",
       playerDeck: { source: "system", systemDeckId: "balanced-starter" },
       aiOpponent: { source: "system", systemDeckId: "balanced-starter" },
     },
@@ -143,10 +143,10 @@ test("home screen creates a shared match from the multiplayer action", async ({ 
   await page.getByRole("button", { name: "New Multiplayer Match" }).click();
 
   await expect(page).toHaveURL(new RegExp(`/match/${SHARED_MATCH_ID}/player-seat$`));
-  expect(sharedMatchRequests).toEqual([{ wizardType: "runekeeper" }]);
+  expect(sharedMatchRequests).toEqual([{ heroType: "runekeeper" }]);
   expect(matchRequests).toEqual([]);
   expect(
-    await page.evaluate((matchId) => sessionStorage.getItem(`rune-lanes-wizard:${matchId}`), SHARED_MATCH_ID),
+    await page.evaluate((matchId) => sessionStorage.getItem(`rune-lanes-hero:${matchId}`), SHARED_MATCH_ID),
   ).toBe("runekeeper");
   expect(
     await page.evaluate((matchId) => sessionStorage.getItem(`rune-lanes-runes:${matchId}`), SHARED_MATCH_ID),
@@ -266,7 +266,7 @@ function authUser() {
     email: "player@local.dev",
     displayName: "Rune Player",
     avatar: { symbol: "sparkles", color: "emerald" },
-    preferredWizardType: "runekeeper",
+    preferredHeroType: "runekeeper",
     boardVisualMode: "2d",
     progressionSummary: {
       totalXp: 0,
@@ -305,11 +305,11 @@ function deckRules() {
 }
 
 function deckRecipe(id, name, isDefault, legal) {
-  const wizardType = id === 101 ? "pyromancer" : "runekeeper";
+  const heroType = id === 101 ? "pyromancer" : "runekeeper";
   return {
     id,
     name,
-    wizardType,
+    heroType,
     runeIds: [],
     isDefault,
     cards: [],
@@ -330,7 +330,7 @@ function systemDeck() {
   return {
     id: "balanced-starter",
     name: "Balanced Starter",
-    wizardType: "runekeeper",
+    heroType: "runekeeper",
     cards: [],
     legality: {
       legal: true,
@@ -363,11 +363,11 @@ function progression() {
         unlocked: true,
       },
     ],
-    wizards: [],
+    heroes: [],
     skillTrees: [],
     loadouts: [
-      { wizardType: "runekeeper", runeIds: [] },
-      { wizardType: "pyromancer", runeIds: [] },
+      { heroType: "runekeeper", runeIds: [] },
+      { heroType: "pyromancer", runeIds: [] },
     ],
   };
 }
@@ -397,10 +397,10 @@ function participant(side) {
     side,
     mana: 5,
     maxMana: 5,
-    wizard: {
-      id: `${side}-wizard`,
+    hero: {
+      id: `${side}-hero`,
       side,
-      wizardType: side === "player" ? "pyromancer" : "runekeeper",
+      heroType: side === "player" ? "pyromancer" : "runekeeper",
       hp: 20,
       maxHp: 20,
       attack: 1,

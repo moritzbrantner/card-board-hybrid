@@ -44,15 +44,15 @@ import {
   UnitContextMenuView,
 } from "../components/board";
 import { AccountActions, ShellMessage } from "../components/common";
-import { LobbySeatStatus, RuneSelector, WizardPicker } from "../components/loadoutControls";
+import { LobbySeatStatus, RuneSelector, HeroPicker } from "../components/loadoutControls";
 import { deckChoiceFromValue, deckChoiceValue } from "../deckHelpers";
 import {
-  defaultRuneIdsForWizard,
-  isWizardType,
+  defaultRuneIdsForHero,
+  isHeroType,
   parseDeckChoice,
   parseRuneIds,
   sideLabel,
-  wizardOptionByType,
+  heroOptionByType,
 } from "../labels";
 import {
   cardFanStyle,
@@ -79,9 +79,9 @@ import type {
   SharedClientMessage,
   SharedServerMessage,
   Side,
-  WizardType,
+  HeroType,
 } from "../types";
-import { WIZARD_OPTIONS } from "../wizards";
+import { HERO_OPTIONS } from "../heroes";
 
 export function SharedMatchPage({
   matchId,
@@ -110,9 +110,9 @@ export function SharedMatchPage({
     coord: null,
     visible: false,
   });
-  const [selectedWizardType, setSelectedWizardType] = useState<WizardType>(() => {
-    const stored = sessionStorage.getItem(`rune-lanes-wizard:${matchId}`);
-    return isWizardType(stored) ? stored : (currentUser?.preferredWizardType ?? "runekeeper");
+  const [selectedHeroType, setSelectedHeroType] = useState<HeroType>(() => {
+    const stored = sessionStorage.getItem(`rune-lanes-hero:${matchId}`);
+    return isHeroType(stored) ? stored : (currentUser?.preferredHeroType ?? "runekeeper");
   });
   const [deckLoadState, setDeckLoadState] = useState<DeckLoadState | null>(
     currentUser ? { status: "loading" } : null,
@@ -214,7 +214,7 @@ export function SharedMatchPage({
       .then((progression) => {
         setProgressionLoadState({ status: "ready", progression });
         setSelectedRuneIds((current) =>
-          current.length > 0 ? current : defaultRuneIdsForWizard(progression, selectedWizardType),
+          current.length > 0 ? current : defaultRuneIdsForHero(progression, selectedHeroType),
         );
       })
       .catch((error: unknown) =>
@@ -229,10 +229,10 @@ export function SharedMatchPage({
     if (progressionLoadState?.status === "ready") {
       const stored = sessionStorage.getItem(`rune-lanes-runes:${matchId}`);
       setSelectedRuneIds(
-        stored ? parseRuneIds(stored) : defaultRuneIdsForWizard(progressionLoadState.progression, selectedWizardType),
+        stored ? parseRuneIds(stored) : defaultRuneIdsForHero(progressionLoadState.progression, selectedHeroType),
       );
     }
-  }, [selectedWizardType, progressionLoadState?.status, matchId]);
+  }, [selectedHeroType, progressionLoadState?.status, matchId]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
@@ -311,10 +311,10 @@ export function SharedMatchPage({
   const canAct = Boolean(match && (hasPendingStack ? isPriorityViewer : isActiveViewer));
 
   useEffect(() => {
-    if (shared?.status === "setup" && shared.viewerWizardType) {
-      setSelectedWizardType(shared.viewerWizardType);
+    if (shared?.status === "setup" && shared.viewerHeroType) {
+      setSelectedHeroType(shared.viewerHeroType);
     }
-  }, [shared?.status, shared?.viewerWizardType]);
+  }, [shared?.status, shared?.viewerHeroType]);
 
   const selectedCard = useMemo(() => {
     if (!match || selection?.type !== "card") {
@@ -549,14 +549,14 @@ export function SharedMatchPage({
       const joined = await joinSharedMatch(
         matchId,
         seatToken,
-        selectedWizardType,
+        selectedHeroType,
         selectedDeckId === "starter" || selectedDeckId.startsWith("system:")
           ? undefined
           : Number(selectedDeckId),
         selectedRuneIds,
         deckChoiceFromValue(selectedDeckId),
       );
-      sessionStorage.setItem(`rune-lanes-wizard:${matchId}`, selectedWizardType);
+      sessionStorage.setItem(`rune-lanes-hero:${matchId}`, selectedHeroType);
       sessionStorage.setItem(`rune-lanes-runes:${matchId}`, JSON.stringify(selectedRuneIds));
       sessionStorage.setItem(
         `rune-lanes-deck-choice:${matchId}`,
@@ -570,9 +570,9 @@ export function SharedMatchPage({
     }
   }
 
-  function handleSelectLobbyWizard(wizardType: WizardType) {
-    setSelectedWizardType(wizardType);
-    sessionStorage.setItem(`rune-lanes-wizard:${matchId}`, wizardType);
+  function handleSelectLobbyHero(heroType: HeroType) {
+    setSelectedHeroType(heroType);
+    sessionStorage.setItem(`rune-lanes-hero:${matchId}`, heroType);
     sessionStorage.removeItem(`rune-lanes-runes:${matchId}`);
   }
 
@@ -696,10 +696,10 @@ export function SharedMatchPage({
     const inviteUrl =
       sessionStorage.getItem(`rune-lanes-invite:${matchId}`) ??
       "Invite link unavailable after reload.";
-    const hasUnsavedWizardChoice = shared.viewerWizardType !== selectedWizardType;
-    const savedWizard = shared.viewerWizardType ? wizardOptionByType(shared.viewerWizardType) : null;
-    const opponentWizard = shared.opponentWizardType
-      ? wizardOptionByType(shared.opponentWizardType)
+    const hasUnsavedHeroChoice = shared.viewerHeroType !== selectedHeroType;
+    const savedHero = shared.viewerHeroType ? heroOptionByType(shared.viewerHeroType) : null;
+    const opponentHero = shared.opponentHeroType
+      ? heroOptionByType(shared.opponentHeroType)
       : null;
     const legalDecks =
       deckLoadState?.status === "ready"
@@ -708,8 +708,8 @@ export function SharedMatchPage({
     const systemDecks =
       systemDeckLoadState.status === "ready" ? systemDeckLoadState.response.decks : [];
     const lobbyActionLabel = shared.viewerReady
-      ? hasUnsavedWizardChoice
-        ? "Update Wizard"
+      ? hasUnsavedHeroChoice
+        ? "Update Hero"
         : "Ready"
       : viewerSide === "player"
         ? "Ready"
@@ -745,10 +745,10 @@ export function SharedMatchPage({
               </button>
             </div>
           ) : null}
-          <WizardPicker
-            selectedWizardType={selectedWizardType}
+          <HeroPicker
+            selectedHeroType={selectedHeroType}
             busy={busy}
-            onSelect={handleSelectLobbyWizard}
+            onSelect={handleSelectLobbyHero}
           />
           <section className="setup-deck-selectors" aria-label="Shared deck selection">
             <label>
@@ -779,7 +779,7 @@ export function SharedMatchPage({
           {progressionLoadState?.status === "ready" ? (
             <RuneSelector
               progression={progressionLoadState.progression}
-              wizardType={selectedWizardType}
+              heroType={selectedHeroType}
               selectedRuneIds={selectedRuneIds}
               onChange={setSelectedRuneIds}
             />
@@ -791,12 +791,12 @@ export function SharedMatchPage({
             <LobbySeatStatus
               label="You"
               ready={shared.viewerReady}
-              wizardName={savedWizard?.name ?? null}
+              heroName={savedHero?.name ?? null}
             />
             <LobbySeatStatus
               label="Opponent"
               ready={shared.opponentReady}
-              wizardName={opponentWizard?.name ?? null}
+              heroName={opponentHero?.name ?? null}
             />
           </div>
           <button
@@ -811,7 +811,7 @@ export function SharedMatchPage({
           <p className="notice">
             {shared.viewerReady
               ? "Waiting for both players to be ready."
-              : "Choose a wizard to enter the lobby."}
+              : "Choose a hero to enter the lobby."}
           </p>
           {notice ? <p className="notice">{notice}</p> : null}
         </section>

@@ -26,8 +26,8 @@ import {
   resolveBoardModel,
   type BoardModelManifest,
 } from "./board3dModelManifest";
-import type { MatchVisualCatalog, UnitVisualIdentity, WizardVisualIdentity } from "./matchVisualIdentity";
-import type { HexCoord, HexTile, Side, Unit, WizardType } from "./types";
+import type { MatchVisualCatalog, UnitVisualIdentity, HeroVisualIdentity } from "./matchVisualIdentity";
+import type { HexCoord, HexTile, Side, Unit, HeroType } from "./types";
 import { BOARD_ANIMATION_DURATION_MS, type BoardAnimationCue, type PieceAnimation } from "./boardAnimations";
 
 const BOARD_CAMERA_MIN_DISTANCE = 5.8;
@@ -36,12 +36,12 @@ const BOARD_CAMERA_MIN_POLAR_ANGLE = Math.PI * 0.22;
 const BOARD_CAMERA_MAX_POLAR_ANGLE = Math.PI * 0.43;
 const CAMERA_DRAG_CLICK_THRESHOLD_PX = 6;
 
-export type Board3DWizard = {
-  pieceType: "wizard";
+export type Board3DHero = {
+  pieceType: "hero";
   id: string;
   side: Side;
   name: string;
-  wizardType: WizardType;
+  heroType: HeroType;
   hp: number;
   maxHp: number;
   attack: number;
@@ -67,7 +67,7 @@ export type Board3DUnit = {
   items: Unit["items"];
 };
 
-export type Board3DPiece = Board3DWizard | Board3DUnit;
+export type Board3DPiece = Board3DHero | Board3DUnit;
 
 export type Board3DTileInteraction = {
   coord: HexCoord;
@@ -585,7 +585,7 @@ function PieceMesh({
   const resolved = resolveBoardModel(piece, manifest);
   const [x, y, z] = axialToBoardPosition(piece.position, 1);
   const visualIdentity =
-    piece.pieceType === "wizard" ? visualCatalog.wizard(piece) : visualCatalog.unit(piece);
+    piece.pieceType === "hero" ? visualCatalog.hero(piece) : visualCatalog.unit(piece);
   const resolvedAssetPath = resolved.status === "available" ? resolved.entry.path : null;
   const handleAssetFailure = useCallback(() => {
     setAssetFailed(true);
@@ -799,7 +799,7 @@ function FallbackPieceMarker({
   position: [number, number, number];
   side: Side;
   pieceType: Board3DPiece["pieceType"];
-  visualIdentity: UnitVisualIdentity | WizardVisualIdentity;
+  visualIdentity: UnitVisualIdentity | HeroVisualIdentity;
   selected: boolean;
   legalTarget: boolean;
   coord: HexCoord;
@@ -809,7 +809,7 @@ function FallbackPieceMarker({
   onContextMenu: (coord: HexCoord, event: { clientX: number; clientY: number }) => void;
 }) {
   const sideColor = side === "player" ? "#77b36f" : "#d1665a";
-  const height = pieceType === "wizard" ? 0.72 : 0.52;
+  const height = pieceType === "hero" ? 0.72 : 0.52;
   const ringColor = selected ? "#fffaf0" : legalTarget ? "#d9b84f" : "#101312";
 
   return (

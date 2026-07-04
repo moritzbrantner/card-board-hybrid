@@ -77,7 +77,7 @@ function playableMatch() {
       side: "player",
       mana: 8,
       maxMana: 8,
-      wizard: wizard("player-wizard", "player", { q: 0, r: 1 }),
+      hero: hero("player-hero", "player", { q: 0, r: 1 }),
       progression: progression(),
       hand,
       handCount: hand.length,
@@ -88,7 +88,7 @@ function playableMatch() {
       side: "opponent",
       mana: 8,
       maxMana: 8,
-      wizard: wizard("opponent-wizard", "opponent", { q: 1, r: 1 }),
+      hero: hero("opponent-hero", "opponent", { q: 1, r: 1 }),
       progression: progression(),
       handCount: 3,
       deckCount: 25,
@@ -128,11 +128,11 @@ function catalogCard(card) {
   };
 }
 
-function wizard(id, side, position) {
+function hero(id, side, position) {
   return {
     id,
     side,
-    wizardType: side === "player" ? "runekeeper" : "pyromancer",
+    heroType: side === "player" ? "runekeeper" : "pyromancer",
     hp: side === "player" ? 20 : 18,
     maxHp: side === "player" ? 20 : 18,
     attack: side === "player" ? 1 : 2,
