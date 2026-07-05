@@ -430,6 +430,115 @@ button {
   gap: 12px;
 }
 
+.loadout-carousel {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  outline: none;
+}
+
+.loadout-carousel:focus-visible {
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px rgba(217, 184, 79, 0.42);
+}
+
+.carousel-track {
+  display: grid;
+  grid-template-columns: minmax(0, 120px) minmax(270px, 520px) minmax(0, 120px);
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.loadout-carousel .loadout-card {
+  justify-self: center;
+  width: min(520px, 100%);
+  min-height: 360px;
+}
+
+.carousel-arrow {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #fffaf0;
+  background: rgba(28, 33, 32, 0.9);
+  cursor: pointer;
+}
+
+.carousel-arrow:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.loadout-peek {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  min-height: 156px;
+  align-content: center;
+  border: 1px solid rgba(247, 243, 234, 0.08);
+  border-radius: 8px;
+  padding: 12px;
+  color: #fffaf0;
+  background: rgba(28, 33, 32, 0.5);
+  opacity: 0.72;
+}
+
+.loadout-peek.previous {
+  text-align: right;
+}
+
+.loadout-peek span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.loadout-peek strong,
+.loadout-peek small {
+  overflow-wrap: anywhere;
+}
+
+.loadout-peek small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.carousel-dots {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.carousel-dots button {
+  width: 10px;
+  height: 10px;
+  border: 1px solid rgba(247, 243, 234, 0.35);
+  border-radius: 999px;
+  padding: 0;
+  background: rgba(247, 243, 234, 0.16);
+  cursor: pointer;
+}
+
+.carousel-dots button[aria-current="true"] {
+  border-color: var(--gold);
+  background: var(--gold);
+}
+
+.carousel-dots button:disabled {
+  cursor: not-allowed;
+}
+
 .loadout-card {
   display: grid;
   grid-template-rows: 132px 1fr;
@@ -477,6 +586,7 @@ button {
 .loadout-card-body,
 .loadout-detail-list,
 .selected-loadout-summary,
+.loadout-empty-state,
 .deck-config-skills {
   display: grid;
   gap: 8px;
@@ -512,6 +622,27 @@ button {
 
 .loadout-detail-list span {
   overflow-wrap: anywhere;
+}
+
+.loadout-empty-state {
+  justify-items: center;
+  border: 1px dashed rgba(247, 243, 234, 0.22);
+  border-radius: 8px;
+  padding: 18px;
+  text-align: center;
+  background: rgba(16, 19, 18, 0.42);
+}
+
+.loadout-empty-state strong {
+  color: #fffaf0;
+}
+
+.loadout-empty-state span {
+  max-width: 560px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.4;
 }
 
 .home-setup-panel {
@@ -4316,6 +4447,28 @@ h1 {
 
   .deck-recipe-scroll {
     grid-auto-columns: minmax(168px, 78vw);
+  }
+
+  .loadout-carousel {
+    grid-template-columns: 40px minmax(0, 1fr) 40px;
+    gap: 8px;
+  }
+
+  .carousel-arrow {
+    width: 40px;
+    height: 40px;
+  }
+
+  .carousel-track {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .loadout-peek {
+    display: none;
+  }
+
+  .loadout-carousel .loadout-card {
+    min-height: 342px;
   }
 
   .deck-catalog-sidebar,

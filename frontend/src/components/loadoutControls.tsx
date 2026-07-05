@@ -1,4 +1,5 @@
-import { Heart, Layers, Sword, WandSparkles, Zap } from "lucide-react";
+import { ChevronLeft, ChevronRight, Heart, Layers, Sword, WandSparkles, Zap } from "lucide-react";
+import type { KeyboardEvent } from "react";
 import { HeroPreview3D } from "../HeroPreview3D";
 import { HERO_OPTIONS } from "../heroes";
 import { defaultRuneIdsForHero, heroOptionByType } from "../labels";
@@ -71,6 +72,118 @@ export function LoadoutCard({
         </span>
       </span>
     </button>
+  );
+}
+
+export function LoadoutCarousel({
+  loadouts,
+  selectedLoadoutId,
+  progression,
+  busy,
+  onSelect,
+}: {
+  loadouts: HomeLoadout[];
+  selectedLoadoutId: string | null;
+  progression: ProgressionResponse | null;
+  busy: boolean;
+  onSelect: (loadout: HomeLoadout) => void;
+}) {
+  const selectedIndex = Math.max(
+    0,
+    loadouts.findIndex((loadout) => loadout.id === selectedLoadoutId),
+  );
+  const selectedLoadout = loadouts[selectedIndex] ?? null;
+  const previousLoadout = loadouts.length > 1
+    ? loadouts[(selectedIndex - 1 + loadouts.length) % loadouts.length]
+    : null;
+  const nextLoadout = loadouts.length > 1
+    ? loadouts[(selectedIndex + 1) % loadouts.length]
+    : null;
+
+  function selectOffset(offset: number) {
+    if (busy || loadouts.length === 0) {
+      return;
+    }
+    const nextIndex = (selectedIndex + offset + loadouts.length) % loadouts.length;
+    onSelect(loadouts[nextIndex]);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      selectOffset(-1);
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      selectOffset(1);
+    }
+  }
+
+  if (!selectedLoadout) {
+    return null;
+  }
+
+  return (
+    <section
+      className="loadout-carousel"
+      aria-label="Configured deck recipes"
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+    >
+      <button
+        className="carousel-arrow"
+        type="button"
+        aria-label="Previous configured deck recipe"
+        onClick={() => selectOffset(-1)}
+        disabled={busy || loadouts.length < 2}
+      >
+        <ChevronLeft size={20} aria-hidden="true" />
+      </button>
+      <div className="carousel-track" aria-live="polite">
+        {previousLoadout ? <LoadoutPeek loadout={previousLoadout} side="previous" /> : null}
+        <LoadoutCard
+          loadout={selectedLoadout}
+          selected
+          progression={progression}
+          onSelect={onSelect}
+          busy={busy}
+        />
+        {nextLoadout ? <LoadoutPeek loadout={nextLoadout} side="next" /> : null}
+      </div>
+      <button
+        className="carousel-arrow"
+        type="button"
+        aria-label="Next configured deck recipe"
+        onClick={() => selectOffset(1)}
+        disabled={busy || loadouts.length < 2}
+      >
+        <ChevronRight size={20} aria-hidden="true" />
+      </button>
+      <div className="carousel-dots" aria-label="Configured deck recipe position">
+        {loadouts.map((loadout, index) => (
+          <button
+            key={loadout.id}
+            type="button"
+            aria-label={`Select ${loadout.name}`}
+            aria-current={index === selectedIndex ? "true" : undefined}
+            onClick={() => onSelect(loadout)}
+            disabled={busy}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function LoadoutPeek({ loadout, side }: { loadout: HomeLoadout; side: "previous" | "next" }) {
+  const hero = heroOptionByType(loadout.heroType);
+
+  return (
+    <div className={`loadout-peek ${side}`} aria-hidden="true">
+      <span>{side === "previous" ? "Previous" : "Next"}</span>
+      <strong>{loadout.name}</strong>
+      <small>{hero?.name ?? "Hero"}</small>
+    </div>
   );
 }
 
