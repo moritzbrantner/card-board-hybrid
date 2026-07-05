@@ -84,6 +84,7 @@ export type Board3DTileInteraction = {
   isFocused?: boolean;
   tutorialHighlightTone?: TutorialHighlightTone;
   hasManaSource?: boolean;
+  hasBuilding?: boolean;
   hasPiece: boolean;
   pieceSide?: Side;
   pieceType?: Board3DPiece["pieceType"];
@@ -1148,6 +1149,7 @@ function Board3DHitTarget({
   const className = [
     "board-3d-hit-target",
     interaction.hasManaSource ? "mana-source" : "",
+    interaction.hasBuilding ? "building" : "",
     interaction.hasPiece ? "occupied" : "",
     interaction.pieceSide ? `occupied-${interaction.pieceSide}` : "",
     interaction.isLegal ? "legal" : "",
@@ -1207,6 +1209,7 @@ function Board3DHitTarget({
       }}
     >
       {interaction.hasManaSource ? <span aria-hidden="true">M</span> : null}
+      {interaction.hasBuilding && !interaction.hasManaSource ? <span aria-hidden="true">B</span> : null}
       {interaction.pieceLabel ? <span>{interaction.pieceLabel}</span> : null}
       {interaction.pieceStatLabel ? <strong>{interaction.pieceStatLabel}</strong> : null}
       {interaction.droppedItemCount ? (

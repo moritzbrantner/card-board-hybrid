@@ -55,6 +55,7 @@ import {
   heroOptionByType,
 } from "../labels";
 import {
+  buildingAt,
   cardFanStyle,
   cardTargetForTile,
   handCountForSide,
@@ -71,6 +72,7 @@ import {
 import { createMatchVisualCatalog } from "../matchVisualIdentity";
 import type { HotkeyHandlers } from "../hotkeyRuntime";
 import type {
+  BuildingEffect,
   Card,
   CatalogCard,
   HexTile,
@@ -607,6 +609,21 @@ export function SharedMatchPage({
       }
     }
 
+    const building = buildingAt(match, tile.coord);
+    if (
+      !selectedPiece &&
+      piece?.side === viewerSide &&
+      building &&
+      buildingEffectIsActivated(building.effect) &&
+      !building.activatedThisTurn &&
+      piece.apRemaining > 0 &&
+      match.actionStack.length === 0 &&
+      match.activeSide === viewerSide
+    ) {
+      sendSharedAction({ type: "activateBuilding", buildingId: building.id });
+      return;
+    }
+
     if (piece?.side === viewerSide) {
       setSelection({ type: "piece", pieceId: piece.id });
       setNotice(null);
@@ -668,6 +685,11 @@ export function SharedMatchPage({
   function handleActivateUnitItem(unit: BoardUnit, itemId: string) {
     setUnitContextMenu(null);
     sendSharedAction({ type: "activateItem", unitId: unit.id, itemId });
+  }
+
+  function handleActivateUnitBuilding(buildingId: string) {
+    setUnitContextMenu(null);
+    sendSharedAction({ type: "activateBuilding", buildingId });
   }
 
   if (loadState.status === "loading") {
@@ -1024,8 +1046,24 @@ export function SharedMatchPage({
             contextMenuUnit.side === viewerSide
           }
           onActivateItem={(itemId) => handleActivateUnitItem(contextMenuUnit, itemId)}
+          building={buildingAt(match, contextMenuUnit.position)}
+          canActivateBuilding={
+            canAct &&
+            match.actionStack.length === 0 &&
+            match.activeSide === viewerSide &&
+            contextMenuUnit.side === viewerSide
+          }
+          onActivateBuilding={handleActivateUnitBuilding}
         />
       ) : null}
     </main>
+  );
+}
+
+function buildingEffectIsActivated(effect: BuildingEffect) {
+  return (
+    effect.type === "activatedDamageLine" ||
+    effect.type === "activatedHeal" ||
+    effect.type === "activatedStatBonus"
   );
 }

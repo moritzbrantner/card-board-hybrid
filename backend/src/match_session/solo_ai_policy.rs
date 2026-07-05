@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 use super::{
-    ActionTarget, Card, CardKind, HexCoord, PieceView, Side, SpellEffect, card_interactions,
+    ActionTarget, BuildingEffect, Card, CardKind, HexCoord, PieceView, Side, SpellEffect,
+    card_interactions,
 };
 
 #[derive(Clone, Debug)]
@@ -117,7 +118,7 @@ impl SoloAiPolicy {
                         .into_iter()
                         .find(|piece| view.damaged_piece_ids.contains(&piece.id))
                 }
-                SpellEffect::Buff { .. } => {
+                SpellEffect::Buff { .. } | SpellEffect::StatBuff { .. } => {
                     legal_spell_targets_for_ai(card, view, &view.opponent_units)
                         .into_iter()
                         .max_by_key(|piece| piece.attack)
@@ -179,7 +180,14 @@ impl SoloAiPolicy {
         }
 
         let card = view.opponent_hand.iter().find(|card| {
-            card.cost <= view.opponent_mana && matches!(card.kind, CardKind::ManaSource)
+            card.cost <= view.opponent_mana
+                && matches!(
+                    card.kind,
+                    CardKind::ManaSource
+                        | CardKind::Building {
+                            effect: BuildingEffect::TurnStartMana { .. }
+                        }
+                )
         })?;
         let coord = self.best_mana_source_hex(view)?;
 
@@ -358,6 +366,7 @@ mod tests {
             attack_range: 1,
             ap_remaining: 1,
             has_attacked: false,
+            is_hero: id.ends_with("hero"),
         }
     }
 

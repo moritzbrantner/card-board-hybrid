@@ -28,6 +28,7 @@ import {
 import { createMatchVisualCatalog, type CardVisualIdentity, type MatchVisualCatalog, type UnitVisualIdentity, type HeroVisualIdentity } from "../matchVisualIdentity";
 import type { BoardPiece, BoardUnit, UnitContextMenu } from "../appTypes";
 import type {
+  Building,
   BoardVisualMode,
   Card,
   HexCoord,
@@ -42,6 +43,7 @@ import { sameTutorialCoord } from "../tutorial/tutorialHighlights";
 import { DetailStat } from "./common";
 import {
   coordKey,
+  buildingAt,
   droppedItemsAt,
   groupTilesByColumn,
   isLegalAttack,
@@ -76,6 +78,9 @@ export function UnitContextMenuView({
   onOpenCardInfo,
   canActivateItems,
   onActivateItem,
+  building,
+  canActivateBuilding,
+  onActivateBuilding,
 }: {
   menu: Exclude<UnitContextMenu, null>;
   unit: BoardUnit;
@@ -83,6 +88,9 @@ export function UnitContextMenuView({
   onOpenCardInfo: () => void;
   canActivateItems: boolean;
   onActivateItem: (itemId: string) => void;
+  building?: Building | null;
+  canActivateBuilding?: boolean;
+  onActivateBuilding?: (buildingId: string) => void;
 }) {
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -129,7 +137,26 @@ export function UnitContextMenuView({
             {item.name}
           </button>
         ))}
+      {building && buildingEffectIsActivated(building.effect) ? (
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!canActivateBuilding || unit.apRemaining === 0 || building.activatedThisTurn}
+          onClick={() => onActivateBuilding?.(building.id)}
+        >
+          <Zap size={15} />
+          {building.name}
+        </button>
+      ) : null}
     </div>
+  );
+}
+
+function buildingEffectIsActivated(effect: Building["effect"]) {
+  return (
+    effect.type === "activatedDamageLine" ||
+    effect.type === "activatedHeal" ||
+    effect.type === "activatedStatBonus"
   );
 }
 
@@ -297,6 +324,12 @@ export function PlayerBadge({ player }: { player: MatchParticipantState }) {
         <Heart size={16} />
         {player.hero.hp}/{player.hero.maxHp}
       </span>
+      {(player.hero.shield ?? 0) > 0 ? (
+        <span>
+          <Shield size={16} />
+          {player.hero.shield ?? 0}
+        </span>
+      ) : null}
       <span>
         <Zap size={16} />
         {player.hero.apRemaining}/{player.hero.maxAp}
@@ -386,6 +419,7 @@ export function Board({
   const tileInteractions = match.board.tiles.map((tile): Board3DTileInteraction => {
     const piece = pieceAt(match, tile.coord);
     const hasManaSource = isManaSourceAt(match, tile.coord);
+    const hasBuilding = !!buildingAt(match, tile.coord);
     const isLegal =
       isInteractive &&
       ((selectedCard && isLegalCardTarget(match, viewerSide, selectedCard, tile.coord, piece)) ||
@@ -405,6 +439,7 @@ export function Board({
       isFocused,
       tutorialHighlightTone,
       hasManaSource,
+      hasBuilding,
       hasPiece: Boolean(piece),
       pieceSide: piece?.side,
       pieceType: piece?.pieceType,
@@ -507,6 +542,8 @@ export function Board({
               const displayPiece = displayPieceByCoord.get(coordKey(tile.coord)) ?? piece;
               const droppedItems = droppedItemsAt(match, tile.coord);
               const hasManaSource = isManaSourceAt(match, tile.coord);
+              const building = buildingAt(match, tile.coord);
+              const hasBuilding = !!building;
               const interaction = tileInteractions.find(
                 (candidate) => coordKey(candidate.coord) === coordKey(tile.coord),
               );
@@ -515,12 +552,14 @@ export function Board({
               const isFocused = focusedCoord ? sameCoord(tile.coord, focusedCoord) : false;
               const tutorialHighlightTone = tutorialHighlightForTile(tile.coord, piece?.id ?? null, tutorialHighlights);
               const occupantClass = displayPiece ? `occupied occupied-${displayPiece.side}` : "";
-              const title = tileTitle(tile, piece, viewerSide, droppedItems.length, hasManaSource);
+              const title = building
+                ? `${tileTitle(tile, piece, viewerSide, droppedItems.length, hasManaSource)}, building ${building.name}`
+                : tileTitle(tile, piece, viewerSide, droppedItems.length, hasManaSource);
 
               return (
                 <button
                   key={coordKey(tile.coord)}
-                  className={`hex-tile ${hasManaSource ? "mana-source" : ""} ${occupantClass} ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""} ${isFocused ? "keyboard-focused" : ""} ${tutorialHighlightTone ? `tutorial-highlight tutorial-highlight-${tutorialHighlightTone}` : ""}`}
+                  className={`hex-tile ${hasManaSource ? "mana-source" : ""} ${hasBuilding ? "building" : ""} ${building ? `building-${building.effect.type}` : ""} ${occupantClass} ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""} ${isFocused ? "keyboard-focused" : ""} ${tutorialHighlightTone ? `tutorial-highlight tutorial-highlight-${tutorialHighlightTone}` : ""}`}
                   type="button"
                   disabled={disabled && !readOnly}
                   tabIndex={readOnly ? -1 : undefined}
@@ -559,6 +598,11 @@ export function Board({
                   {hasManaSource ? (
                     <span className="mana-source-marker" aria-hidden="true">
                       M
+                    </span>
+                  ) : null}
+                  {building && !hasManaSource ? (
+                    <span className="building-marker" aria-hidden="true">
+                      B
                     </span>
                   ) : null}
                   {displayPiece ? (

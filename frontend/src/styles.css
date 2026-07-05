@@ -1586,6 +1586,25 @@ h1 {
   line-height: 1;
 }
 
+.building-marker {
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  z-index: 2;
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 250, 240, 0.58);
+  background: var(--teal);
+  color: #101312;
+  font-size: 0.68rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
 .hex-occupant-marker {
   position: absolute;
   top: 50%;

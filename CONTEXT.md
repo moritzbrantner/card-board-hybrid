@@ -28,6 +28,22 @@ _Avoid_: energy
 A board hex marker that grants Mana to the side occupying it at the beginning of that side's turn.
 _Avoid_: mana tile, controlled hex
 
+**Building**:
+A neutral, permanent board feature on a hex. A Building may grant an effect to the occupying side, project an aura, or be activated by its occupying Hero or Unit.
+_Avoid_: structure, owned building
+
+**Building card**:
+A Card that creates a Building on an adjacent empty hex.
+_Avoid_: building spell, structure card
+
+**Building activation**:
+Spending 1 action point from a Hero or Unit occupying a Building to use that Building's activated effect.
+_Avoid_: building trigger, tower action
+
+**Hero shield**:
+A persistent damage buffer on a Hero, created by shield-granting buffs and consumed before Hero HP.
+_Avoid_: hero armor, temporary health
+
 **Hero action points**:
 The hero's per-turn action budget for moving, attacking, and playing cards.
 _Avoid_: hero movement counter

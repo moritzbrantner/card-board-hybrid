@@ -1,6 +1,7 @@
 use super::{
-    ActionTarget, Card, CardKind, CardSummary, CarriedItem, HexBoard, HexCoord, ItemActiveEffect,
-    ItemPassiveEffect, MatchError, MatchProgressionLoadout, PieceView, Side, SpellEffect, Unit,
+    ActionTarget, BuffTargetPolicy, Card, CardKind, CardSummary, CarriedItem, HexBoard, HexCoord,
+    ItemActiveEffect, ItemPassiveEffect, MatchError, MatchProgressionLoadout, PieceView, Side,
+    SpellEffect, Unit,
 };
 
 pub(crate) struct PlannedUnitPlay {
@@ -25,6 +26,8 @@ pub(crate) enum ResolvedSpellEffect {
         piece_id: String,
         attack: i32,
         armor: i32,
+        max_ap: i8,
+        targets: BuffTargetPolicy,
     },
     Damage {
         piece_ids: Vec<String>,
@@ -170,7 +173,9 @@ pub(crate) fn validate_spell_target(
     target: &PieceView,
 ) -> Result<(), MatchError> {
     match effect {
-        SpellEffect::Heal { .. } | SpellEffect::Buff { .. } if target.side != side => {
+        SpellEffect::Heal { .. } | SpellEffect::Buff { .. } | SpellEffect::StatBuff { .. }
+            if target.side != side =>
+        {
             Err(MatchError::InvalidTarget)
         }
         SpellEffect::Damage { .. }
@@ -189,6 +194,11 @@ pub(crate) fn validate_spell_target(
             Err(MatchError::InvalidTarget)
         }
         SpellEffect::Buff { .. } if target.id == caster_hero_id => Err(MatchError::InvalidTarget),
+        SpellEffect::StatBuff { targets, .. }
+            if !target_policy_allows(*targets, target.is_hero) =>
+        {
+            Err(MatchError::InvalidTarget)
+        }
         _ => Ok(()),
     }
 }
@@ -236,6 +246,25 @@ pub(crate) fn resolve_spell(
                 piece_id: target.id.clone(),
                 attack: *attack,
                 armor: *armor,
+                max_ap: 0,
+                targets: BuffTargetPolicy::UnitsOnly,
+            },
+            log: SpellLog::Buff {
+                piece_id: target.id.clone(),
+            },
+        },
+        SpellEffect::StatBuff {
+            attack,
+            armor,
+            max_ap,
+            targets,
+        } => ResolvedSpell {
+            effect: ResolvedSpellEffect::Buff {
+                piece_id: target.id.clone(),
+                attack: *attack,
+                armor: *armor,
+                max_ap: *max_ap,
+                targets: *targets,
             },
             log: SpellLog::Buff {
                 piece_id: target.id.clone(),
@@ -288,6 +317,14 @@ pub(crate) fn resolve_spell(
     };
 
     Ok(resolved)
+}
+
+pub(crate) fn target_policy_allows(targets: BuffTargetPolicy, is_hero: bool) -> bool {
+    match targets {
+        BuffTargetPolicy::UnitsOnly => !is_hero,
+        BuffTargetPolicy::HeroesOnly => is_hero,
+        BuffTargetPolicy::UnitsAndHeroes => true,
+    }
 }
 
 pub(crate) fn equip_item_from_card(

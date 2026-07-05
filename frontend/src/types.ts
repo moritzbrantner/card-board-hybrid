@@ -11,6 +11,41 @@ export type HexCoord = {
   r: number;
 };
 
+export type BuffTargetPolicy = "unitsOnly" | "heroesOnly" | "unitsAndHeroes";
+
+export type BuildingEffect =
+  | {
+      type: "turnStartMana";
+      amount: number;
+    }
+  | {
+      type: "auraStatBonus";
+      range: number;
+      targets: BuffTargetPolicy;
+      attack: number;
+      armor: number;
+      maxAp: number;
+    }
+  | {
+      type: "activatedDamageLine";
+      range: number;
+      amount: number;
+    }
+  | {
+      type: "activatedHeal";
+      range: number;
+      amount: number;
+      targets: BuffTargetPolicy;
+    }
+  | {
+      type: "activatedStatBonus";
+      range: number;
+      targets: BuffTargetPolicy;
+      attack: number;
+      armor: number;
+      maxAp: number;
+    };
+
 export type SpellEffect =
   | {
       type: "heal";
@@ -20,6 +55,13 @@ export type SpellEffect =
       type: "buff";
       attack: number;
       armor: number;
+    }
+  | {
+      type: "statBuff";
+      attack: number;
+      armor: number;
+      maxAp: number;
+      targets: BuffTargetPolicy;
     }
   | {
       type: "damage";
@@ -69,6 +111,10 @@ export type CardKind =
       range: number;
       passive: ItemPassiveEffect;
       active?: ItemActiveEffect;
+    }
+  | {
+      type: "building";
+      effect: BuildingEffect;
     }
   | {
       type: "manaSource";
@@ -339,6 +385,7 @@ export type Hero = {
   heroType: HeroType;
   hp: number;
   maxHp: number;
+  shield?: number;
   attack: number;
   attackRange: number;
   position: HexCoord;
@@ -395,9 +442,19 @@ export type HexTile = {
 export type HexBoard = {
   radius: number;
   tiles: HexTile[];
-  manaSources: HexCoord[];
+  manaSources?: HexCoord[];
+  buildings?: Building[];
   units: Unit[];
   droppedItems: DroppedItem[];
+};
+
+export type Building = {
+  id: string;
+  templateId: string;
+  name: string;
+  position: HexCoord;
+  effect: BuildingEffect;
+  activatedThisTurn: boolean;
 };
 
 export type MatchParticipantState = {
@@ -470,9 +527,19 @@ export type StackAction =
       coord: HexCoord;
     }
   | {
+      type: "buildBuilding";
+      card: CardSummary;
+      coord: HexCoord;
+    }
+  | {
       type: "activateItem";
       unitId: string;
       itemId: string;
+    }
+  | {
+      type: "activateBuilding";
+      buildingId: string;
+      occupantId: string;
     };
 
 export type MatchResponse = {
@@ -564,6 +631,10 @@ export type MatchActionRequest =
       type: "activateItem";
       unitId: string;
       itemId: string;
+    }
+  | {
+      type: "activateBuilding";
+      buildingId: string;
     }
   | {
       type: "endTurn";
@@ -707,6 +778,26 @@ export type ReplayEvent =
       type: "manaSourceBuilt";
       side: Side;
       coord: HexCoord;
+    }
+  | {
+      type: "buildingBuilt";
+      side: Side;
+      buildingId: string;
+      name: string;
+      coord: HexCoord;
+    }
+  | {
+      type: "buildingActivated";
+      side: Side;
+      buildingId: string;
+      name: string;
+      occupantId: string;
+    }
+  | {
+      type: "heroShielded";
+      side: Side;
+      heroId: string;
+      amount: number;
     }
   | {
       type: "manaGained";

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { loadCatalog } from "../api";
 import type { CatalogLoadState } from "../appTypes";
 import { DetailStat, ShellMessage } from "../components/common";
-import { itemActiveLabel, itemPassiveLabel, kindSummary, spellEffectLabel } from "../labels";
+import { buildingEffectLabel, itemActiveLabel, itemPassiveLabel, kindSummary, spellEffectLabel } from "../labels";
 import type { CatalogCard, Rarity } from "../types";
 
 type KindFilter = "all" | CatalogCard["kind"]["type"];
@@ -106,7 +106,7 @@ export function CatalogPage({ onNavigate }: { onNavigate: (to: string) => void }
               ["unit", "Units"],
               ["spell", "Spells"],
               ["item", "Items"],
-              ["manaSource", "Mana Sources"],
+              ["building", "Buildings"],
             ]}
             onChange={(value) => setKindFilter(value as KindFilter)}
           />
@@ -238,6 +238,11 @@ export function CatalogDetail({ card }: { card: CatalogCard | null }) {
                 label="Active"
                 value={card.kind.active ? itemActiveLabel(card.kind.active) : "None"}
               />
+            </>
+          ) : card.kind.type === "building" ? (
+            <>
+              <DetailStat label="Type" value="Building" />
+              <DetailStat label="Effect" value={buildingEffectLabel(card.kind.effect)} />
             </>
           ) : (
             <DetailStat label="Source" value="+1 mana when occupied" />

@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import type {
   ActionTarget,
+  Building,
   Card,
   HexCoord,
   HexTile,
@@ -12,6 +13,7 @@ import type {
 import type { AnimatedPieceSnapshot, BoardAnimationCue, PieceAnimation } from "./boardAnimations";
 import type { BoardPiece } from "./appTypes";
 import { viewerSideLabel, heroTypeLabel } from "./labels";
+import type { BuffTargetPolicy } from "./types";
 
 export function groupTilesByColumn(tiles: HexTile[]) {
   const columns = new Map<number, HexTile[]>();
@@ -131,7 +133,20 @@ export function droppedItemsAt(match: MatchState, coord: HexCoord) {
 }
 
 export function isManaSourceAt(match: MatchState, coord: HexCoord) {
-  return (match.board.manaSources ?? []).some((source) => sameCoord(source, coord));
+  return (
+    (match.board.manaSources ?? []).some((source) => sameCoord(source, coord)) ||
+    (match.board.buildings ?? []).some(
+      (building) => building.effect.type === "turnStartMana" && sameCoord(building.position, coord),
+    )
+  );
+}
+
+export function buildingAt(match: MatchState, coord: HexCoord): Building | null {
+  return (match.board.buildings ?? []).find((building) => sameCoord(building.position, coord)) ?? null;
+}
+
+export function isBuildingAt(match: MatchState, coord: HexCoord) {
+  return !!buildingAt(match, coord) || (match.board.manaSources ?? []).some((source) => sameCoord(source, coord));
 }
 
 export function tileAt(match: MatchState, coord: HexCoord) {
@@ -262,7 +277,7 @@ export function cardTargetForTile(
     return null;
   }
 
-  if (card.kind.type === "unit" || card.kind.type === "manaSource") {
+  if (card.kind.type === "unit" || card.kind.type === "manaSource" || card.kind.type === "building") {
     return { type: "hex", coord: tile.coord };
   }
 
@@ -290,10 +305,10 @@ export function isLegalCardTarget(
     return !piece && distance(participant.hero.position, coord) === 1;
   }
 
-  if (card.kind.type === "manaSource") {
+  if (card.kind.type === "manaSource" || card.kind.type === "building") {
     return (
       !piece &&
-      !isManaSourceAt(match, coord) &&
+      !isBuildingAt(match, coord) &&
       distance(participant.hero.position, coord) === 1
     );
   }
@@ -316,6 +331,8 @@ export function isLegalCardTarget(
       return piece.side === viewerSide;
     case "buff":
       return piece.side === viewerSide && piece.pieceType === "unit";
+    case "statBuff":
+      return piece.side === viewerSide && targetPolicyAllows(card.kind.effect.targets, piece.pieceType === "hero");
     case "damage":
     case "areaDamage":
       return piece.side === opponentSide;
@@ -326,6 +343,17 @@ export function isLegalCardTarget(
         piece.side === opponentSide &&
         lineDirection(participant.hero.position, piece.position) !== null
       );
+  }
+}
+
+function targetPolicyAllows(policy: BuffTargetPolicy, isHero: boolean) {
+  switch (policy) {
+    case "unitsOnly":
+      return !isHero;
+    case "heroesOnly":
+      return isHero;
+    case "unitsAndHeroes":
+      return true;
   }
 }
 

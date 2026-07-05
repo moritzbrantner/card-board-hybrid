@@ -299,6 +299,10 @@ export function activateItem(matchId: string, unitId: string, itemId: string) {
   return matchAction(matchId, { type: "activateItem", unitId, itemId });
 }
 
+export function activateBuilding(matchId: string, buildingId: string) {
+  return matchAction(matchId, { type: "activateBuilding", buildingId });
+}
+
 export function endTurn(matchId: string) {
   return matchAction(matchId, { type: "endTurn" });
 }

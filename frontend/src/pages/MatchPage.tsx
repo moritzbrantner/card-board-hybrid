@@ -2,6 +2,7 @@ import { Activity, Archive, Eye, EyeOff, Layers, Play, Plus, RotateCcw, Zap } fr
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
 import {
+  activateBuilding,
   activateItem,
   advanceAi,
   attack,
@@ -39,6 +40,7 @@ import { sideLabel } from "../labels";
 import { liveAiPlaybackFrames } from "../livePlayback";
 import {
   cardFanStyle,
+  buildingAt,
   cardTargetForTile,
   delay,
   handCountForSide,
@@ -58,6 +60,7 @@ import { createMatchVisualCatalog } from "../matchVisualIdentity";
 import type { HotkeyHandlers } from "../hotkeyRuntime";
 import type {
   Card,
+  BuildingEffect,
   CatalogCard,
   HexCoord,
   HexTile,
@@ -506,6 +509,21 @@ export function MatchPage({
       }
     }
 
+    const building = buildingAt(match, tile.coord);
+    if (
+      !selectedPiece &&
+      piece?.side === viewerSide &&
+      building &&
+      buildingEffectIsActivated(building.effect) &&
+      !building.activatedThisTurn &&
+      piece.apRemaining > 0 &&
+      match.actionStack.length === 0 &&
+      match.activeSide === viewerSide
+    ) {
+      void runAction(() => activateBuilding(matchId, building.id));
+      return;
+    }
+
     if (piece?.side === viewerSide) {
       setSelection({ type: "piece", pieceId: piece.id });
       setNotice(null);
@@ -567,6 +585,11 @@ export function MatchPage({
   function handleActivateUnitItem(unit: BoardUnit, itemId: string) {
     setUnitContextMenu(null);
     void runAction(() => activateItem(matchId, unit.id, itemId));
+  }
+
+  function handleActivateUnitBuilding(buildingId: string) {
+    setUnitContextMenu(null);
+    void runAction(() => activateBuilding(matchId, buildingId));
   }
 
   return (
@@ -754,8 +777,23 @@ export function MatchPage({
             contextMenuUnit.side === viewerSide
           }
           onActivateItem={(itemId) => handleActivateUnitItem(contextMenuUnit, itemId)}
+          building={buildingAt(match, contextMenuUnit.position)}
+          canActivateBuilding={
+            match.actionStack.length === 0 &&
+            match.activeSide === viewerSide &&
+            contextMenuUnit.side === viewerSide
+          }
+          onActivateBuilding={handleActivateUnitBuilding}
         />
       ) : null}
     </main>
+  );
+}
+
+function buildingEffectIsActivated(effect: BuildingEffect) {
+  return (
+    effect.type === "activatedDamageLine" ||
+    effect.type === "activatedHeal" ||
+    effect.type === "activatedStatBonus"
   );
 }

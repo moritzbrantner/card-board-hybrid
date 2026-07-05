@@ -359,7 +359,7 @@ export function DecksPage({ currentUser, onNavigate, onSignOut }: AccountProps &
                 <option value="unit">Units</option>
                 <option value="spell">Spells</option>
                 <option value="item">Items</option>
-                <option value="manaSource">Mana Sources</option>
+                <option value="building">Buildings</option>
               </select>
             </label>
             <label>

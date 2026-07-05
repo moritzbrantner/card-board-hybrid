@@ -2,7 +2,8 @@ use serde::Serialize;
 
 use crate::deck_library::starter_recipe_count;
 use crate::match_session::{
-    Card, CardKind, ItemActiveEffect, ItemPassiveEffect, Rarity, SpellEffect,
+    BuffTargetPolicy, BuildingEffect, Card, CardKind, ItemActiveEffect, ItemPassiveEffect, Rarity,
+    SpellEffect,
 };
 
 #[derive(Clone, Debug, Serialize)]
@@ -243,12 +244,13 @@ pub fn starter_card_templates() -> Vec<Card> {
                 max_ap: 1,
             },
         ),
-        mana_source_card(
+        building_card(
             "mana-well",
             "Mana Well",
             Rarity::Basic,
             2,
-            "Build a mana source on an adjacent empty hex. Occupied mana sources give +1 mana at the start of that side's turn.",
+            "Build on an adjacent empty hex. Occupying side gains +1 mana at the start of its turn.",
+            BuildingEffect::TurnStartMana { amount: 1 },
         ),
         spell_card(
             "runic-insight",
@@ -529,6 +531,127 @@ pub fn starter_card_templates() -> Vec<Card> {
             },
             Some(ItemActiveEffect::HealCarrier { amount: 2 }),
         ),
+        item_card(
+            "titan-plate",
+            "Titan Plate",
+            Rarity::Rare,
+            4,
+            "Range 2. Equip to an allied unit. Passive: +4 armor. Drops when the unit dies.",
+            2,
+            ItemPassiveEffect::StatBonus {
+                attack: 0,
+                armor: 4,
+                max_ap: 0,
+            },
+            None,
+        ),
+        item_card(
+            "overclock-bracers",
+            "Overclock Bracers",
+            Rarity::Rare,
+            4,
+            "Range 2. Equip to an allied unit. Passive: +1 attack, +2 AP. Active: spend 1 unit AP to heal carrier 2.",
+            2,
+            ItemPassiveEffect::StatBonus {
+                attack: 1,
+                armor: 0,
+                max_ap: 2,
+            },
+            Some(ItemActiveEffect::HealCarrier { amount: 2 }),
+        ),
+        item_card(
+            "sunforged-halberd",
+            "Sunforged Halberd",
+            Rarity::Advanced,
+            3,
+            "Range 2. Equip to an allied unit. Passive: +2 attack, +1 armor. Drops when the unit dies.",
+            2,
+            ItemPassiveEffect::StatBonus {
+                attack: 2,
+                armor: 1,
+                max_ap: 0,
+            },
+            None,
+        ),
+        item_card(
+            "guardian-harness",
+            "Guardian Harness",
+            Rarity::Advanced,
+            3,
+            "Range 2. Equip to an allied unit. Passive: +2 armor, +1 AP. Active: spend 1 unit AP to heal carrier 3.",
+            2,
+            ItemPassiveEffect::StatBonus {
+                attack: 0,
+                armor: 2,
+                max_ap: 1,
+            },
+            Some(ItemActiveEffect::HealCarrier { amount: 3 }),
+        ),
+        item_card(
+            "rift-gauntlet",
+            "Rift Gauntlet",
+            Rarity::Rare,
+            5,
+            "Range 2. Equip to an allied unit. Passive: +3 attack. Active: spend 1 unit AP to heal carrier 2.",
+            2,
+            ItemPassiveEffect::StatBonus {
+                attack: 3,
+                armor: 0,
+                max_ap: 0,
+            },
+            Some(ItemActiveEffect::HealCarrier { amount: 2 }),
+        ),
+        building_card(
+            "stone-bastion",
+            "Stone Bastion",
+            Rarity::Advanced,
+            3,
+            "Build on an adjacent empty hex. While occupied, allied units within range 1 gain +1 armor.",
+            BuildingEffect::AuraStatBonus {
+                range: 1,
+                targets: BuffTargetPolicy::UnitsOnly,
+                attack: 0,
+                armor: 1,
+                max_ap: 0,
+            },
+        ),
+        building_card(
+            "watchtower",
+            "Watchtower",
+            Rarity::Advanced,
+            3,
+            "Build on an adjacent empty hex. Activate: occupant spends 1 AP to deal 2 damage along the best enemy line within range 2.",
+            BuildingEffect::ActivatedDamageLine {
+                range: 2,
+                amount: 2,
+            },
+        ),
+        building_card(
+            "war-foundry",
+            "War Foundry",
+            Rarity::Rare,
+            4,
+            "Build on an adjacent empty hex. While occupied, allied units within range 1 gain +1 attack.",
+            BuildingEffect::AuraStatBonus {
+                range: 1,
+                targets: BuffTargetPolicy::UnitsOnly,
+                attack: 1,
+                armor: 0,
+                max_ap: 0,
+            },
+        ),
+        building_card(
+            "healing-font",
+            "Healing Font",
+            Rarity::Advanced,
+            3,
+            "Build on an adjacent empty hex. Activate: occupant spends 1 AP to heal an allied hero or unit within range 2 for 3.",
+            BuildingEffect::ActivatedHeal {
+                range: 2,
+                amount: 3,
+                targets: BuffTargetPolicy::UnitsAndHeroes,
+            },
+        ),
         unit_card(
             "phoenix-adept",
             "Phoenix Adept",
@@ -562,6 +685,36 @@ pub fn starter_card_templates() -> Vec<Card> {
             3,
             3,
             SpellEffect::Damage { amount: 5 },
+        ),
+        spell_card(
+            "colossus-oath",
+            "Colossus Oath",
+            Rarity::Rare,
+            5,
+            "Priority 1. Range 2. An allied unit gains +2 attack and +3 armor, or an allied hero gains +2 attack and +3 shield.",
+            2,
+            1,
+            SpellEffect::StatBuff {
+                attack: 2,
+                armor: 3,
+                max_ap: 0,
+                targets: BuffTargetPolicy::UnitsAndHeroes,
+            },
+        ),
+        spell_card(
+            "surge-protocol",
+            "Surge Protocol",
+            Rarity::Rare,
+            4,
+            "Priority 2. Range 2. An allied unit gains +2 attack, +1 armor, and +1 AP.",
+            2,
+            2,
+            SpellEffect::StatBuff {
+                attack: 2,
+                armor: 1,
+                max_ap: 1,
+                targets: BuffTargetPolicy::UnitsOnly,
+            },
         ),
     ]
 }
@@ -659,7 +812,14 @@ fn item_card(
     }
 }
 
-fn mana_source_card(template_id: &str, name: &str, rarity: Rarity, cost: u8, text: &str) -> Card {
+fn building_card(
+    template_id: &str,
+    name: &str,
+    rarity: Rarity,
+    cost: u8,
+    text: &str,
+    effect: BuildingEffect,
+) -> Card {
     Card {
         id: template_id.to_string(),
         template_id: template_id.to_string(),
@@ -667,6 +827,6 @@ fn mana_source_card(template_id: &str, name: &str, rarity: Rarity, cost: u8, tex
         rarity,
         cost,
         text: text.to_string(),
-        kind: CardKind::ManaSource,
+        kind: CardKind::Building { effect },
     }
 }

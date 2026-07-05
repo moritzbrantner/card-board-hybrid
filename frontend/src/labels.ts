@@ -1,6 +1,7 @@
 import { HERO_OPTIONS } from "./heroes";
 import type {
   Card,
+  BuildingEffect,
   CatalogCard,
   DeckChoice,
   MatchSummary,
@@ -24,6 +25,10 @@ export function kindSummary(card: Card | CatalogCard) {
     return "Build mana source";
   }
 
+  if (card.kind.type === "building") {
+    return buildingEffectLabel(card.kind.effect);
+  }
+
   return `${spellEffectLabel(card)} rng ${card.kind.range} pri ${card.kind.priority}`;
 }
 
@@ -37,6 +42,8 @@ export function spellEffectLabel(card: Card | CatalogCard) {
       return `heal ${card.kind.effect.amount}`;
     case "buff":
       return `+${card.kind.effect.attack}/+${card.kind.effect.armor}`;
+    case "statBuff":
+      return `+${card.kind.effect.attack}/+${card.kind.effect.armor}/+${card.kind.effect.maxAp} ap`;
     case "damage":
       return `damage ${card.kind.effect.amount}`;
     case "draw":
@@ -45,6 +52,21 @@ export function spellEffectLabel(card: Card | CatalogCard) {
       return `area ${card.kind.effect.amount}`;
     case "lineDamage":
       return `line ${card.kind.effect.amount}`;
+  }
+}
+
+export function buildingEffectLabel(effect: BuildingEffect) {
+  switch (effect.type) {
+    case "turnStartMana":
+      return `+${effect.amount} mana occupied`;
+    case "auraStatBonus":
+      return `aura +${effect.attack}/+${effect.armor}/+${effect.maxAp} ap rng ${effect.range}`;
+    case "activatedDamageLine":
+      return `activate line ${effect.amount} rng ${effect.range}`;
+    case "activatedHeal":
+      return `activate heal ${effect.amount} rng ${effect.range}`;
+    case "activatedStatBonus":
+      return `activate +${effect.attack}/+${effect.armor}/+${effect.maxAp} ap`;
   }
 }
 
@@ -83,8 +105,12 @@ export function stackItemTitle(item: StackItem) {
       return `${sideLabel(item.side)} equips ${item.action.card.name}`;
     case "buildManaSource":
       return `${sideLabel(item.side)} builds ${item.action.card.name}`;
+    case "buildBuilding":
+      return `${sideLabel(item.side)} builds ${item.action.card.name}`;
     case "activateItem":
       return `${sideLabel(item.side)} activates ${item.action.itemId}`;
+    case "activateBuilding":
+      return `${sideLabel(item.side)} activates ${item.action.buildingId}`;
   }
 }
 
@@ -148,6 +174,12 @@ export function eventTitle(event: ReplayEvent) {
       return `${event.name} destroyed`;
     case "manaSourceBuilt":
       return "Mana source built";
+    case "buildingBuilt":
+      return `${event.name} built`;
+    case "buildingActivated":
+      return `${event.name} activated`;
+    case "heroShielded":
+      return `${event.heroId} shielded`;
     case "manaGained":
       return `${sideLabel(event.side)} gained mana`;
     case "itemEquipped":
@@ -195,6 +227,12 @@ export function eventDetail(event: ReplayEvent) {
       return `${event.name} left the board.`;
     case "manaSourceBuilt":
       return `${sideLabel(event.side)} built a mana source at q ${event.coord.q}, r ${event.coord.r}.`;
+    case "buildingBuilt":
+      return `${sideLabel(event.side)} built ${event.name} at q ${event.coord.q}, r ${event.coord.r}.`;
+    case "buildingActivated":
+      return `${sideLabel(event.side)} activated ${event.name} with ${event.occupantId}.`;
+    case "heroShielded":
+      return `${event.heroId} gained ${event.amount} shield.`;
     case "manaGained":
       switch (event.source.type) {
         case "barbarianKill":

@@ -35,6 +35,7 @@ pub struct MatchState {
     next_stack_item_id: u32,
     next_unit_id: u32,
     next_item_id: u32,
+    next_building_id: u32,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -138,6 +139,23 @@ pub enum ReplayEvent {
         side: Side,
         coord: HexCoord,
     },
+    BuildingBuilt {
+        side: Side,
+        building_id: String,
+        name: String,
+        coord: HexCoord,
+    },
+    BuildingActivated {
+        side: Side,
+        building_id: String,
+        name: String,
+        occupant_id: String,
+    },
+    HeroShielded {
+        side: Side,
+        hero_id: String,
+        amount: i32,
+    },
     ManaGained {
         side: Side,
         amount: u8,
@@ -209,7 +227,7 @@ impl Serialize for MatchState {
                 expose_hand: false,
             },
         )?;
-        state.serialize_field("board", &self.board)?;
+        state.serialize_field("board", &self.public_board())?;
         state.serialize_field("actionStack", &self.action_stack)?;
         state.serialize_field("log", &self.log)?;
         state.serialize_field("winner", &self.winner)?;
@@ -319,6 +337,8 @@ pub struct Hero {
     pub hero_type: HeroType,
     pub hp: i32,
     pub max_hp: i32,
+    #[serde(default)]
+    pub shield: i32,
     pub attack: i32,
     #[serde(default = "default_attack_range")]
     pub attack_range: u8,
@@ -411,6 +431,8 @@ pub struct HexBoard {
     pub tiles: Vec<HexTile>,
     #[serde(default)]
     pub mana_sources: Vec<HexCoord>,
+    #[serde(default)]
+    pub buildings: Vec<Building>,
     pub units: Vec<Unit>,
     #[serde(default)]
     pub dropped_items: Vec<DroppedItem>,
@@ -473,6 +495,18 @@ pub struct DroppedItem {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Building {
+    pub id: String,
+    pub template_id: String,
+    pub name: String,
+    pub position: HexCoord,
+    pub effect: BuildingEffect,
+    #[serde(default)]
+    pub activated_this_turn: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Card {
     pub id: String,
     pub template_id: String,
@@ -515,18 +549,84 @@ pub enum CardKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         active: Option<ItemActiveEffect>,
     },
+    Building {
+        effect: BuildingEffect,
+    },
     ManaSource,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BuffTargetPolicy {
+    UnitsOnly,
+    HeroesOnly,
+    UnitsAndHeroes,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum BuildingEffect {
+    TurnStartMana {
+        amount: u8,
+    },
+    AuraStatBonus {
+        range: u8,
+        targets: BuffTargetPolicy,
+        attack: i32,
+        armor: i32,
+        max_ap: i8,
+    },
+    ActivatedDamageLine {
+        range: u8,
+        amount: i32,
+    },
+    ActivatedHeal {
+        range: u8,
+        amount: i32,
+        targets: BuffTargetPolicy,
+    },
+    ActivatedStatBonus {
+        range: u8,
+        targets: BuffTargetPolicy,
+        attack: i32,
+        armor: i32,
+        max_ap: i8,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SpellEffect {
-    Heal { amount: i32 },
-    Buff { attack: i32, armor: i32 },
-    Damage { amount: i32 },
-    Draw { amount: u8 },
-    AreaDamage { amount: i32, radius: u8 },
-    LineDamage { amount: i32 },
+    Heal {
+        amount: i32,
+    },
+    Buff {
+        attack: i32,
+        armor: i32,
+    },
+    StatBuff {
+        attack: i32,
+        armor: i32,
+        max_ap: i8,
+        targets: BuffTargetPolicy,
+    },
+    Damage {
+        amount: i32,
+    },
+    Draw {
+        amount: u8,
+    },
+    AreaDamage {
+        amount: i32,
+        radius: u8,
+    },
+    LineDamage {
+        amount: i32,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -564,6 +664,9 @@ pub enum MatchActionRequest {
         unit_id: String,
         item_id: String,
     },
+    ActivateBuilding {
+        building_id: String,
+    },
     EndTurn,
     PassPriority,
     AdvanceAi,
@@ -597,6 +700,8 @@ pub enum MatchError {
     AlreadyAttacked,
     ItemNotFound,
     ItemExhausted,
+    BuildingNotFound,
+    BuildingExhausted,
     StackPending,
     EmptyStack,
     PriorityTooLow,
@@ -644,9 +749,17 @@ pub enum StackAction {
         card: CardSummary,
         coord: HexCoord,
     },
+    BuildBuilding {
+        card: CardSummary,
+        coord: HexCoord,
+    },
     ActivateItem {
         unit_id: String,
         item_id: String,
+    },
+    ActivateBuilding {
+        building_id: String,
+        occupant_id: String,
     },
 }
 
@@ -659,12 +772,21 @@ struct PieceView {
     attack_range: u8,
     ap_remaining: u8,
     has_attacked: bool,
+    is_hero: bool,
 }
 
 #[derive(Clone, Debug)]
 struct DestroyedUnit {
     side: Side,
     unit_id: String,
+}
+
+#[derive(Clone, Copy)]
+struct StatBonus {
+    attack: i32,
+    armor: i32,
+    max_ap: i8,
+    targets: BuffTargetPolicy,
 }
 
 impl fmt::Display for MatchError {
@@ -685,6 +807,8 @@ impl fmt::Display for MatchError {
             Self::AlreadyAttacked => "that piece has already attacked this turn",
             Self::ItemNotFound => "item not found",
             Self::ItemExhausted => "that item has already been activated this turn",
+            Self::BuildingNotFound => "building not found",
+            Self::BuildingExhausted => "that building has already been activated this turn",
             Self::StackPending => "resolve the stack before taking that action",
             Self::EmptyStack => "there are no pending actions to resolve",
             Self::PriorityTooLow => "spell priority must be greater than the pending action",
@@ -850,7 +974,7 @@ impl MatchState {
             "prioritySide": self.priority_side,
             "player": self.player.replay_value(true),
             "opponent": self.opponent.replay_value(visibility == ReplayVisibility::Revealed),
-            "board": self.board,
+            "board": self.public_board(),
             "actionStack": self.action_stack,
             "log": self.log,
             "winner": self.winner,
@@ -943,6 +1067,7 @@ impl MatchState {
             next_stack_item_id: 1,
             next_unit_id: 1,
             next_item_id: 1,
+            next_building_id: 1,
         };
 
         for _ in 0..opening_hand_size(&game.player.progression) {
@@ -1048,6 +1173,10 @@ impl MatchState {
             MatchActionRequest::ActivateItem { unit_id, item_id } => {
                 self.require_turn_action_side(side)?;
                 self.activate_item_for_side(side, &unit_id, &item_id, &mut frames, action_index)
+            }
+            MatchActionRequest::ActivateBuilding { building_id } => {
+                self.require_turn_action_side(side)?;
+                self.activate_building_for_side(side, &building_id, &mut frames, action_index)
             }
             MatchActionRequest::EndTurn => {
                 self.require_turn_action_side(side)?;
@@ -1163,7 +1292,23 @@ impl MatchState {
     }
 
     fn occupied_mana_sources(&self, side: Side) -> u8 {
-        let occupied = self
+        let amount = self
+            .board
+            .buildings
+            .iter()
+            .filter_map(|building| match building.effect {
+                BuildingEffect::TurnStartMana { amount } => Some((building.position, amount)),
+                _ => None,
+            })
+            .filter_map(|(position, amount)| {
+                self.piece_view_at(position)
+                    .is_some_and(|piece| piece.side == side)
+                    .then_some(amount)
+            })
+            .fold(0_u16, |total, amount| {
+                total.saturating_add(u16::from(amount))
+            });
+        let legacy_amount = self
             .board
             .mana_sources
             .iter()
@@ -1171,12 +1316,29 @@ impl MatchState {
                 self.piece_view_at(**source)
                     .is_some_and(|piece| piece.side == side)
             })
-            .count();
-        occupied.min(usize::from(u8::MAX)) as u8
+            .count()
+            .min(usize::from(u8::MAX)) as u16;
+        amount.saturating_add(legacy_amount).min(u16::from(u8::MAX)) as u8
     }
 
-    fn has_mana_source(&self, coord: HexCoord) -> bool {
-        self.board.mana_sources.contains(&coord)
+    fn has_building(&self, coord: HexCoord) -> bool {
+        self.board
+            .buildings
+            .iter()
+            .any(|building| building.position == coord)
+            || self.board.mana_sources.contains(&coord)
+    }
+
+    fn public_board(&self) -> HexBoard {
+        let mut board = self.board.clone();
+        for unit in &mut board.units {
+            let bonus = self.aura_stat_bonus_for(unit.side, unit.position, false);
+            unit.attack += bonus.attack;
+            unit.armor += bonus.armor;
+            unit.max_armor += bonus.armor;
+            apply_ap_delta(&mut unit.ap_remaining, &mut unit.max_ap, bonus.max_ap);
+        }
+        board
     }
 
     fn play_card_for_side(
@@ -1366,8 +1528,8 @@ impl MatchState {
                     ReplayEvent::ActionQueued { side, item },
                 );
             }
-            CardKind::ManaSource => {
-                let coord = self.validate_mana_source_target(side, target)?;
+            CardKind::Building { .. } | CardKind::ManaSource => {
+                let coord = self.validate_building_target(side, target)?;
 
                 self.spend_card_resources(side, &card_id, &card)?;
                 self.log.insert(
@@ -1377,7 +1539,7 @@ impl MatchState {
                 let item = self.push_stack_item(
                     side,
                     0,
-                    StackAction::BuildManaSource {
+                    StackAction::BuildBuilding {
                         card: CardSummary::from(&card),
                         coord,
                     },
@@ -1407,7 +1569,7 @@ impl MatchState {
         Ok(())
     }
 
-    fn validate_mana_source_target(
+    fn validate_building_target(
         &self,
         side: Side,
         target: ActionTarget,
@@ -1421,7 +1583,7 @@ impl MatchState {
         if self.is_occupied(coord) {
             return Err(MatchError::OccupiedHex);
         }
-        if self.has_mana_source(coord) {
+        if self.has_building(coord) {
             return Err(MatchError::InvalidTarget);
         }
         if self.player_ref(side).hero.position.distance(coord) != 1 {
@@ -1488,14 +1650,23 @@ impl MatchState {
                 piece_id,
                 attack,
                 armor,
+                max_ap,
+                targets,
             } => {
-                if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
-                    unit.attack += attack;
-                    unit.armor += armor;
-                    unit.max_armor += armor;
+                if self.apply_stat_bonus_to_piece(
+                    &piece_id,
+                    StatBonus {
+                        attack,
+                        armor,
+                        max_ap,
+                        targets,
+                    },
+                    frames,
+                    action_index,
+                ) {
                     self.log.insert(
                         0,
-                        format!("{} cast {} on {}.", side.label(), card_name, unit.name),
+                        format!("{} cast {} on {}.", side.label(), card_name, piece_id),
                     );
                     self.record_replay_frame(
                         frames,
@@ -1633,18 +1804,31 @@ impl MatchState {
             StackAction::EquipItem { card, unit_id } => {
                 self.resolve_item_card(item.side, card, &unit_id, frames, action_index);
             }
-            StackAction::BuildManaSource { card, coord } => {
-                self.resolve_mana_source_card(item.side, card, coord, frames, action_index);
+            StackAction::BuildManaSource { card, coord }
+            | StackAction::BuildBuilding { card, coord } => {
+                self.resolve_building_card(item.side, card, coord, frames, action_index);
             }
             StackAction::ActivateItem { unit_id, item_id } => {
                 self.resolve_item_activation(item.side, &unit_id, &item_id, frames, action_index);
+            }
+            StackAction::ActivateBuilding {
+                building_id,
+                occupant_id,
+            } => {
+                self.resolve_building_activation(
+                    item.side,
+                    &building_id,
+                    &occupant_id,
+                    frames,
+                    action_index,
+                );
             }
         }
 
         self.priority_side = self.action_stack.last().map(|item| item.side.opponent());
     }
 
-    fn resolve_mana_source_card(
+    fn resolve_building_card(
         &mut self,
         side: Side,
         card: CardSummary,
@@ -1652,16 +1836,29 @@ impl MatchState {
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) {
-        if !self.board.is_valid(coord) || self.is_occupied(coord) || self.has_mana_source(coord) {
+        if !self.board.is_valid(coord) || self.is_occupied(coord) || self.has_building(coord) {
             self.log.insert(
                 0,
-                format!("{} resolved with no legal source hex.", card.name),
+                format!("{} resolved with no legal building hex.", card.name),
             );
             self.truncate_log();
             return;
         }
 
-        self.board.mana_sources.push(coord);
+        let building_id = self.next_building_id(side);
+        let effect = match card.kind {
+            CardKind::Building { effect } => effect,
+            CardKind::ManaSource => BuildingEffect::TurnStartMana { amount: 1 },
+            _ => return,
+        };
+        self.board.buildings.push(Building {
+            id: building_id.clone(),
+            template_id: card.template_id,
+            name: card.name.clone(),
+            position: coord,
+            effect: effect.clone(),
+            activated_this_turn: false,
+        });
         self.log.insert(
             0,
             format!(
@@ -1675,8 +1872,20 @@ impl MatchState {
         self.record_replay_frame(
             frames,
             action_index,
-            ReplayEvent::ManaSourceBuilt { side, coord },
+            ReplayEvent::BuildingBuilt {
+                side,
+                building_id: building_id.clone(),
+                name: card.name.clone(),
+                coord,
+            },
         );
+        if matches!(effect, BuildingEffect::TurnStartMana { .. }) {
+            self.record_replay_frame(
+                frames,
+                action_index,
+                ReplayEvent::ManaSourceBuilt { side, coord },
+            );
+        }
     }
 
     fn resolve_unit_card(
@@ -1882,6 +2091,99 @@ impl MatchState {
                 unit_id: unit_id.to_string(),
                 item_id: item_id.to_string(),
                 name: resolved_item_activation.item_name,
+            },
+        );
+    }
+
+    fn resolve_building_activation(
+        &mut self,
+        side: Side,
+        building_id: &str,
+        occupant_id: &str,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        let Some(building) = self
+            .board
+            .buildings
+            .iter()
+            .find(|building| building.id == building_id)
+            .cloned()
+        else {
+            self.log.insert(
+                0,
+                format!("Building activation by {occupant_id} had no building."),
+            );
+            return;
+        };
+        let Some(occupant) = self.piece_view_at(building.position) else {
+            self.log
+                .insert(0, format!("{} had no occupant.", building.name));
+            return;
+        };
+        if occupant.id != occupant_id || occupant.side != side {
+            self.log
+                .insert(0, format!("{} had no legal occupant.", building.name));
+            return;
+        }
+
+        match building.effect {
+            BuildingEffect::ActivatedDamageLine { range, amount } => {
+                let targets = self.best_building_line_targets(side, building.position, range);
+                self.damage_pieces(side, targets, amount, frames, action_index);
+            }
+            BuildingEffect::ActivatedHeal {
+                range,
+                amount,
+                targets,
+            } => {
+                if let Some(piece_id) =
+                    self.best_building_heal_target(side, building.position, range, targets)
+                {
+                    self.heal_piece(&piece_id, amount);
+                    self.record_replay_frame(
+                        frames,
+                        action_index,
+                        ReplayEvent::PieceHealed {
+                            side,
+                            piece_id,
+                            amount,
+                        },
+                    );
+                }
+            }
+            BuildingEffect::ActivatedStatBonus {
+                targets,
+                attack,
+                armor,
+                max_ap,
+                ..
+            } => {
+                self.apply_stat_bonus_to_piece(
+                    occupant_id,
+                    StatBonus {
+                        attack,
+                        armor,
+                        max_ap,
+                        targets,
+                    },
+                    frames,
+                    action_index,
+                );
+            }
+            BuildingEffect::TurnStartMana { .. } | BuildingEffect::AuraStatBonus { .. } => {}
+        }
+
+        self.log
+            .insert(0, format!("{} activated {}.", side.label(), building.name));
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::BuildingActivated {
+                side,
+                building_id: building.id,
+                name: building.name,
+                occupant_id: occupant_id.to_string(),
             },
         );
     }
@@ -2105,6 +2407,79 @@ impl MatchState {
         Ok(())
     }
 
+    fn activate_building_for_side(
+        &mut self,
+        side: Side,
+        building_id: &str,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) -> Result<(), MatchError> {
+        let building_index = self
+            .board
+            .buildings
+            .iter()
+            .position(|building| building.id == building_id)
+            .ok_or(MatchError::BuildingNotFound)?;
+        if !building_effect_is_activated(&self.board.buildings[building_index].effect) {
+            return Err(MatchError::InvalidTarget);
+        }
+        if self.board.buildings[building_index].activated_this_turn {
+            return Err(MatchError::BuildingExhausted);
+        }
+
+        let occupant = self
+            .piece_view_at(self.board.buildings[building_index].position)
+            .ok_or(MatchError::InvalidTarget)?;
+        if occupant.side != side {
+            return Err(MatchError::NotYourPiece);
+        }
+        if occupant.ap_remaining == 0 {
+            return Err(MatchError::NoActionPoints);
+        }
+
+        self.spend_piece_ap(&occupant.id);
+        self.board.buildings[building_index].activated_this_turn = true;
+        self.log.insert(
+            0,
+            format!(
+                "{} put {} on the stack.",
+                side.label(),
+                self.board.buildings[building_index].name
+            ),
+        );
+        let stack_item = self.push_stack_item(
+            side,
+            0,
+            StackAction::ActivateBuilding {
+                building_id: building_id.to_string(),
+                occupant_id: occupant.id,
+            },
+        );
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::ActionQueued {
+                side,
+                item: stack_item,
+            },
+        );
+        if self.mode == MatchMode::Solo && side == Side::Player {
+            self.resolve_all_stack(frames, action_index);
+        }
+        self.truncate_log();
+        Ok(())
+    }
+
+    fn spend_piece_ap(&mut self, piece_id: &str) {
+        if self.player.hero.id == piece_id {
+            self.player.hero.ap_remaining = self.player.hero.ap_remaining.saturating_sub(1);
+        } else if self.opponent.hero.id == piece_id {
+            self.opponent.hero.ap_remaining = self.opponent.hero.ap_remaining.saturating_sub(1);
+        } else if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
+            unit.ap_remaining = unit.ap_remaining.saturating_sub(1);
+        }
+    }
+
     fn resolve_attack(
         &mut self,
         side: Side,
@@ -2292,6 +2667,9 @@ impl MatchState {
                 item.active_used_this_turn = false;
             }
         }
+        for building in &mut self.board.buildings {
+            building.activated_this_turn = false;
+        }
         self.record_replay_frame(
             frames,
             action_index,
@@ -2354,7 +2732,13 @@ impl MatchState {
             .map(|piece| piece.position)
             .collect();
         let valid_hexes = self.board.tiles.iter().map(|tile| tile.coord).collect();
-        let mana_sources = self.board.mana_sources.iter().copied().collect();
+        let mana_sources = self
+            .board
+            .buildings
+            .iter()
+            .filter(|building| matches!(building.effect, BuildingEffect::TurnStartMana { .. }))
+            .map(|building| building.position)
+            .collect();
         let mut damaged_piece_ids = HashSet::new();
         for piece in opponent_pieces.iter().chain(player_pieces.iter()) {
             if self.piece_is_damaged(&piece.id) {
@@ -2381,43 +2765,135 @@ impl MatchState {
     }
 
     fn pieces_for_side(&self, side: Side) -> Vec<PieceView> {
-        let mut pieces = vec![PieceView::from(&self.player_ref(side).hero)];
+        let mut pieces =
+            vec![self.apply_aura_to_piece_view(PieceView::from(&self.player_ref(side).hero))];
         pieces.extend(
             self.board
                 .units
                 .iter()
                 .filter(|unit| unit.side == side)
-                .map(PieceView::from),
+                .map(PieceView::from)
+                .map(|piece| self.apply_aura_to_piece_view(piece)),
         );
         pieces
     }
 
     fn piece_view_at(&self, coord: HexCoord) -> Option<PieceView> {
         if self.player.hero.position == coord {
-            return Some(PieceView::from(&self.player.hero));
+            return Some(self.apply_aura_to_piece_view(PieceView::from(&self.player.hero)));
         }
         if self.opponent.hero.position == coord {
-            return Some(PieceView::from(&self.opponent.hero));
+            return Some(self.apply_aura_to_piece_view(PieceView::from(&self.opponent.hero)));
         }
         self.board
             .units
             .iter()
             .find(|unit| unit.position == coord)
             .map(PieceView::from)
+            .map(|piece| self.apply_aura_to_piece_view(piece))
     }
 
     fn piece_view(&self, piece_id: &str) -> Option<PieceView> {
         if self.player.hero.id == piece_id {
-            return Some(PieceView::from(&self.player.hero));
+            return Some(self.apply_aura_to_piece_view(PieceView::from(&self.player.hero)));
         }
         if self.opponent.hero.id == piece_id {
-            return Some(PieceView::from(&self.opponent.hero));
+            return Some(self.apply_aura_to_piece_view(PieceView::from(&self.opponent.hero)));
         }
         self.board
             .units
             .iter()
             .find(|unit| unit.id == piece_id)
             .map(PieceView::from)
+            .map(|piece| self.apply_aura_to_piece_view(piece))
+    }
+
+    fn apply_aura_to_piece_view(&self, mut piece: PieceView) -> PieceView {
+        let bonus = self.aura_stat_bonus_for(piece.side, piece.position, piece.is_hero);
+        piece.attack += bonus.attack;
+        piece
+    }
+
+    fn aura_stat_bonus_for(&self, side: Side, position: HexCoord, is_hero: bool) -> StatBonus {
+        let mut bonus = StatBonus {
+            attack: 0,
+            armor: 0,
+            max_ap: 0,
+            targets: BuffTargetPolicy::UnitsAndHeroes,
+        };
+        for building in &self.board.buildings {
+            let BuildingEffect::AuraStatBonus {
+                range,
+                targets,
+                attack,
+                armor,
+                max_ap,
+                ..
+            } = building.effect
+            else {
+                continue;
+            };
+            if building.position.distance(position) > i32::from(range) {
+                continue;
+            }
+            if self.building_occupant_side(building.position) != Some(side) {
+                continue;
+            }
+            if !card_interactions::target_policy_allows(targets, is_hero) {
+                continue;
+            }
+            bonus.attack += attack;
+            bonus.armor += armor;
+            bonus.max_ap += max_ap;
+        }
+        bonus
+    }
+
+    fn building_occupant_side(&self, position: HexCoord) -> Option<Side> {
+        if self.player.hero.position == position {
+            return Some(Side::Player);
+        }
+        if self.opponent.hero.position == position {
+            return Some(Side::Opponent);
+        }
+        self.board
+            .units
+            .iter()
+            .find(|unit| unit.position == position)
+            .map(|unit| unit.side)
+    }
+
+    fn best_building_line_targets(&self, side: Side, origin: HexCoord, range: u8) -> Vec<String> {
+        HexCoord::directions()
+            .into_iter()
+            .map(|direction| {
+                self.pieces_for_side(side.opponent())
+                    .into_iter()
+                    .filter(|piece| {
+                        origin.distance(piece.position) <= i32::from(range)
+                            && origin.direction_to(piece.position) == Some(direction)
+                    })
+                    .map(|piece| piece.id)
+                    .collect::<Vec<_>>()
+            })
+            .max_by_key(Vec::len)
+            .unwrap_or_default()
+    }
+
+    fn best_building_heal_target(
+        &self,
+        side: Side,
+        origin: HexCoord,
+        range: u8,
+        targets: BuffTargetPolicy,
+    ) -> Option<String> {
+        self.pieces_for_side(side)
+            .into_iter()
+            .filter(|piece| origin.distance(piece.position) <= i32::from(range))
+            .filter(|piece| card_interactions::target_policy_allows(targets, piece.is_hero))
+            .filter(|piece| self.piece_is_damaged(&piece.id))
+            .min_by_key(|piece| origin.distance(piece.position))
+            .map(|piece| piece.id)
     }
 
     fn mark_attacker_spent(&mut self, piece_id: &str) {
@@ -2439,11 +2915,11 @@ impl MatchState {
 
     fn damage_piece(&mut self, piece_id: &str, amount: i32) {
         if self.player.hero.id == piece_id {
-            self.player.hero.hp -= amount;
+            damage_hero(&mut self.player.hero, amount);
             return;
         }
         if self.opponent.hero.id == piece_id {
-            self.opponent.hero.hp -= amount;
+            damage_hero(&mut self.opponent.hero, amount);
             return;
         }
         if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
@@ -2491,6 +2967,66 @@ impl MatchState {
         if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
             unit.armor = (unit.armor + amount).min(unit.max_armor);
         }
+    }
+
+    fn apply_stat_bonus_to_piece(
+        &mut self,
+        piece_id: &str,
+        bonus: StatBonus,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) -> bool {
+        if self.player.hero.id == piece_id {
+            return self.apply_stat_bonus_to_hero(Side::Player, bonus, frames, action_index);
+        }
+        if self.opponent.hero.id == piece_id {
+            return self.apply_stat_bonus_to_hero(Side::Opponent, bonus, frames, action_index);
+        }
+        if !card_interactions::target_policy_allows(bonus.targets, false) {
+            return false;
+        }
+        if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
+            unit.attack += bonus.attack;
+            unit.armor += bonus.armor;
+            unit.max_armor += bonus.armor;
+            apply_ap_delta(&mut unit.ap_remaining, &mut unit.max_ap, bonus.max_ap);
+            return true;
+        }
+        false
+    }
+
+    fn apply_stat_bonus_to_hero(
+        &mut self,
+        side: Side,
+        bonus: StatBonus,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) -> bool {
+        if !card_interactions::target_policy_allows(bonus.targets, true) {
+            return false;
+        }
+        let mut shielded_hero_id = None;
+        {
+            let hero = &mut self.player_mut(side).hero;
+            hero.attack += bonus.attack;
+            apply_ap_delta(&mut hero.ap_remaining, &mut hero.max_ap, bonus.max_ap);
+            if bonus.armor > 0 {
+                hero.shield = hero.shield.saturating_add(bonus.armor);
+                shielded_hero_id = Some(hero.id.clone());
+            }
+        }
+        if let Some(hero_id) = shielded_hero_id {
+            self.record_replay_frame(
+                frames,
+                action_index,
+                ReplayEvent::HeroShielded {
+                    side,
+                    hero_id,
+                    amount: bonus.armor,
+                },
+            );
+        }
+        true
     }
 
     fn piece_is_damaged(&self, piece_id: &str) -> bool {
@@ -2723,6 +3259,16 @@ impl MatchState {
         id
     }
 
+    fn next_building_id(&mut self, side: Side) -> String {
+        let prefix = match side {
+            Side::Player => "PB",
+            Side::Opponent => "OB",
+        };
+        let id = format!("{prefix}{}", self.next_building_id);
+        self.next_building_id += 1;
+        id
+    }
+
     fn truncate_log(&mut self) {
         self.log.truncate(12);
     }
@@ -2751,6 +3297,8 @@ struct MatchSnapshot {
     next_unit_id: u32,
     #[serde(default = "default_next_item_id")]
     next_item_id: u32,
+    #[serde(default = "default_next_building_id")]
+    next_building_id: u32,
 }
 
 impl From<&MatchState> for MatchSnapshot {
@@ -2770,12 +3318,15 @@ impl From<&MatchState> for MatchSnapshot {
             next_stack_item_id: match_state.next_stack_item_id,
             next_unit_id: match_state.next_unit_id,
             next_item_id: match_state.next_item_id,
+            next_building_id: match_state.next_building_id,
         }
     }
 }
 
 impl From<MatchSnapshot> for MatchState {
     fn from(snapshot: MatchSnapshot) -> Self {
+        let mut board = snapshot.board;
+        board.migrate_legacy_mana_sources();
         Self {
             round: snapshot.round,
             mode: snapshot.mode,
@@ -2784,13 +3335,14 @@ impl From<MatchSnapshot> for MatchState {
             priority_side: snapshot.priority_side,
             player: snapshot.player,
             opponent: snapshot.opponent,
-            board: snapshot.board,
+            board,
             action_stack: snapshot.action_stack,
             log: snapshot.log,
             winner: snapshot.winner,
             next_stack_item_id: snapshot.next_stack_item_id,
             next_unit_id: snapshot.next_unit_id,
             next_item_id: snapshot.next_item_id,
+            next_building_id: snapshot.next_building_id,
         }
     }
 }
@@ -2811,6 +3363,10 @@ fn default_next_item_id() -> u32 {
     1
 }
 
+fn default_next_building_id() -> u32 {
+    1
+}
+
 fn default_attack_range() -> u8 {
     1
 }
@@ -2827,14 +3383,16 @@ impl HexBoard {
             }
         }
         tiles.sort_by_key(|tile| (tile.coord.r, tile.coord.q));
+        let buildings = vec![
+            mana_well_building("natural-mana-1".to_string(), HexCoord { q: -1, r: 0 }),
+            mana_well_building("natural-mana-2".to_string(), HexCoord { q: 0, r: 0 }),
+            mana_well_building("natural-mana-3".to_string(), HexCoord { q: 1, r: 0 }),
+        ];
         Self {
             radius,
             tiles,
-            mana_sources: vec![
-                HexCoord { q: -1, r: 0 },
-                HexCoord { q: 0, r: 0 },
-                HexCoord { q: 1, r: 0 },
-            ],
+            mana_sources: Vec::new(),
+            buildings,
             units: Vec::new(),
             dropped_items: Vec::new(),
         }
@@ -2842,6 +3400,39 @@ impl HexBoard {
 
     pub(crate) fn is_valid(&self, coord: HexCoord) -> bool {
         coord.distance(HexCoord { q: 0, r: 0 }) <= self.radius
+    }
+
+    fn migrate_legacy_mana_sources(&mut self) {
+        if self.mana_sources.is_empty() {
+            return;
+        }
+
+        let mut next_index = self.buildings.len() + 1;
+        for coord in std::mem::take(&mut self.mana_sources) {
+            if self
+                .buildings
+                .iter()
+                .any(|building| building.position == coord)
+            {
+                continue;
+            }
+            self.buildings.push(mana_well_building(
+                format!("legacy-mana-{next_index}"),
+                coord,
+            ));
+            next_index += 1;
+        }
+    }
+}
+
+fn mana_well_building(id: String, position: HexCoord) -> Building {
+    Building {
+        id,
+        template_id: "mana-well".to_string(),
+        name: "Mana Well".to_string(),
+        position,
+        effect: BuildingEffect::TurnStartMana { amount: 1 },
+        activated_this_turn: false,
     }
 }
 
@@ -3042,6 +3633,7 @@ impl Hero {
             hero_type,
             hp: max_hp,
             max_hp,
+            shield: 0,
             attack,
             attack_range: profile.attack_range,
             position,
@@ -3061,6 +3653,33 @@ fn mana_with_progression(base: u8, delta: i8) -> u8 {
     value.clamp(0, i16::from(u8::MAX)) as u8
 }
 
+fn damage_hero(hero: &mut Hero, amount: i32) {
+    let shield_damage = hero.shield.min(amount);
+    hero.shield -= shield_damage;
+    hero.hp -= amount - shield_damage;
+}
+
+fn apply_ap_delta(ap_remaining: &mut u8, max_ap: &mut u8, delta: i8) {
+    if delta >= 0 {
+        let amount = delta as u8;
+        *ap_remaining = ap_remaining.saturating_add(amount);
+        *max_ap = max_ap.saturating_add(amount);
+    } else {
+        let amount = delta.unsigned_abs();
+        *ap_remaining = ap_remaining.saturating_sub(amount);
+        *max_ap = max_ap.saturating_sub(amount);
+    }
+}
+
+fn building_effect_is_activated(effect: &BuildingEffect) -> bool {
+    matches!(
+        effect,
+        BuildingEffect::ActivatedDamageLine { .. }
+            | BuildingEffect::ActivatedHeal { .. }
+            | BuildingEffect::ActivatedStatBonus { .. }
+    )
+}
+
 fn piece_can_attack(attacker: &PieceView, target: &PieceView) -> bool {
     let distance = attacker.position.distance(target.position);
     distance >= 1 && distance <= i32::from(attacker.attack_range)
@@ -3076,6 +3695,7 @@ impl From<&Hero> for PieceView {
             attack_range: hero.attack_range,
             ap_remaining: hero.ap_remaining,
             has_attacked: hero.has_attacked,
+            is_hero: true,
         }
     }
 }
@@ -3090,6 +3710,7 @@ impl From<&Unit> for PieceView {
             attack_range: unit.attack_range,
             ap_remaining: unit.ap_remaining,
             has_attacked: unit.has_attacked,
+            is_hero: false,
         }
     }
 }
@@ -3226,6 +3847,9 @@ mod tests {
                 ReplayEvent::CardDrawn { .. } => Some("cardDrawn"),
                 ReplayEvent::ItemEquipped { .. } => Some("itemEquipped"),
                 ReplayEvent::ItemActivated { .. } => Some("itemActivated"),
+                ReplayEvent::BuildingBuilt { .. } => Some("buildingBuilt"),
+                ReplayEvent::BuildingActivated { .. } => Some("buildingActivated"),
+                ReplayEvent::HeroShielded { .. } => Some("heroShielded"),
                 ReplayEvent::ManaSourceBuilt { .. } => Some("manaSourceBuilt"),
                 _ => None,
             })
@@ -3239,7 +3863,11 @@ mod tests {
         assert_eq!(game.board.radius, 3);
         assert_eq!(game.board.tiles.len(), 37);
         assert_eq!(
-            game.board.mana_sources,
+            game.board
+                .buildings
+                .iter()
+                .map(|building| building.position)
+                .collect::<Vec<_>>(),
             vec![hex(-1, 0), hex(0, 0), hex(1, 0)]
         );
         assert!(game.board.is_valid(hex(0, 0)));
@@ -3551,7 +4179,7 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(starter_card_templates().len(), 44);
+        assert_eq!(starter_card_templates().len(), 55);
         assert_eq!(game.player.hand.len(), 4);
         assert_eq!(game.player.deck_count, 56);
     }
@@ -4764,12 +5392,23 @@ mod tests {
             )
             .expect("mana well should be buildable next to hero");
 
-        assert!(game.board.mana_sources.contains(&hex(0, 2)));
+        assert!(
+            game.board
+                .buildings
+                .iter()
+                .any(|building| building.position == hex(0, 2)
+                    && building.template_id == "mana-well")
+        );
         assert_eq!(game.player.mana, 1);
         assert_eq!(game.player.hero.ap_remaining, 2);
         assert_eq!(
             card_play_event_names(&frames),
-            vec!["cardPlayed", "actionQueued", "manaSourceBuilt"]
+            vec![
+                "cardPlayed",
+                "actionQueued",
+                "buildingBuilt",
+                "manaSourceBuilt"
+            ]
         );
     }
 
