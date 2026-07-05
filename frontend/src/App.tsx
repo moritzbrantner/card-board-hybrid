@@ -10,13 +10,16 @@ import { SettingsPage } from "./settings";
 import type { HotkeyHandlers } from "./hotkeyRuntime";
 import {
   currentRoutePath,
+  matchSummaryRouteFromPath,
   matchRouteFromPath,
   protectedLoginRoute,
   publicDeckRouteFromPath,
   replayRouteFromPath,
   routeFromPath,
   safeAuthNextPath,
+  sharedMatchSummaryRouteFromPath,
   sharedMatchRouteFromPath,
+  sharedReplayRouteFromPath,
 } from "./routes";
 import { AuthPage } from "./pages/AuthPage";
 import { CatalogPage } from "./pages/CatalogPage";
@@ -24,6 +27,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { DecksPage } from "./pages/DecksPage";
 import { MatchArchivePage } from "./pages/MatchArchivePage";
 import { MatchPage } from "./pages/MatchPage";
+import { MatchSummaryPage } from "./pages/MatchSummaryPage";
 import { PlayPage } from "./pages/MatchPicker";
 import { MatchScenariosPage } from "./pages/MatchScenariosPage";
 import { PublicDeckPage } from "./pages/PublicDeckPage";
@@ -261,6 +265,54 @@ export function App() {
         allowSignOut={false}
         loginNextPath={path}
         visualPreferences={visualPreferences}
+      />
+    );
+  }
+
+  const matchSummaryRoute = matchSummaryRouteFromPath(path);
+  if (matchSummaryRoute) {
+    return (
+      <MatchSummaryPage
+        key={matchSummaryRoute}
+        matchId={matchSummaryRoute}
+        onNavigate={navigate}
+        currentUser={currentUser}
+        onSignOut={handleSignOut}
+        allowSignOut={false}
+        loginNextPath={path}
+      />
+    );
+  }
+
+  const sharedReplayRoute = sharedReplayRouteFromPath(path);
+  if (sharedReplayRoute) {
+    return (
+      <ReplayPage
+        key={`${sharedReplayRoute.matchId}:${sharedReplayRoute.seatToken}:replay`}
+        matchId={sharedReplayRoute.matchId}
+        seatToken={sharedReplayRoute.seatToken}
+        onNavigate={navigate}
+        currentUser={currentUser}
+        onSignOut={handleSignOut}
+        allowSignOut={false}
+        loginNextPath={path}
+        visualPreferences={visualPreferences}
+      />
+    );
+  }
+
+  const sharedMatchSummaryRoute = sharedMatchSummaryRouteFromPath(path);
+  if (sharedMatchSummaryRoute) {
+    return (
+      <MatchSummaryPage
+        key={`${sharedMatchSummaryRoute.matchId}:${sharedMatchSummaryRoute.seatToken}:summary`}
+        matchId={sharedMatchSummaryRoute.matchId}
+        seatToken={sharedMatchSummaryRoute.seatToken}
+        onNavigate={navigate}
+        currentUser={currentUser}
+        onSignOut={handleSignOut}
+        allowSignOut={false}
+        loginNextPath={path}
       />
     );
   }

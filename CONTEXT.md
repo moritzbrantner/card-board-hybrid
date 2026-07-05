@@ -224,6 +224,10 @@ _Avoid_: legendary card
 The list of replay-capable matches stored by the backend.
 _Avoid_: match picker, database browser
 
+**Match summary**:
+The post-match result and reward surface for a completed match, linking the player to replay, the Player dashboard, or the Play section.
+_Avoid_: result screen, post-match report
+
 **Replay event**:
 A durable record of one meaningful match occurrence, such as a turn start, draw, card play, movement, attack, unit destruction, or match end.
 _Avoid_: text log line

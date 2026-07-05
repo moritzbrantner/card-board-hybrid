@@ -11,6 +11,7 @@ import type {
   DeckRecipeSummary,
   DeckChoice,
   MatchArchiveResponse,
+  MatchSummaryResponse,
   MatchActionRequest,
   MatchReplayResponse,
   MatchResponse,
@@ -277,6 +278,22 @@ export function loadMatches() {
 
 export function loadReplay(matchId: string) {
   return request<MatchReplayResponse>(`/api/matches/${encodeURIComponent(matchId)}/replay`);
+}
+
+export function loadMatchSummary(matchId: string) {
+  return request<MatchSummaryResponse>(`/api/matches/${encodeURIComponent(matchId)}/summary`);
+}
+
+export function loadSharedMatchSummary(matchId: string, seatToken: string) {
+  return request<MatchSummaryResponse>(
+    `/api/shared-matches/${encodeURIComponent(matchId)}/seats/${encodeURIComponent(seatToken)}/summary`,
+  );
+}
+
+export function loadSharedReplay(matchId: string, seatToken: string) {
+  return request<MatchReplayResponse>(
+    `/api/shared-matches/${encodeURIComponent(matchId)}/seats/${encodeURIComponent(seatToken)}/replay`,
+  );
 }
 
 export function loadCatalog() {

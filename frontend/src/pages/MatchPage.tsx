@@ -1,4 +1,4 @@
-import { Activity, Archive, Eye, EyeOff, Layers, Play, Plus, RotateCcw, Zap } from "lucide-react";
+import { Activity, Archive, Eye, EyeOff, Layers, Play, Plus, RotateCcw, Trophy, Zap } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
 import {
@@ -786,7 +786,43 @@ export function MatchPage({
           onActivateBuilding={handleActivateUnitBuilding}
         />
       ) : null}
+      {match.phase === "matchOver" ? (
+        <MatchEndOverlay
+          winner={match.winner}
+          viewerSide={viewerSide}
+          onOpenSummary={() => onNavigate(`/matches/${matchId}/summary`)}
+        />
+      ) : null}
     </main>
+  );
+}
+
+function MatchEndOverlay({
+  winner,
+  viewerSide,
+  onOpenSummary,
+}: {
+  winner: Side | null;
+  viewerSide: Side;
+  onOpenSummary: () => void;
+}) {
+  const result = winner === viewerSide ? "Victory" : "Defeat";
+  const winnerLabel = winner ? `${sideLabel(winner)} wins` : "Match complete";
+
+  return (
+    <section className="match-end-overlay" role="dialog" aria-label="Match complete">
+      <div className={`match-end-panel ${winner === viewerSide ? "victory" : "defeat"}`}>
+        <span className="match-end-icon">
+          <Trophy size={34} />
+        </span>
+        <p className="eyebrow">{winnerLabel}</p>
+        <h2>{result}</h2>
+        <button className="primary-button" type="button" onClick={onOpenSummary}>
+          <Play size={18} />
+          Match Summary
+        </button>
+      </div>
+    </section>
   );
 }
 

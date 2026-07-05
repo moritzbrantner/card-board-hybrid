@@ -36,6 +36,62 @@ pub struct ProgressionResponse {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MatchRewardSummary {
+    pub side: Side,
+    pub hero_type: HeroType,
+    pub won: bool,
+    pub account_xp_gained: i64,
+    pub hero_xp_gained: i64,
+    pub win_bonus_xp: i64,
+    pub account: ProgressionDelta,
+    pub hero: HeroProgressionDelta,
+    pub unlocks: Vec<MatchUnlockCallout>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgressionDelta {
+    pub before: ProgressionSummary,
+    pub after: ProgressionSummary,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeroProgressionDelta {
+    pub hero_type: HeroType,
+    pub before: HeroProgression,
+    pub after: HeroProgression,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum MatchUnlockCallout {
+    AccountLevel {
+        level: u32,
+    },
+    RuneUnlocked {
+        rune_id: &'static str,
+        name: &'static str,
+    },
+    RuneSlotUnlocked {
+        rune_slots: usize,
+    },
+    HeroMasteryLevel {
+        hero_type: HeroType,
+        level: u32,
+    },
+    SkillPointUnlocked {
+        hero_type: HeroType,
+        skill_points: usize,
+    },
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RuneDefinition {
     pub id: &'static str,
     pub name: &'static str,
@@ -185,6 +241,70 @@ impl<'a> ProgressionModule<'a> {
         self.total_xp(user_id).map(summary_for_xp)
     }
 
+    pub fn match_reward_summary(
+        &self,
+        user_id: i64,
+        match_id: &str,
+        side: Side,
+    ) -> Result<Option<MatchRewardSummary>, ProgressionError> {
+        let Some(target) = self.match_award(user_id, match_id)? else {
+            return Ok(None);
+        };
+
+        let account_awards = self.awards_for_user(user_id)?;
+        let current_account_xp = self.total_xp(user_id)?;
+        let total_awarded_account_xp: i64 =
+            account_awards.iter().map(|award| award.account_xp).sum();
+        let baseline_account_xp = current_account_xp - total_awarded_account_xp;
+        let account_xp_before =
+            baseline_account_xp + prior_account_xp(&account_awards, &target.match_id);
+        let account_before = summary_for_xp(account_xp_before);
+        let account_after = summary_for_xp(account_xp_before + target.account_xp);
+
+        let hero_awards: Vec<&MatchAwardRow> = account_awards
+            .iter()
+            .filter(|award| award.hero_type == target.hero_type)
+            .collect();
+        let current_hero_xp = self.hero_xp(user_id, target.hero_type)?;
+        let total_awarded_hero_xp: i64 = hero_awards.iter().map(|award| award.hero_xp).sum();
+        let baseline_hero_xp = current_hero_xp - total_awarded_hero_xp;
+        let hero_xp_before = baseline_hero_xp + prior_hero_xp(&hero_awards, &target.match_id);
+        let hero_before =
+            self.hero_progression_from_xp(user_id, target.hero_type, hero_xp_before)?;
+        let hero_after = self.hero_progression_from_xp(
+            user_id,
+            target.hero_type,
+            hero_xp_before + target.hero_xp,
+        )?;
+
+        let unlocks = reward_unlocks(
+            target.hero_type,
+            &account_before,
+            &account_after,
+            &hero_before,
+            &hero_after,
+        );
+
+        Ok(Some(MatchRewardSummary {
+            side,
+            hero_type: target.hero_type,
+            won: target.won,
+            account_xp_gained: target.account_xp,
+            hero_xp_gained: target.hero_xp,
+            win_bonus_xp: if target.won { WIN_BONUS_XP } else { 0 },
+            account: ProgressionDelta {
+                before: account_before,
+                after: account_after,
+            },
+            hero: HeroProgressionDelta {
+                hero_type: target.hero_type,
+                before: hero_before,
+                after: hero_after,
+            },
+            unlocks,
+        }))
+    }
+
     pub fn unlock_skill(
         &mut self,
         user_id: i64,
@@ -305,6 +425,15 @@ impl<'a> ProgressionModule<'a> {
         hero_type: HeroType,
     ) -> Result<HeroProgression, ProgressionError> {
         let xp = self.hero_xp(user_id, hero_type)?;
+        self.hero_progression_from_xp(user_id, hero_type, xp)
+    }
+
+    fn hero_progression_from_xp(
+        &self,
+        user_id: i64,
+        hero_type: HeroType,
+        xp: i64,
+    ) -> Result<HeroProgression, ProgressionError> {
         let level_summary = summary_for_xp(xp);
         let unlocked_skill_ids = self.unlocked_skill_ids(user_id, hero_type)?;
         let spent_skill_points = unlocked_skill_ids.len();
@@ -323,6 +452,42 @@ impl<'a> ProgressionModule<'a> {
             available_skill_points,
             unlocked_skill_ids,
         })
+    }
+
+    fn match_award(
+        &self,
+        user_id: i64,
+        match_id: &str,
+    ) -> Result<Option<MatchAwardRow>, ProgressionError> {
+        self.connection
+            .query_row(
+                "
+                SELECT match_id, account_xp, hero_type, hero_xp, won, awarded_at
+                FROM match_xp_awards
+                WHERE user_id = ?1 AND match_id = ?2
+                ",
+                params![user_id, match_id],
+                |row| match_award_from_row(row),
+            )
+            .optional()
+            .map_err(ProgressionError::from)
+    }
+
+    fn awards_for_user(&self, user_id: i64) -> Result<Vec<MatchAwardRow>, ProgressionError> {
+        let mut statement = self.connection.prepare(
+            "
+            SELECT match_id, account_xp, hero_type, hero_xp, won, awarded_at
+            FROM match_xp_awards
+            WHERE user_id = ?1
+            ORDER BY awarded_at ASC, match_id ASC
+            ",
+        )?;
+        let rows = statement.query_map(params![user_id], match_award_from_row)?;
+        let mut awards = Vec::new();
+        for row in rows {
+            awards.push(row?);
+        }
+        Ok(awards)
     }
 
     fn hero_xp(&self, user_id: i64, hero_type: HeroType) -> Result<i64, ProgressionError> {
@@ -733,6 +898,100 @@ fn rune_definition(rune_id: &str) -> Option<RuneDefinition> {
     rune_definitions()
         .into_iter()
         .find(|rune| rune.id == rune_id)
+}
+
+#[derive(Clone, Debug)]
+struct MatchAwardRow {
+    match_id: String,
+    account_xp: i64,
+    hero_type: HeroType,
+    hero_xp: i64,
+    won: bool,
+    awarded_at: i64,
+}
+
+fn match_award_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MatchAwardRow> {
+    let hero_type: String = row.get(2)?;
+    Ok(MatchAwardRow {
+        match_id: row.get(0)?,
+        account_xp: row.get(1)?,
+        hero_type: hero_type_from_db(&hero_type).expect("stored hero type should be valid"),
+        hero_xp: row.get(3)?,
+        won: row.get(4)?,
+        awarded_at: row.get(5)?,
+    })
+}
+
+fn prior_account_xp(awards: &[MatchAwardRow], match_id: &str) -> i64 {
+    let Some(target) = awards.iter().find(|award| award.match_id == match_id) else {
+        return 0;
+    };
+
+    awards
+        .iter()
+        .filter(|award| {
+            (award.awarded_at, award.match_id.as_str())
+                < (target.awarded_at, target.match_id.as_str())
+        })
+        .map(|award| award.account_xp)
+        .sum()
+}
+
+fn prior_hero_xp(awards: &[&MatchAwardRow], match_id: &str) -> i64 {
+    let Some(target) = awards.iter().find(|award| award.match_id == match_id) else {
+        return 0;
+    };
+
+    awards
+        .iter()
+        .filter(|award| {
+            (award.awarded_at, award.match_id.as_str())
+                < (target.awarded_at, target.match_id.as_str())
+        })
+        .map(|award| award.hero_xp)
+        .sum()
+}
+
+fn reward_unlocks(
+    hero_type: HeroType,
+    account_before: &ProgressionSummary,
+    account_after: &ProgressionSummary,
+    hero_before: &HeroProgression,
+    hero_after: &HeroProgression,
+) -> Vec<MatchUnlockCallout> {
+    let mut unlocks = Vec::new();
+
+    for level in (account_before.level + 1)..=account_after.level {
+        unlocks.push(MatchUnlockCallout::AccountLevel { level });
+    }
+
+    if account_after.rune_slots > account_before.rune_slots {
+        unlocks.push(MatchUnlockCallout::RuneSlotUnlocked {
+            rune_slots: account_after.rune_slots,
+        });
+    }
+
+    for rune in rune_definitions() {
+        if account_before.level < rune.unlock_level && account_after.level >= rune.unlock_level {
+            unlocks.push(MatchUnlockCallout::RuneUnlocked {
+                rune_id: rune.id,
+                name: rune.name,
+            });
+        }
+    }
+
+    for level in (hero_before.level + 1)..=hero_after.level {
+        unlocks.push(MatchUnlockCallout::HeroMasteryLevel { hero_type, level });
+    }
+
+    if hero_after.total_skill_points > hero_before.total_skill_points {
+        unlocks.push(MatchUnlockCallout::SkillPointUnlocked {
+            hero_type,
+            skill_points: hero_after.total_skill_points - hero_before.total_skill_points,
+        });
+    }
+
+    unlocks
 }
 
 fn effects_for(rune_ids: &[String], skill_ids: &[String]) -> MatchProgressionEffects {
@@ -1260,6 +1519,20 @@ fn hero_type_to_db(hero_type: HeroType) -> &'static str {
         HeroType::Barbarian => "barbarian",
         HeroType::Archer => "archer",
         HeroType::Builder => "builder",
+    }
+}
+
+fn hero_type_from_db(value: &str) -> Option<HeroType> {
+    match value {
+        "runekeeper" => Some(HeroType::Runekeeper),
+        "pyromancer" => Some(HeroType::Pyromancer),
+        "chronomancer" => Some(HeroType::Chronomancer),
+        "warden" => Some(HeroType::Warden),
+        "battlemage" => Some(HeroType::Battlemage),
+        "barbarian" => Some(HeroType::Barbarian),
+        "archer" => Some(HeroType::Archer),
+        "builder" => Some(HeroType::Builder),
+        _ => None,
     }
 }
 

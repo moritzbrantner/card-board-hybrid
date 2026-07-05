@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, Eye, EyeOff, History, Play } from "lucide-react";
 import { useEffect, useState } from "react";
-import { loadReplay } from "../api";
+import { loadReplay, loadSharedReplay } from "../api";
 import type { AccountPreferenceProps, ReplayLoadState } from "../appTypes";
 import { createBoardAnimationCue } from "../boardAnimations";
 import { Board, PlayerBadge } from "../components/board";
@@ -10,6 +10,7 @@ import { eventDetail, eventSideLabel, eventTitle, sideLabel } from "../labels";
 
 export function ReplayPage({
   matchId,
+  seatToken,
   onNavigate,
   currentUser,
   onSignOut,
@@ -18,6 +19,7 @@ export function ReplayPage({
   visualPreferences,
 }: {
   matchId: string;
+  seatToken?: string;
   onNavigate: (to: string) => void;
 } & AccountPreferenceProps) {
   const boardVisualMode = visualPreferences.preferences.boardVisualMode;
@@ -29,7 +31,8 @@ export function ReplayPage({
   useEffect(() => {
     setLoadState({ status: "loading" });
     setFrameIndex(0);
-    loadReplay(matchId)
+    const load = seatToken ? loadSharedReplay(matchId, seatToken) : loadReplay(matchId);
+    load
       .then((response) => setLoadState({ status: "ready", replay: response }))
       .catch((error: unknown) =>
         setLoadState({
@@ -37,7 +40,7 @@ export function ReplayPage({
           message: error instanceof Error ? error.message : "Could not load replay",
         }),
       );
-  }, [matchId]);
+  }, [matchId, seatToken]);
 
   if (loadState.status === "loading") {
     return <ShellMessage title={`Replay ${matchId}`} message="Loading replay" />;

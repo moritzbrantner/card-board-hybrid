@@ -698,6 +698,29 @@ impl SqliteMatchStore {
             .map_err(MatchStoreError::from)
     }
 
+    pub fn completed_shared_participant_side(
+        &self,
+        match_id: &str,
+        user_id: i64,
+    ) -> Result<Option<Side>, MatchStoreError> {
+        let side = self
+            .connection
+            .query_row(
+                "
+                SELECT match_seats.side
+                FROM match_seats
+                JOIN shared_matches ON shared_matches.match_id = match_seats.match_id
+                WHERE match_seats.match_id = ?1
+                    AND match_seats.participant_user_id = ?2
+                    AND shared_matches.status IN ('completed', 'forfeited')
+                ",
+                params![match_id, user_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(side.and_then(|side| side_from_db(&side)))
+    }
+
     pub fn next_action_index(&self, id: &str) -> Result<u32, MatchStoreError> {
         let next = self.connection.query_row(
             "

@@ -578,6 +578,7 @@ export type ReplayVisibility = "public" | "revealed";
 
 export type MatchSummary = {
   matchId: string;
+  mode: MatchMode;
   createdAt: number;
   updatedAt: number;
   round: number;
@@ -589,6 +590,66 @@ export type MatchSummary = {
 export type MatchArchiveResponse = {
   matches: MatchSummary[];
 };
+
+export type ViewerResult = "victory" | "defeat" | "spectator";
+
+export type MatchSummaryResponse = {
+  matchId: string;
+  summary: MatchSummary;
+  viewer: {
+    side: Side | null;
+    result: ViewerResult;
+  };
+  reward: MatchRewardSummary | null;
+};
+
+export type MatchRewardSummary = {
+  side: Side;
+  heroType: HeroType;
+  won: boolean;
+  accountXpGained: number;
+  heroXpGained: number;
+  winBonusXp: number;
+  account: ProgressionDelta;
+  hero: HeroProgressionDelta;
+  unlocks: MatchUnlockCallout[];
+};
+
+export type ProgressionDelta = {
+  before: ProgressionSummary;
+  after: ProgressionSummary;
+};
+
+export type HeroProgressionDelta = {
+  heroType: HeroType;
+  before: HeroProgression;
+  after: HeroProgression;
+};
+
+export type MatchUnlockCallout =
+  | {
+      type: "accountLevel";
+      level: number;
+    }
+  | {
+      type: "runeUnlocked";
+      runeId: string;
+      name: string;
+    }
+  | {
+      type: "runeSlotUnlocked";
+      runeSlots: number;
+    }
+  | {
+      type: "heroMasteryLevel";
+      heroType: HeroType;
+      level: number;
+    }
+  | {
+      type: "skillPointUnlocked";
+      heroType: HeroType;
+      skillPoints: number;
+    };
 
 export type MatchScenarioSummary = {
   id: string;

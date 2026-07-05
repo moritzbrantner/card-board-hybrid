@@ -59,6 +59,34 @@ export function replayRouteFromPath(path: string) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+export function matchSummaryRouteFromPath(path: string) {
+  const normalized = path.replace(/\/+$/, "");
+  const match = normalized.match(/^\/matches\/([^/]+)\/summary$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+export function sharedMatchSummaryRouteFromPath(path: string) {
+  const normalized = path.replace(/\/+$/, "");
+  const match = normalized.match(/^\/match\/([^/]+)\/([^/]+)\/summary$/);
+  return match
+    ? {
+        matchId: decodeURIComponent(match[1]),
+        seatToken: decodeURIComponent(match[2]),
+      }
+    : null;
+}
+
+export function sharedReplayRouteFromPath(path: string) {
+  const normalized = path.replace(/\/+$/, "");
+  const match = normalized.match(/^\/match\/([^/]+)\/([^/]+)\/replay$/);
+  return match
+    ? {
+        matchId: decodeURIComponent(match[1]),
+        seatToken: decodeURIComponent(match[2]),
+      }
+    : null;
+}
+
 export function sharedMatchRouteFromPath(path: string) {
   const normalized = path.replace(/\/+$/, "");
   const match = normalized.match(/^\/match\/([^/]+)\/([^/]+)$/);

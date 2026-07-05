@@ -130,10 +130,10 @@ export function MatchArchivePage({
                   <button
                     className="primary-button"
                     type="button"
-                    onClick={() => onNavigate(`/matches/${match.matchId}/replay`)}
+                    onClick={() => onNavigate(`/matches/${match.matchId}/summary`)}
                   >
                     <History size={18} />
-                    Replay
+                    Summary
                   </button>
                 </div>
               </article>

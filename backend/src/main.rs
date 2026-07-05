@@ -41,8 +41,8 @@ use match_store::{
 };
 use preferences::{PreferencesError, PreferencesModule, UpdatePreferencesRequest};
 use progression::{
-    ProgressionError, ProgressionModule, ProgressionResponse, ProgressionSummary,
-    SaveRuneLoadoutRequest,
+    MatchRewardSummary, ProgressionError, ProgressionModule, ProgressionResponse,
+    ProgressionSummary, SaveRuneLoadoutRequest,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -230,6 +230,30 @@ struct MatchArchiveResponse {
     matches: Vec<MatchSummary>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MatchSummaryResponse {
+    match_id: String,
+    summary: MatchSummary,
+    viewer: MatchSummaryViewer,
+    reward: Option<MatchRewardSummary>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MatchSummaryViewer {
+    side: Option<Side>,
+    result: ViewerResult,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum ViewerResult {
+    Victory,
+    Defeat,
+    Spectator,
+}
+
 #[cfg(debug_assertions)]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -251,6 +275,7 @@ struct MatchScenarioSummary {
 #[serde(rename_all = "camelCase")]
 struct MatchSummary {
     match_id: String,
+    mode: MatchMode,
     created_at: i64,
     updated_at: i64,
     round: u32,
@@ -405,6 +430,7 @@ fn create_app(store: SqliteMatchStore) -> Router {
         )
         .route("/api/matches", get(list_matches).post(create_match))
         .route("/api/matches/{match_id}", get(load_match))
+        .route("/api/matches/{match_id}/summary", get(load_match_summary))
         .route("/api/matches/{match_id}/replay", get(load_replay))
         .route("/api/matches/{match_id}/actions", post(apply_match_action))
         .route("/api/shared-matches", post(create_shared_match))
@@ -415,6 +441,14 @@ fn create_app(store: SqliteMatchStore) -> Router {
         .route(
             "/api/shared-matches/{match_id}/seats/{seat_token}/join",
             post(join_shared_match),
+        )
+        .route(
+            "/api/shared-matches/{match_id}/seats/{seat_token}/summary",
+            get(load_shared_match_summary),
+        )
+        .route(
+            "/api/shared-matches/{match_id}/seats/{seat_token}/replay",
+            get(load_shared_replay),
         )
         .route(
             "/api/shared-matches/{match_id}/seats/{seat_token}/ws",
@@ -1609,6 +1643,158 @@ async fn load_replay(
             .into_response();
     }
 
+    replay_response(replay)
+}
+
+async fn load_match_summary(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(match_id): Path<String>,
+) -> impl IntoResponse {
+    let profile = match optional_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
+        Err(response) => return response,
+    };
+    let (summary, viewer_side, reward) = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let replay = match store.load_replay(&match_id) {
+            Ok(Some(replay)) => replay,
+            Ok(None) => return match_summary_not_found_response(&match_id),
+            Err(error) => return store_error_response(error),
+        };
+        let actor = Actor::from(profile.as_ref());
+        if !MatchAccess::new(&store).can_load_replay(&actor, &match_id) {
+            return match_summary_not_found_response(&match_id);
+        }
+        if replay.summary.state.winner.is_none() {
+            return match_summary_not_found_response(&match_id);
+        }
+        let viewer_side = match (replay.summary.state.mode, profile.as_ref()) {
+            (MatchMode::Solo, _) => Some(Side::Player),
+            (MatchMode::Shared, Some(profile)) => {
+                match store.completed_shared_participant_side(&match_id, profile.id) {
+                    Ok(side) => side,
+                    Err(error) => return store_error_response(error),
+                }
+            }
+            (MatchMode::Shared, None) => None,
+        };
+        if replay.summary.state.mode == MatchMode::Shared && viewer_side.is_none() {
+            return match_summary_not_found_response(&match_id);
+        }
+        let reward = if let (Some(profile), Some(viewer_side)) = (profile.as_ref(), viewer_side) {
+            let progression = ProgressionModule::new(store.connection_mut());
+            match progression.match_reward_summary(profile.id, &match_id, viewer_side) {
+                Ok(reward) => reward,
+                Err(error) => return progression_error_response(error),
+            }
+        } else {
+            None
+        };
+        (replay.summary, viewer_side, reward)
+    };
+
+    let viewer = MatchSummaryViewer {
+        side: viewer_side,
+        result: viewer_result(viewer_side, summary.state.winner),
+    };
+    let match_id = summary.id.clone();
+    Json(MatchSummaryResponse {
+        match_id,
+        summary: MatchSummary::from(summary),
+        viewer,
+        reward,
+    })
+    .into_response()
+}
+
+async fn load_shared_match_summary(
+    State(state): State<SharedState>,
+    Path((match_id, seat_token)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let (summary, viewer_side, reward) = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let shared = match store.load_shared_match_for_seat(&match_id, &seat_token) {
+            Ok(Some(shared)) => shared,
+            Ok(None) => return match_summary_not_found_response(&match_id),
+            Err(error) => return store_error_response(error),
+        };
+        if shared.status == SharedMatchStatus::Active || shared.status == SharedMatchStatus::Setup {
+            return match_summary_not_found_response(&match_id);
+        }
+        let replay = match store.load_replay(&match_id) {
+            Ok(Some(replay)) => replay,
+            Ok(None) => return match_summary_not_found_response(&match_id),
+            Err(error) => return store_error_response(error),
+        };
+        if replay.summary.state.winner.is_none() {
+            return match_summary_not_found_response(&match_id);
+        }
+        let viewer_side = shared.viewer_seat.side;
+        let reward = if let Some(user_id) = shared.viewer_seat.participant_user_id {
+            let progression = ProgressionModule::new(store.connection_mut());
+            match progression.match_reward_summary(user_id, &match_id, viewer_side) {
+                Ok(reward) => reward,
+                Err(error) => return progression_error_response(error),
+            }
+        } else {
+            None
+        };
+        (replay.summary, viewer_side, reward)
+    };
+
+    let viewer = MatchSummaryViewer {
+        side: Some(viewer_side),
+        result: viewer_result(Some(viewer_side), summary.state.winner),
+    };
+    let match_id = summary.id.clone();
+    Json(MatchSummaryResponse {
+        match_id,
+        summary: MatchSummary::from(summary),
+        viewer,
+        reward,
+    })
+    .into_response()
+}
+
+async fn load_shared_replay(
+    State(state): State<SharedState>,
+    Path((match_id, seat_token)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let replay = {
+        let store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        let shared = match store.load_shared_match_for_seat(&match_id, &seat_token) {
+            Ok(Some(shared)) => shared,
+            Ok(None) => return replay_not_found_response(&match_id),
+            Err(error) => return store_error_response(error),
+        };
+        if shared.status == SharedMatchStatus::Active || shared.status == SharedMatchStatus::Setup {
+            return replay_not_found_response(&match_id);
+        }
+        let replay = match store.load_replay(&match_id) {
+            Ok(Some(replay)) => replay,
+            Ok(None) => return replay_not_found_response(&match_id),
+            Err(error) => return store_error_response(error),
+        };
+        if replay.summary.state.winner.is_none() {
+            return replay_not_found_response(&match_id);
+        }
+        replay
+    };
+
+    replay_response(replay)
+}
+
+fn replay_response(replay: match_store::StoredReplay) -> axum::response::Response {
     let visibility = if replay.summary.state.winner.is_some() {
         ReplayVisibility::Revealed
     } else {
@@ -1629,6 +1815,14 @@ async fn load_replay(
         frames,
     })
     .into_response()
+}
+
+fn viewer_result(viewer_side: Option<Side>, winner: Option<Side>) -> ViewerResult {
+    match (viewer_side, winner) {
+        (Some(viewer_side), Some(winner)) if viewer_side == winner => ViewerResult::Victory,
+        (Some(_), Some(_)) => ViewerResult::Defeat,
+        _ => ViewerResult::Spectator,
+    }
 }
 
 async fn apply_match_action(
@@ -1827,6 +2021,16 @@ fn replay_not_found_response(match_id: &str) -> axum::response::Response {
         StatusCode::NOT_FOUND,
         Json(ApiError {
             message: format!("Replay for match {match_id} was not found"),
+        }),
+    )
+        .into_response()
+}
+
+fn match_summary_not_found_response(match_id: &str) -> axum::response::Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ApiError {
+            message: format!("Match summary for match {match_id} was not found"),
         }),
     )
         .into_response()
@@ -2257,6 +2461,7 @@ impl From<StoredMatchSummary> for MatchSummary {
     fn from(summary: StoredMatchSummary) -> Self {
         Self {
             match_id: summary.id,
+            mode: summary.state.mode,
             created_at: summary.created_at,
             updated_at: summary.updated_at,
             round: summary.state.round,
@@ -2368,6 +2573,24 @@ mod tests {
         url.rsplit('/')
             .next()
             .expect("seat URL should end in token")
+    }
+
+    fn complete_match_by_forfeit(path: &std::path::Path, match_id: &str, winner: Side) {
+        let mut store = SqliteMatchStore::new(path).expect("store should reopen");
+        let mut stored = store
+            .load_match(match_id)
+            .expect("match lookup should succeed")
+            .expect("match should exist");
+        let frames = stored.state.forfeit_recording(winner, 0);
+        store
+            .save_custom_action_and_replay_frames(
+                match_id,
+                0,
+                r#"{"type":"testForfeit"}"#,
+                &stored.state,
+                &frames,
+            )
+            .expect("completed match should save");
     }
 
     async fn register_test_account(app: Router, email: &str) -> String {
@@ -4175,6 +4398,238 @@ mod tests {
         assert_eq!(replay["visibility"], "public");
         assert_eq!(replay["frames"][0]["frameIndex"], 0);
         assert_eq!(replay["frames"][0]["event"]["type"], "matchCreated");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn completed_match_summary_includes_viewer_reward_unlocks() {
+        let path = test_db_path("match-summary-reward");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let token = register_test_account(app.clone(), "summary-reward@example.com").await;
+
+        let (status, created) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/matches")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"heroType":"pyromancer"}"#))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let match_id = created["matchId"].as_str().expect("match id should exist");
+        complete_match_by_forfeit(&path, match_id, Side::Player);
+
+        let (status, summary) = json_request(
+            app,
+            Request::builder()
+                .uri(format!("/api/matches/{match_id}/summary"))
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(summary["matchId"], match_id);
+        assert_eq!(summary["summary"]["mode"], "solo");
+        assert_eq!(summary["viewer"]["side"], "player");
+        assert_eq!(summary["viewer"]["result"], "victory");
+        assert_eq!(summary["reward"]["accountXpGained"], 150);
+        assert_eq!(summary["reward"]["heroXpGained"], 150);
+        assert_eq!(summary["reward"]["winBonusXp"], 50);
+        assert_eq!(summary["reward"]["account"]["before"]["level"], 1);
+        assert_eq!(summary["reward"]["account"]["after"]["level"], 2);
+        assert!(
+            summary["reward"]["unlocks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|unlock| unlock["type"] == "runeUnlocked" && unlock["runeId"] == "vitality")
+        );
+        assert!(
+            summary["reward"]["unlocks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|unlock| unlock["type"] == "skillPointUnlocked")
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn completed_shared_seat_links_can_load_summary_and_replay() {
+        let path = test_db_path("shared-summary-replay");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+
+        let (status, created) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/shared-matches")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"heroType":"chronomancer"}"#))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let match_id = created["matchId"].as_str().expect("match id should exist");
+        let player_token = seat_token_from_url(
+            created["playerSeatUrl"]
+                .as_str()
+                .expect("player URL exists"),
+        );
+        let opponent_token = seat_token_from_url(
+            created["inviteSeatUrl"]
+                .as_str()
+                .expect("invite URL exists"),
+        );
+
+        for (token, hero_type) in [(player_token, "pyromancer"), (opponent_token, "warden")] {
+            let (status, _) = json_request(
+                app.clone(),
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/shared-matches/{match_id}/seats/{token}/join"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"heroType":"{hero_type}"}}"#)))
+                    .expect("request should build"),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+
+        complete_match_by_forfeit(&path, match_id, Side::Opponent);
+
+        let (status, player_summary) = json_request(
+            app.clone(),
+            Request::builder()
+                .uri(format!(
+                    "/api/shared-matches/{match_id}/seats/{player_token}/summary"
+                ))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(player_summary["summary"]["mode"], "shared");
+        assert_eq!(player_summary["viewer"]["side"], "player");
+        assert_eq!(player_summary["viewer"]["result"], "defeat");
+        assert!(player_summary["reward"].is_null());
+
+        let (status, opponent_summary) = json_request(
+            app.clone(),
+            Request::builder()
+                .uri(format!(
+                    "/api/shared-matches/{match_id}/seats/{opponent_token}/summary"
+                ))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(opponent_summary["viewer"]["side"], "opponent");
+        assert_eq!(opponent_summary["viewer"]["result"], "victory");
+
+        let (status, replay) = json_request(
+            app,
+            Request::builder()
+                .uri(format!(
+                    "/api/shared-matches/{match_id}/seats/{opponent_token}/replay"
+                ))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(replay["visibility"], "revealed");
+        assert_eq!(replay["summary"]["winner"], "opponent");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn completed_shared_account_participant_can_load_summary_from_match_route() {
+        let path = test_db_path("shared-account-summary");
+        let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+        let player_auth = register_test_account(app.clone(), "shared-player@example.com").await;
+        let opponent_auth = register_test_account(app.clone(), "shared-opponent@example.com").await;
+
+        let (status, created) = json_request(
+            app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/shared-matches")
+                .header("authorization", format!("Bearer {player_auth}"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"heroType":"chronomancer"}"#))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let match_id = created["matchId"].as_str().expect("match id should exist");
+        let player_token = seat_token_from_url(
+            created["playerSeatUrl"]
+                .as_str()
+                .expect("player URL exists"),
+        );
+        let opponent_token = seat_token_from_url(
+            created["inviteSeatUrl"]
+                .as_str()
+                .expect("invite URL exists"),
+        );
+
+        for (token, auth, hero_type) in [
+            (player_token, &player_auth, "pyromancer"),
+            (opponent_token, &opponent_auth, "warden"),
+        ] {
+            let (status, _) = json_request(
+                app.clone(),
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/shared-matches/{match_id}/seats/{token}/join"))
+                    .header("authorization", format!("Bearer {auth}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"heroType":"{hero_type}"}}"#)))
+                    .expect("request should build"),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+
+        complete_match_by_forfeit(&path, match_id, Side::Opponent);
+
+        let (status, summary) = json_request(
+            app.clone(),
+            Request::builder()
+                .uri(format!("/api/matches/{match_id}/summary"))
+                .header("authorization", format!("Bearer {player_auth}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(summary["summary"]["mode"], "shared");
+        assert_eq!(summary["viewer"]["side"], "player");
+        assert_eq!(summary["viewer"]["result"], "defeat");
+        assert_eq!(summary["reward"]["accountXpGained"], 100);
+
+        let (status, replay) = json_request(
+            app,
+            Request::builder()
+                .uri(format!("/api/matches/{match_id}/replay"))
+                .header("authorization", format!("Bearer {opponent_auth}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(replay["summary"]["mode"], "shared");
+        assert_eq!(replay["visibility"], "revealed");
 
         let _ = fs::remove_file(path);
     }

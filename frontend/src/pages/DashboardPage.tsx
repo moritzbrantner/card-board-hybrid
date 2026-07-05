@@ -367,8 +367,8 @@ function RecentMatchRow({
             Continue
           </button>
         ) : null}
-        <button className="primary-button" type="button" onClick={() => onNavigate(`/matches/${match.matchId}/replay`)}>
-          Replay
+        <button className="primary-button" type="button" onClick={() => onNavigate(`/matches/${match.matchId}/summary`)}>
+          Summary
         </button>
       </div>
     </article>
