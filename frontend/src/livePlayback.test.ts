@@ -29,6 +29,12 @@ describe("liveAiPlaybackFrames", () => {
         to: { q: 0, r: -2 },
       }),
       makeFrame(3, {
+        type: "unitArmorRefreshed",
+        side: "opponent",
+        unitId: "opponent-unit",
+        amount: 2,
+      }),
+      makeFrame(4, {
         type: "pieceMoved",
         side: "player",
         pieceId: "player-hero",
@@ -37,7 +43,7 @@ describe("liveAiPlaybackFrames", () => {
       }),
     ] satisfies ReplayFrame[];
 
-    expect(liveAiPlaybackFrames(frames).map((frame) => frame.frameIndex)).toEqual([1, 2]);
+    expect(liveAiPlaybackFrames(frames).map((frame) => frame.frameIndex)).toEqual([1, 2, 3]);
   });
 });
 

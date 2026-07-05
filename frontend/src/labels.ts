@@ -166,6 +166,8 @@ export function eventTitle(event: ReplayEvent) {
       return `${event.attackerId} attacked`;
     case "pieceHealed":
       return `${event.pieceId} healed`;
+    case "unitArmorRefreshed":
+      return `${event.unitId} armor refreshed`;
     case "pieceBuffed":
       return `${event.pieceId} buffed`;
     case "pieceDamaged":
@@ -219,6 +221,8 @@ export function eventDetail(event: ReplayEvent) {
       return `${event.attackerId} dealt ${event.damageToTarget}; counterdamage was ${event.counterDamageToAttacker}.`;
     case "pieceHealed":
       return `${event.pieceId} healed ${event.amount}.`;
+    case "unitArmorRefreshed":
+      return `${event.unitId} restored ${event.amount} armor.`;
     case "pieceBuffed":
       return `${event.pieceId} gained +${event.attackDelta}/+${event.armorDelta}.`;
     case "pieceDamaged":

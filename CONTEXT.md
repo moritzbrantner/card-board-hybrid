@@ -12,6 +12,10 @@ _Avoid_: wizard, commander, base
 A card-created board piece with attack, armor, and unit action points.
 _Avoid_: creature, minion, troop
 
+**Unit armor**:
+A Unit's renewable durability. Damage lowers current Unit armor; at the beginning of its owner's turn, surviving damaged Units refresh to their max armor.
+_Avoid_: health, hero armor, shield
+
 **Spell**:
 A card that creates an immediate effect from the caster hero instead of creating a unit.
 _Avoid_: tactic

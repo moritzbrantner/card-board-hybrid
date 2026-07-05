@@ -117,6 +117,8 @@ function animationsFromEvent(
     }
     case "pieceHealed":
       return [{ pieceId: event.pieceId, kind: "heal", amount: event.amount }];
+    case "unitArmorRefreshed":
+      return [{ pieceId: event.unitId, kind: "heal", amount: event.amount }];
     case "pieceBuffed":
       return [
         {

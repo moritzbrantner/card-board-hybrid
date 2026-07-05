@@ -119,6 +119,11 @@ pub enum ReplayEvent {
         piece_id: String,
         amount: i32,
     },
+    UnitArmorRefreshed {
+        side: Side,
+        unit_id: String,
+        amount: i32,
+    },
     PieceBuffed {
         side: Side,
         piece_id: String,
@@ -1261,7 +1266,6 @@ impl MatchState {
 
         if side == Side::Opponent {
             self.round += 1;
-            self.reset_unit_armor_for_new_round();
             self.log.insert(0, format!("Round {} begins.", self.round));
             self.truncate_log();
             self.record_replay_frame(
@@ -1275,9 +1279,34 @@ impl MatchState {
         self.truncate_log();
     }
 
-    fn reset_unit_armor_for_new_round(&mut self) {
-        for unit in self.board.units.iter_mut().filter(|unit| unit.armor > 0) {
-            unit.armor = unit.max_armor;
+    fn refresh_unit_armor_for_turn(
+        &mut self,
+        side: Side,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        let refreshed_units: Vec<_> = self
+            .board
+            .units
+            .iter_mut()
+            .filter(|unit| unit.side == side && unit.armor > 0 && unit.armor < unit.max_armor)
+            .map(|unit| {
+                let amount = unit.max_armor - unit.armor;
+                unit.armor = unit.max_armor;
+                (unit.id.clone(), amount)
+            })
+            .collect();
+
+        for (unit_id, amount) in refreshed_units {
+            self.record_replay_frame(
+                frames,
+                action_index,
+                ReplayEvent::UnitArmorRefreshed {
+                    side,
+                    unit_id,
+                    amount,
+                },
+            );
         }
     }
 
@@ -2628,7 +2657,6 @@ impl MatchState {
 
         if self.phase == Phase::Planning {
             self.round += 1;
-            self.reset_unit_armor_for_new_round();
             self.start_turn(Side::Player, frames, action_index);
             self.log.insert(0, format!("Round {} begins.", self.round));
             self.truncate_log();
@@ -2649,14 +2677,11 @@ impl MatchState {
         self.active_side = side;
         self.refresh_mana_from_sources(side);
         let should_draw = self.player_ref(side).has_started_first_turn;
-        let mut drawn = None;
         {
             let player = self.player_mut(side);
             player.hero.ap_remaining = player.hero.max_ap;
             player.hero.has_attacked = false;
-            if should_draw {
-                drawn = player.draw();
-            } else {
+            if !should_draw {
                 player.has_started_first_turn = true;
             }
         }
@@ -2678,16 +2703,19 @@ impl MatchState {
                 round: self.round,
             },
         );
-        if let Some(card) = drawn {
-            self.record_replay_frame(
-                frames,
-                action_index,
-                ReplayEvent::CardDrawn {
-                    side,
-                    card: Some(CardSummary::from(&card)),
-                    hidden: side == Side::Opponent,
-                },
-            );
+        self.refresh_unit_armor_for_turn(side, frames, action_index);
+        if should_draw {
+            if let Some(card) = self.player_mut(side).draw() {
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::CardDrawn {
+                        side,
+                        card: Some(CardSummary::from(&card)),
+                        hidden: side == Side::Opponent,
+                    },
+                );
+            }
         }
     }
 
@@ -3834,6 +3862,30 @@ mod tests {
         }
     }
 
+    fn damaged_board_unit(
+        id: &str,
+        side: Side,
+        position: HexCoord,
+        armor: i32,
+        max_armor: i32,
+    ) -> Unit {
+        Unit {
+            id: id.to_string(),
+            side,
+            name: id.to_string(),
+            template_id: Some(id.to_string()),
+            attack: 1,
+            attack_range: 1,
+            armor,
+            max_armor,
+            position,
+            ap_remaining: 2,
+            max_ap: 2,
+            has_attacked: false,
+            items: Vec::new(),
+        }
+    }
+
     fn card_play_event_names(frames: &[RecordedReplayFrame]) -> Vec<&'static str> {
         frames
             .iter()
@@ -3844,6 +3896,7 @@ mod tests {
                 ReplayEvent::PieceHealed { .. } => Some("pieceHealed"),
                 ReplayEvent::PieceBuffed { .. } => Some("pieceBuffed"),
                 ReplayEvent::PieceDamaged { .. } => Some("pieceDamaged"),
+                ReplayEvent::UnitArmorRefreshed { .. } => Some("unitArmorRefreshed"),
                 ReplayEvent::CardDrawn { .. } => Some("cardDrawn"),
                 ReplayEvent::ItemEquipped { .. } => Some("itemEquipped"),
                 ReplayEvent::ItemActivated { .. } => Some("itemActivated"),
@@ -5468,60 +5521,34 @@ mod tests {
     }
 
     #[test]
-    fn solo_round_start_resets_surviving_unit_armor_to_max_armor() {
+    fn solo_turn_start_refreshes_only_active_side_unit_armor() {
         let mut game = MatchState::new_with_seed(7);
         game.opponent.hand.clear();
-        game.board.units.push(Unit {
-            id: "player-guard".to_string(),
-            side: Side::Player,
-            name: "Stoneguard".to_string(),
-            template_id: Some("stoneguard".to_string()),
-            attack: 1,
-            attack_range: 1,
-            armor: 1,
-            max_armor: 4,
-            position: hex(0, 2),
-            ap_remaining: 2,
-            max_ap: 2,
-            has_attacked: false,
-            items: Vec::new(),
-        });
-        game.board.units.push(Unit {
-            id: "opponent-guard".to_string(),
-            side: Side::Opponent,
-            name: "Stoneguard".to_string(),
-            template_id: Some("stoneguard".to_string()),
-            attack: 1,
-            attack_range: 1,
-            armor: 2,
-            max_armor: 6,
-            position: hex(0, -2),
-            ap_remaining: 2,
-            max_ap: 2,
-            has_attacked: false,
-            items: Vec::new(),
-        });
+        game.board.units.push(damaged_board_unit(
+            "player-guard",
+            Side::Player,
+            hex(0, 2),
+            1,
+            4,
+        ));
+        game.board.units.push(damaged_board_unit(
+            "opponent-guard",
+            Side::Opponent,
+            hex(0, -2),
+            2,
+            6,
+        ));
 
         game.apply_action(MatchActionRequest::EndTurn)
-            .expect("ending turn should advance to the next round");
+            .expect("ending turn should start the opponent turn");
+
+        assert_eq!(unit_armor(&game, "player-guard"), Some(1));
+        assert_eq!(unit_armor(&game, "opponent-guard"), Some(6));
+
         advance_solo_ai_until_player_turn(&mut game);
 
-        assert_eq!(
-            game.board
-                .units
-                .iter()
-                .find(|unit| unit.id == "player-guard")
-                .map(|unit| unit.armor),
-            Some(4)
-        );
-        assert_eq!(
-            game.board
-                .units
-                .iter()
-                .find(|unit| unit.id == "opponent-guard")
-                .map(|unit| unit.armor),
-            Some(6)
-        );
+        assert_eq!(unit_armor(&game, "player-guard"), Some(4));
+        assert_eq!(unit_armor(&game, "opponent-guard"), Some(6));
     }
 
     #[test]
@@ -5564,51 +5591,133 @@ mod tests {
     }
 
     #[test]
-    fn shared_round_start_resets_surviving_unit_armor_to_max_armor() {
+    fn shared_turn_start_refreshes_only_active_side_unit_armor() {
         let mut game = MatchState::new_with_seed_hero_types_and_mode(
             7,
             HeroType::Runekeeper,
             HeroType::Pyromancer,
             MatchMode::Shared,
         );
-        game.board.units.push(Unit {
-            id: "guard".to_string(),
-            side: Side::Player,
-            name: "Stoneguard".to_string(),
-            template_id: Some("stoneguard".to_string()),
-            attack: 1,
-            attack_range: 1,
-            armor: 1,
-            max_armor: 5,
-            position: hex(0, 2),
-            ap_remaining: 2,
-            max_ap: 2,
-            has_attacked: false,
-            items: Vec::new(),
-        });
+        game.board.units.push(damaged_board_unit(
+            "player-guard",
+            Side::Player,
+            hex(0, 2),
+            1,
+            5,
+        ));
+        game.board.units.push(damaged_board_unit(
+            "opponent-guard",
+            Side::Opponent,
+            hex(0, -2),
+            2,
+            6,
+        ));
+        game.board.units.push(damaged_board_unit(
+            "opponent-full-guard",
+            Side::Opponent,
+            hex(1, -2),
+            4,
+            4,
+        ));
+        game.board.units.push(damaged_board_unit(
+            "opponent-dead-guard",
+            Side::Opponent,
+            hex(-1, -2),
+            0,
+            4,
+        ));
 
-        game.apply_action_recording_for_side(Side::Player, MatchActionRequest::EndTurn, 0)
+        let opponent_turn_frames = game
+            .apply_action_recording_for_side(Side::Player, MatchActionRequest::EndTurn, 0)
             .expect("player can end their active turn");
+
+        assert_eq!(unit_armor(&game, "player-guard"), Some(1));
+        assert_eq!(unit_armor(&game, "opponent-guard"), Some(6));
+        assert_eq!(unit_armor(&game, "opponent-full-guard"), Some(4));
+        assert_eq!(unit_armor(&game, "opponent-dead-guard"), Some(0));
+        assert!(matches!(
+            opponent_turn_frames.as_slice(),
+            [
+                RecordedReplayFrame {
+                    event: ReplayEvent::TurnEnded {
+                        side: Side::Player,
+                        ..
+                    },
+                    ..
+                },
+                RecordedReplayFrame {
+                    event: ReplayEvent::TurnStarted {
+                        side: Side::Opponent,
+                        ..
+                    },
+                    ..
+                },
+                RecordedReplayFrame {
+                    event: ReplayEvent::UnitArmorRefreshed {
+                        side: Side::Opponent,
+                        unit_id,
+                        amount: 4,
+                    },
+                    ..
+                },
+                ..
+            ] if unit_id == "opponent-guard"
+        ));
         assert_eq!(
-            game.board
-                .units
+            opponent_turn_frames
                 .iter()
-                .find(|unit| unit.id == "guard")
-                .map(|unit| unit.armor),
-            Some(1)
+                .filter(|frame| matches!(frame.event, ReplayEvent::UnitArmorRefreshed { .. }))
+                .count(),
+            1
         );
 
-        game.apply_action_recording_for_side(Side::Opponent, MatchActionRequest::EndTurn, 1)
+        let player_turn_frames = game
+            .apply_action_recording_for_side(Side::Opponent, MatchActionRequest::EndTurn, 1)
             .expect("opponent can end their active turn");
 
+        assert_eq!(unit_armor(&game, "player-guard"), Some(5));
         assert_eq!(
-            game.board
-                .units
-                .iter()
-                .find(|unit| unit.id == "guard")
-                .map(|unit| unit.armor),
-            Some(5)
+            card_play_event_names(&player_turn_frames),
+            vec!["unitArmorRefreshed", "cardDrawn"]
         );
+        assert!(matches!(
+            player_turn_frames.as_slice(),
+            [
+                RecordedReplayFrame {
+                    event: ReplayEvent::TurnEnded {
+                        side: Side::Opponent,
+                        ..
+                    },
+                    ..
+                },
+                RecordedReplayFrame {
+                    event: ReplayEvent::RoundStarted { .. },
+                    ..
+                },
+                RecordedReplayFrame {
+                    event: ReplayEvent::TurnStarted {
+                        side: Side::Player,
+                        ..
+                    },
+                    ..
+                },
+                RecordedReplayFrame {
+                    event: ReplayEvent::UnitArmorRefreshed {
+                        side: Side::Player,
+                        unit_id,
+                        amount: 4,
+                    },
+                    ..
+                },
+                RecordedReplayFrame {
+                    event: ReplayEvent::CardDrawn {
+                        side: Side::Player,
+                        ..
+                    },
+                    ..
+                },
+            ] if unit_id == "player-guard"
+        ));
     }
 
     #[test]

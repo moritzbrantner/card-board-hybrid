@@ -91,6 +91,25 @@ describe("createBoardAnimationCue", () => {
     ]);
   });
 
+  it("uses armor refresh events as unit heal cues", () => {
+    const previous = matchWithUnit({ id: "unit-1", q: 0, r: 0, armor: 1 });
+    const next = matchWithUnit({ id: "unit-1", q: 0, r: 0, armor: 4 });
+
+    const cue = createBoardAnimationCue({
+      previous,
+      next,
+      event: {
+        type: "unitArmorRefreshed",
+        side: "opponent",
+        unitId: "unit-1",
+        amount: 3,
+      },
+      sequence: 5,
+    });
+
+    expect(cue?.pieces).toEqual([{ pieceId: "unit-1", kind: "heal", amount: 3 }]);
+  });
+
   it("suppresses cosmetic cues for reduced-motion users", () => {
     const previous = matchWithUnit({ id: "unit-1", q: 0, r: 0, armor: 3 });
     const next = matchWithUnit({ id: "unit-1", q: 1, r: 0, armor: 3 });
@@ -99,7 +118,7 @@ describe("createBoardAnimationCue", () => {
       createBoardAnimationCue({
         previous,
         next,
-        sequence: 5,
+        sequence: 6,
         reducedMotion: true,
       }),
     ).toBeNull();

@@ -756,6 +756,12 @@ export type ReplayEvent =
       amount: number;
     }
   | {
+      type: "unitArmorRefreshed";
+      side: Side;
+      unitId: string;
+      amount: number;
+    }
+  | {
       type: "pieceBuffed";
       side: Side;
       pieceId: string;
