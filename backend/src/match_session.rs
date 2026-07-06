@@ -3412,9 +3412,9 @@ impl HexBoard {
         }
         tiles.sort_by_key(|tile| (tile.coord.r, tile.coord.q));
         let buildings = vec![
-            mana_well_building("natural-mana-1".to_string(), HexCoord { q: -1, r: 0 }),
+            mana_well_building("natural-mana-1".to_string(), HexCoord { q: -2, r: 0 }),
             mana_well_building("natural-mana-2".to_string(), HexCoord { q: 0, r: 0 }),
-            mana_well_building("natural-mana-3".to_string(), HexCoord { q: 1, r: 0 }),
+            mana_well_building("natural-mana-3".to_string(), HexCoord { q: 2, r: 0 }),
         ];
         Self {
             radius,
@@ -3921,7 +3921,7 @@ mod tests {
                 .iter()
                 .map(|building| building.position)
                 .collect::<Vec<_>>(),
-            vec![hex(-1, 0), hex(0, 0), hex(1, 0)]
+            vec![hex(-2, 0), hex(0, 0), hex(2, 0)]
         );
         assert!(game.board.is_valid(hex(0, 0)));
         assert!(!game.board.is_valid(hex(4, 0)));
@@ -5355,7 +5355,7 @@ mod tests {
         game.board.units.push(board_unit(
             "source-worker",
             Side::Player,
-            hex(1, 0),
+            hex(2, 0),
             1,
             1,
             2,
