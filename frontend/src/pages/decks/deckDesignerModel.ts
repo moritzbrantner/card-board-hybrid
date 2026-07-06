@@ -1,5 +1,5 @@
-import { copyLimitForRarity, runeNamesForLoadout, skillNamesForWizard } from "../../deckHelpers";
-import { kindSummary, wizardOptionByType } from "../../labels";
+import { copyLimitForRarity, runeNamesForLoadout, skillNamesForHero } from "../../deckHelpers";
+import { kindSummary, heroOptionByType } from "../../labels";
 import type {
   CatalogCard,
   DeckCardCount,
@@ -7,7 +7,7 @@ import type {
   DeckRules,
   ProgressionResponse,
   Rarity,
-  WizardType,
+  HeroType,
 } from "../../types";
 
 export type ManaCostFilter = "all" | "5plus" | number;
@@ -57,7 +57,7 @@ export type DeckDesignerStats = {
   advancedTotalLimit: number | null;
   rareTotalLimit: number | null;
   messages: string[];
-  wizardName: string;
+  heroName: string;
   runeNames: string[];
   skillNames: string[];
 };
@@ -146,13 +146,13 @@ export function filterCatalogCards(
 export function deckStats(
   previewLegality: DeckLegality | null,
   rules: DeckRules | null,
-  selectedWizardType: WizardType,
+  selectedHeroType: HeroType,
   selectedRuneIds: string[],
   progression: ProgressionResponse | null,
 ): DeckDesignerStats {
-  const wizard = wizardOptionByType(selectedWizardType);
+  const hero = heroOptionByType(selectedHeroType);
   const runeNames = progression ? runeNamesForLoadout(progression, selectedRuneIds) : selectedRuneIds;
-  const skillNames = progression ? skillNamesForWizard(progression, selectedWizardType) : [];
+  const skillNames = progression ? skillNamesForHero(progression, selectedHeroType) : [];
 
   return {
     statusLabel: previewLegality?.legal ? "Legal deck" : "Draft deck",
@@ -165,7 +165,7 @@ export function deckStats(
     advancedTotalLimit: rules?.advancedTotalLimit ?? null,
     rareTotalLimit: rules?.rareTotalLimit ?? null,
     messages: previewLegality?.messages ?? [],
-    wizardName: wizard.name,
+    heroName: hero.name,
     runeNames,
     skillNames,
   };
@@ -205,6 +205,10 @@ export function cardKindLabel(card: CatalogCard) {
       return "Spell";
     case "item":
       return "Item";
+    case "building":
+      return "Building";
+    case "manaSource":
+      return "Mana Source";
   }
 }
 

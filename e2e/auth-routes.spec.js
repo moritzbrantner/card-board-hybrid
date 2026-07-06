@@ -61,7 +61,7 @@ for (const nextPath of ["/profile", "/settings", "/decks", "/matches"]) {
   });
 }
 
-test("successful login with no safe next lands on profile", async ({ page }) => {
+test("successful login with no safe next lands on the dashboard", async ({ page }) => {
   await mockAuthApi(page);
 
   await page.goto("/login");
@@ -69,7 +69,8 @@ test("successful login with no safe next lands on profile", async ({ page }) => 
   await page.getByLabel("Password").fill("pw");
   await page.getByRole("button", { name: "Sign In" }).click();
 
-  await expect(page).toHaveURL(/\/profile$/);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
 });
 
 test("/login/ behaves like the canonical login route", async ({
@@ -104,7 +105,7 @@ test("/register/ behaves like the canonical register route", async ({
   expect(authRequests).toEqual(["/api/auth/register"]);
 });
 
-test("register submits credentials to the existing registration API and opens profile by default", async ({ page }) => {
+test("register submits credentials to the existing registration API and opens the dashboard by default", async ({ page }) => {
   const authRequests = [];
   await mockAuthApi(page, authRequests);
 
@@ -116,7 +117,8 @@ test("register submits credentials to the existing registration API and opens pr
   await page.getByLabel("Password").fill("pw");
   await page.getByRole("button", { name: "Create Account" }).click();
 
-  await expect(page).toHaveURL(/\/profile$/);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
   expect(authRequests).toEqual(["/api/auth/register"]);
 });
 
@@ -150,7 +152,7 @@ test("login and register links preserve a safe next parameter", async ({ page })
   await expect(page.getByRole("heading", { name: "Sign In" })).toBeVisible();
 });
 
-test("absolute URL next values fall back to profile after login", async ({ page }) => {
+test("absolute URL next values fall back to the dashboard after login", async ({ page }) => {
   await mockAuthApi(page);
 
   await page.goto("/login?next=https%3A%2F%2Fevil.test%2Fsteal");
@@ -158,10 +160,11 @@ test("absolute URL next values fall back to profile after login", async ({ page 
   await page.getByLabel("Password").fill("pw");
   await page.getByRole("button", { name: "Sign In" }).click();
 
-  await expect(page).toHaveURL(/\/profile$/);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
 });
 
-test("protocol-relative next values fall back to profile after registration", async ({ page }) => {
+test("protocol-relative next values fall back to the dashboard after registration", async ({ page }) => {
   await mockAuthApi(page);
 
   await page.goto("/register?next=%2F%2Fevil.test%2Fsteal");
@@ -169,10 +172,11 @@ test("protocol-relative next values fall back to profile after registration", as
   await page.getByLabel("Password").fill("pw");
   await page.getByRole("button", { name: "Create Account" }).click();
 
-  await expect(page).toHaveURL(/\/profile$/);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
 });
 
-test("signed-in visits to auth routes redirect to profile or a safe next path", async ({
+test("signed-in visits to auth routes redirect to the dashboard or a safe next path", async ({
   page,
 }) => {
   await page.addInitScript(
@@ -185,10 +189,11 @@ test("signed-in visits to auth routes redirect to profile or a safe next path", 
   await expect(page).toHaveURL(/\/decks$/);
 
   await page.goto("/register?next=https%3A%2F%2Fevil.test%2Fsteal");
-  await expect(page).toHaveURL(/\/profile$/);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
 });
 
-test("signing out clears the session and returns to the public match picker", async ({ page }) => {
+test("signing out clears the session and returns to the public dashboard", async ({ page }) => {
   const authRequests = [];
   await page.addInitScript(
     ({ key }) => localStorage.setItem(key, "existing-token"),
@@ -198,11 +203,13 @@ test("signing out clears the session and returns to the public match picker", as
 
   await page.goto("/profile");
   await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
+  await expect(page.getByTitle("Sign out")).toHaveCount(0);
 
-  await page.getByTitle("Sign out").click();
+  await page.getByRole("button", { name: /Account menu for Rune Player/ }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
 
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("heading", { name: "Choose Your Loadout" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign In" })).toBeVisible();
   await expect
     .poll(() => page.evaluate((key) => localStorage.getItem(key), AUTH_TOKEN_STORAGE_KEY))
@@ -210,12 +217,133 @@ test("signing out clears the session and returns to the public match picker", as
   expect(authRequests).toEqual(["/api/auth/logout"]);
 });
 
+test("signed-in dashboard shows account, match, and deck summaries", async ({ page }) => {
+  await page.addInitScript(
+    ({ key }) => localStorage.setItem(key, "existing-token"),
+    { key: AUTH_TOKEN_STORAGE_KEY },
+  );
+  await mockAuthApi(page);
+
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
+  await expect(page.getByText("Welcome back, Rune Player.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Account Progression" })).toBeVisible();
+  await expect(page.getByText("Next level in 60 XP")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Preferred Hero" })).toBeVisible();
+  await expect(page.getByText("Runekeeper")).toHaveCount(2);
+  await expect(page.getByRole("heading", { name: "Deck Library" })).toBeVisible();
+  await expect(page.getByText("Default: Default Legal")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent Matches" })).toBeVisible();
+  await expect(page.getByText("dashboard-match")).toBeVisible();
+
+  await page.getByRole("button", { name: "Play" }).first().click();
+  await expect(page).toHaveURL(/\/play$/);
+});
+
+test("dashboard opens a match by ID", async ({ page }) => {
+  await mockAuthApi(page);
+
+  await page.goto("/");
+  await page.getByLabel("Open Match by ID").fill("manual-match");
+  await page.getByRole("button", { name: "Open" }).click();
+
+  await expect(page).toHaveURL(/\/match\/manual-match$/);
+});
+
+test("signed-in dashboard account menu opens profile, settings, and sign out actions", async ({ page }) => {
+  await page.addInitScript(
+    ({ key }) => localStorage.setItem(key, "existing-token"),
+    { key: AUTH_TOKEN_STORAGE_KEY },
+  );
+  await mockAuthApi(page);
+
+  await page.goto("/");
+
+  const accountMenu = page.getByRole("button", { name: /Account menu for Rune Player/ });
+  await expect(accountMenu).toBeVisible();
+  await expect(accountMenu).toContainText("Rune Player");
+  await expect(accountMenu).toContainText("Lv. 2");
+
+  await accountMenu.click();
+  await expect(page.getByRole("menuitem", { name: "Profile" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
+
+  await page.getByRole("menuitem", { name: "Profile" }).click();
+  await expect(page).toHaveURL(/\/profile$/);
+
+  await page.getByRole("button", { name: /Account menu for Rune Player/ }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+});
+
+test("profile and settings mark the current account menu item disabled", async ({ page }) => {
+  await page.addInitScript(
+    ({ key }) => localStorage.setItem(key, "existing-token"),
+    { key: AUTH_TOKEN_STORAGE_KEY },
+  );
+  await mockAuthApi(page);
+
+  await page.goto("/profile");
+  await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
+
+  await page.getByRole("button", { name: /Account menu for Rune Player/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Profile" })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: "Settings" })).toBeEnabled();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeEnabled();
+
+  await page.goto("/settings");
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+
+  await page.getByRole("button", { name: /Account menu for Rune Player/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Profile" })).toBeEnabled();
+  await expect(page.getByRole("menuitem", { name: "Settings" })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeEnabled();
+});
+
+test("match-related account menu omits sign out for signed-in players", async ({ page }) => {
+  await page.addInitScript(
+    ({ key }) => localStorage.setItem(key, "existing-token"),
+    { key: AUTH_TOKEN_STORAGE_KEY },
+  );
+  await mockAuthApi(page);
+
+  await page.goto("/match/menu-match");
+  await expect(page.getByRole("heading", { name: "Round 1" })).toBeVisible();
+
+  await page.getByRole("button", { name: /Account menu for Rune Player/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Profile" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toHaveCount(0);
+});
+
+test("signed-out match sign in returns to the same match route", async ({ page }) => {
+  const authRequests = [];
+  await mockAuthApi(page, authRequests);
+
+  await page.goto("/match/menu-match");
+  await expect(page.getByRole("heading", { name: "Round 1" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Sign In" }).click();
+  await expect(page).toHaveURL(/\/login\?/);
+  expect(new URL(page.url()).searchParams.get("next")).toBe("/match/menu-match");
+
+  await page.getByLabel("Email").fill("player@local.dev");
+  await page.getByLabel("Password").fill("pw");
+  await page.getByRole("button", { name: "Sign In" }).click();
+
+  await expect(page).toHaveURL(/\/match\/menu-match$/);
+  await expect(page.getByRole("heading", { name: "Round 1" })).toBeVisible();
+  expect(authRequests).toEqual(["/api/auth/login"]);
+});
+
 test("protected route redirects replace the protected URL in browser history", async ({ page }) => {
   await mockAuthApi(page);
 
   for (const protectedPath of ["/profile", "/decks", "/matches"]) {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Choose Your Loadout" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
 
     await page.goto(protectedPath);
 
@@ -225,12 +353,13 @@ test("protected route redirects replace the protected URL in browser history", a
     await page.goBack();
 
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("heading", { name: "Choose Your Loadout" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
   }
 });
 
 for (const { path, heading } of [
-  { path: "/", heading: "Choose Your Loadout" },
+  { path: "/", heading: "Player Dashboard" },
+  { path: "/play", heading: "Play" },
   { path: "/catalog", heading: "Card Catalog" },
   { path: "/settings", heading: "Settings" },
   { path: "/@rune-player/decks/10", heading: "Arcane Draft" },
@@ -248,7 +377,7 @@ for (const { path, heading } of [
 for (const { path, message } of [
   { path: "/match/public-solo", message: "Missing test match" },
   { path: "/match/public-shared/seat-token", message: "Missing shared match" },
-  { path: "/matches/public-replay/replay", message: "Missing test replay" },
+  { path: "/matches/public-replay/replay", message: "Sign in to view this replay" },
 ]) {
   test(`signed-out players can open public route ${path} without auth redirect`, async ({
     page,
@@ -277,9 +406,13 @@ for (const { path, message } of [
 }
 
 async function mockAuthApi(page, authRequests = []) {
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/auth/login" && request.method() === "POST") {
       authRequests.push(url.pathname);
@@ -305,12 +438,46 @@ async function mockAuthApi(page, authRequests = []) {
     }
 
     if (url.pathname === "/api/profile/matches") {
-      await route.fulfill({ json: { matches: [] } });
+      await route.fulfill({
+        json: {
+          matches: [
+            {
+              matchId: "dashboard-match",
+              createdAt: 20,
+              updatedAt: 40,
+              round: 3,
+              phase: "planning",
+              winner: null,
+              frameCount: 7,
+            },
+          ],
+        },
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/progression") {
+      await route.fulfill({ json: progression() });
+      return;
+    }
+
+    if (url.pathname === "/api/preferences" && request.method() === "GET") {
+      await route.fulfill({ json: preferences() });
+      return;
+    }
+
+    if (url.pathname === "/api/preferences" && request.method() === "PATCH") {
+      await route.fulfill({ json: { ...request.postDataJSON(), updatedAt: 20 } });
       return;
     }
 
     if (url.pathname === "/api/matches" && request.method() === "GET") {
       await route.fulfill({ json: { matches: [] } });
+      return;
+    }
+
+    if (url.pathname === "/api/matches/menu-match" && request.method() === "GET") {
+      await route.fulfill({ json: matchResponse("menu-match", playableMatch()) });
       return;
     }
 
@@ -350,7 +517,7 @@ async function mockAuthApi(page, authRequests = []) {
             id: 10,
             name: "Arcane Draft",
             isDefault: false,
-            wizardType: "runekeeper",
+            heroType: "runekeeper",
             runeIds: [],
             cards: [],
             legality: {
@@ -370,7 +537,15 @@ async function mockAuthApi(page, authRequests = []) {
     }
 
     if (url.pathname === "/api/decks") {
-      await route.fulfill({ json: { rules: deckRules(), decks: [] } });
+      await route.fulfill({
+        json: {
+          rules: deckRules(),
+          decks: [
+            deckRecipe(101, "Default Legal", true, true),
+            deckRecipe(102, "Needs More Basics", false, false),
+          ],
+        },
+      });
       return;
     }
 
@@ -387,7 +562,7 @@ function systemDeck() {
   return {
     id: "balanced-starter",
     name: "Balanced Starter",
-    wizardType: "runekeeper",
+    heroType: "runekeeper",
     cards: [],
     legality: {
       legal: true,
@@ -414,17 +589,77 @@ function authUser(email) {
     email,
     displayName: "Rune Player",
     avatar: { symbol: "spark", color: "emerald" },
-    preferredWizardType: "runekeeper",
+    preferredHeroType: "runekeeper",
     boardVisualMode: "2d",
     progressionSummary: {
-      totalXp: 0,
-      level: 1,
+      totalXp: 140,
+      level: 2,
       currentLevelXp: 0,
-      nextLevelXp: 100,
-      xpIntoLevel: 0,
-      xpToNextLevel: 100,
+      nextLevelXp: 200,
+      xpIntoLevel: 140,
+      xpToNextLevel: 60,
       runeSlots: 1,
     },
+  };
+}
+
+function preferences() {
+  return {
+    theme: "system",
+    motion: "system",
+    animationSpeed: "normal",
+    boardScale: "normal",
+    boardVisualMode: "2d",
+    hotkeys: [],
+    updatedAt: 10,
+  };
+}
+
+function progression() {
+  return {
+    account: authUser("player@local.dev").progressionSummary,
+    heroes: [
+      {
+        heroType: "runekeeper",
+        xp: 75,
+        level: 2,
+        currentLevelXp: 0,
+        nextLevelXp: 100,
+        xpIntoLevel: 75,
+        xpToNextLevel: 25,
+        totalSkillPoints: 1,
+        spentSkillPoints: 0,
+        availableSkillPoints: 1,
+        unlockedSkillIds: [],
+      },
+    ],
+    runes: [],
+    skillTrees: [],
+    loadouts: [
+      { heroType: "runekeeper", runeIds: [] },
+      { heroType: "pyromancer", runeIds: [] },
+    ],
+  };
+}
+
+function deckRecipe(id, name, isDefault, legal) {
+  return {
+    id,
+    name,
+    isDefault,
+    heroType: "runekeeper",
+    runeIds: [],
+    cards: [],
+    legality: {
+      legal,
+      totalCards: legal ? 30 : 12,
+      basicCards: legal ? 30 : 12,
+      advancedCards: 0,
+      rareCards: 0,
+      messages: legal ? [] : ["Deck recipe needs at least 30 cards."],
+    },
+    createdAt: 1,
+    updatedAt: 1,
   };
 }
 
@@ -438,4 +673,75 @@ function deckRules() {
     advancedTotalLimit: 12,
     rareTotalLimit: 6,
   };
+}
+
+function matchResponse(matchId, matchState) {
+  return { matchId, matchState, replayFrames: [] };
+}
+
+function playableMatch() {
+  return {
+    mode: "solo",
+    round: 1,
+    phase: "planning",
+    activeSide: "player",
+    prioritySide: null,
+    player: participant("player"),
+    opponent: participant("opponent"),
+    board: { radius: 3, tiles: radiusThreeTiles(), units: [], droppedItems: [] },
+    actionStack: [],
+    log: [],
+    winner: null,
+  };
+}
+
+function participant(side) {
+  return {
+    side,
+    mana: 5,
+    maxMana: 5,
+    hero: {
+      id: `${side}-hero`,
+      side,
+      heroType: side === "player" ? "runekeeper" : "pyromancer",
+      hp: 20,
+      maxHp: 20,
+      attack: 1,
+      attackRange: 1,
+      position: side === "player" ? { q: 0, r: 3 } : { q: 0, r: -3 },
+      apRemaining: side === "player" ? 3 : 0,
+      maxAp: 3,
+      hasAttacked: false,
+    },
+    hand: [],
+    handCount: 0,
+    deckCount: 40,
+    discardCount: 0,
+    progression: {
+      runeIds: [],
+      skillIds: [],
+      effects: {
+        maxHpDelta: 0,
+        attackDelta: 0,
+        maxApDelta: 0,
+        manaDelta: 0,
+        openingHandDelta: 0,
+        summonedUnitArmorDelta: 0,
+        firstSummonedUnitArmorDelta: 0,
+        spellDamageDelta: 0,
+      },
+    },
+  };
+}
+
+function radiusThreeTiles() {
+  const tiles = [];
+  for (let q = -3; q <= 3; q += 1) {
+    const minR = Math.max(-3, -q - 3);
+    const maxR = Math.min(3, -q + 3);
+    for (let r = minR; r <= maxR; r += 1) {
+      tiles.push({ coord: { q, r } });
+    }
+  }
+  return tiles;
 }

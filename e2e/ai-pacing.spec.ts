@@ -28,14 +28,14 @@ test("plays replay frames from one AI action one at a time", async ({ page }) =>
         replayFrame(0, firstMove, {
           type: "pieceMoved",
           side: "opponent",
-          pieceId: "opponent-wizard",
+          pieceId: "opponent-hero",
           from: { q: 0, r: -3 },
           to: { q: 0, r: -2 },
         }),
         replayFrame(1, secondMove, {
           type: "pieceMoved",
           side: "opponent",
-          pieceId: "opponent-wizard",
+          pieceId: "opponent-hero",
           from: { q: 0, r: -2 },
           to: { q: 0, r: -1 },
         }),
@@ -46,7 +46,7 @@ test("plays replay frames from one AI action one at a time", async ({ page }) =>
   }, () => match);
 
   await page.goto(`/match/${MATCH_ID}`);
-  await expect(opponentWizardAt(page, { q: 0, r: -3 })).toBeVisible();
+  await expect(opponentHeroAt(page, { q: 0, r: -3 })).toBeVisible();
 
   const advanceResponse = page.waitForResponse(
     (response) =>
@@ -57,15 +57,15 @@ test("plays replay frames from one AI action one at a time", async ({ page }) =>
   await advanceResponse;
 
   await page.waitForTimeout(100);
-  await expect(opponentWizardAt(page, { q: 0, r: -3 })).toBeVisible();
-  await expect(opponentWizardAt(page, { q: 0, r: -2 })).toBeHidden();
+  await expect(opponentHeroAt(page, { q: 0, r: -3 })).toBeVisible();
+  await expect(opponentHeroAt(page, { q: 0, r: -2 })).toBeHidden();
 
   await page.waitForTimeout(1_000);
-  await expect(opponentWizardAt(page, { q: 0, r: -2 })).toBeVisible();
-  await expect(opponentWizardAt(page, { q: 0, r: -1 })).toBeHidden();
+  await expect(opponentHeroAt(page, { q: 0, r: -2 })).toBeVisible();
+  await expect(opponentHeroAt(page, { q: 0, r: -1 })).toBeHidden();
 
   await page.waitForTimeout(1_000);
-  await expect(opponentWizardAt(page, { q: 0, r: -1 })).toBeVisible();
+  await expect(opponentHeroAt(page, { q: 0, r: -1 })).toBeVisible();
 });
 
 test("does not start the next AI action until current playback finishes", async ({ page }) => {
@@ -94,14 +94,14 @@ test("does not start the next AI action until current playback finishes", async 
         replayFrame(0, firstMove, {
           type: "pieceMoved",
           side: "opponent",
-          pieceId: "opponent-wizard",
+          pieceId: "opponent-hero",
           from: { q: 0, r: -3 },
           to: { q: 0, r: -2 },
         }),
         replayFrame(1, secondMove, {
           type: "pieceMoved",
           side: "opponent",
-          pieceId: "opponent-wizard",
+          pieceId: "opponent-hero",
           from: { q: 0, r: -2 },
           to: { q: 0, r: -1 },
         }),
@@ -125,7 +125,7 @@ test("does not start the next AI action until current playback finishes", async 
 
   await page.waitForTimeout(1_500);
   expect(secondAdvanceRequested).toBe(false);
-  await expect(opponentWizardAt(page, { q: 0, r: -2 })).toBeVisible();
+  await expect(opponentHeroAt(page, { q: 0, r: -2 })).toBeVisible();
 
   await expect
     .poll(() => secondAdvanceRequested, { timeout: 2_500 })
@@ -137,9 +137,13 @@ async function mockMatchApi(
   handleAction,
   currentMatch,
 ) {
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/catalog/cards") {
       await route.fulfill({ json: { cards: [] } });
@@ -182,9 +186,9 @@ function replayFrame(
   };
 }
 
-function opponentWizardAt(page, coord) {
+function opponentHeroAt(page, coord) {
   return page.getByRole("button", {
-    name: `q ${coord.q}, r ${coord.r}, occupied by the opponent's wizard`,
+    name: `q ${coord.q}, r ${coord.r}, occupied by the opponent's hero`,
   });
 }
 
@@ -199,13 +203,14 @@ function matchAt(opponentPosition, activeSide) {
       side: "player",
       mana: 2,
       maxMana: 2,
-      wizard: {
-        id: "player-wizard",
+      hero: {
+        id: "player-hero",
         side: "player",
-        wizardType: "runekeeper",
+        heroType: "runekeeper",
         hp: 20,
         maxHp: 20,
         attack: 1,
+        attackRange: 1,
         position: { q: 0, r: 3 },
         apRemaining: activeSide === "player" ? 3 : 0,
         maxAp: 3,
@@ -219,13 +224,14 @@ function matchAt(opponentPosition, activeSide) {
       side: "opponent",
       mana: 2,
       maxMana: 2,
-      wizard: {
-        id: "opponent-wizard",
+      hero: {
+        id: "opponent-hero",
         side: "opponent",
-        wizardType: "pyromancer",
+        heroType: "pyromancer",
         hp: 20,
         maxHp: 20,
         attack: 1,
+        attackRange: 1,
         position: opponentPosition,
         apRemaining: activeSide === "opponent" ? 3 : 0,
         maxAp: 3,

@@ -143,17 +143,21 @@ test("solo board cursor selects and confirms a legal move", async ({ page }) => 
 
   await page.keyboard.press("Enter");
   await expect.poll(() => actions).toEqual([
-    { type: "movePiece", pieceId: "player-wizard", to: { q: 0, r: 2 } },
+    { type: "movePiece", pieceId: "player-hero", to: { q: 0, r: 2 } },
   ]);
   await expect(
-    page.getByRole("button", { name: "q 0, r 2, occupied by your wizard" }),
+    page.getByRole("button", { name: "q 0, r 2, occupied by your hero" }),
   ).toBeVisible();
 });
 
 async function mockHotkeyApi(page, handleAction = null, currentMatch = null) {
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/auth/me") {
       await route.fulfill({ json: authUser() });
@@ -240,7 +244,7 @@ function authUser() {
     email: "player@local.dev",
     displayName: "Rune Player",
     avatar: { symbol: "sparkles", color: "emerald" },
-    preferredWizardType: "runekeeper",
+    preferredHeroType: "runekeeper",
     boardVisualMode: "2d",
     progressionSummary: {
       totalXp: 0,
@@ -286,13 +290,14 @@ function participant(side, activeSide, position, hand) {
     side,
     mana: 5,
     maxMana: 5,
-    wizard: {
-      id: `${side}-wizard`,
+    hero: {
+      id: `${side}-hero`,
       side,
-      wizardType: side === "player" ? "runekeeper" : "pyromancer",
+      heroType: side === "player" ? "runekeeper" : "pyromancer",
       hp: 20,
       maxHp: 20,
       attack: 1,
+      attackRange: 1,
       position,
       apRemaining: activeSide === side ? 3 : 0,
       maxAp: 3,
@@ -311,7 +316,7 @@ function stackItem() {
     id: "stack-1",
     side: "opponent",
     priority: 1,
-    action: { type: "castSpell", card: { id: "spark", name: "Spark", rarity: "basic" }, targetId: "player-wizard" },
+    action: { type: "castSpell", card: { id: "spark", name: "Spark", rarity: "basic" }, targetId: "player-hero" },
   };
 }
 
@@ -359,7 +364,7 @@ function systemDeck() {
   return {
     id: "balanced-starter",
     name: "Balanced Starter",
-    wizardType: "runekeeper",
+    heroType: "runekeeper",
     cards: [],
     legality: {
       legal: true,
@@ -384,7 +389,7 @@ function progression() {
       runeSlots: 1,
     },
     runes: [],
-    wizards: [],
+    heroes: [],
     skillTrees: [],
     loadouts: [],
   };

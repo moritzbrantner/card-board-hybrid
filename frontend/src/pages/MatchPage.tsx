@@ -1,7 +1,8 @@
-import { Activity, Archive, Eye, EyeOff, Layers, Play, Plus, RotateCcw, Zap } from "lucide-react";
+import { Activity, Archive, Eye, EyeOff, Layers, Play, Plus, RotateCcw, Trophy, Zap } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
 import {
+  activateBuilding,
   activateItem,
   advanceAi,
   attack,
@@ -38,7 +39,9 @@ import { AccountActions, ShellMessage } from "../components/common";
 import { sideLabel } from "../labels";
 import { liveAiPlaybackFrames } from "../livePlayback";
 import {
+  buildingEffectIsActivated,
   cardFanStyle,
+  buildingAt,
   cardTargetForTile,
   delay,
   handCountForSide,
@@ -72,6 +75,8 @@ export function MatchPage({
   onNavigate,
   currentUser,
   onSignOut,
+  allowSignOut,
+  loginNextPath,
   visualPreferences,
 }: {
   matchId: string;
@@ -504,6 +509,21 @@ export function MatchPage({
       }
     }
 
+    const building = buildingAt(match, tile.coord);
+    if (
+      !selectedPiece &&
+      piece?.side === viewerSide &&
+      building &&
+      buildingEffectIsActivated(building.effect) &&
+      !building.activatedThisTurn &&
+      piece.apRemaining > 0 &&
+      match.actionStack.length === 0 &&
+      match.activeSide === viewerSide
+    ) {
+      void runAction(() => activateBuilding(matchId, building.id));
+      return;
+    }
+
     if (piece?.side === viewerSide) {
       setSelection({ type: "piece", pieceId: piece.id });
       setNotice(null);
@@ -567,6 +587,11 @@ export function MatchPage({
     void runAction(() => activateItem(matchId, unit.id, itemId));
   }
 
+  function handleActivateUnitBuilding(buildingId: string) {
+    setUnitContextMenu(null);
+    void runAction(() => activateBuilding(matchId, buildingId));
+  }
+
   return (
     <main className={`app-shell match-app-shell ${matchChromeMinimized ? "match-chrome-minimized" : ""}`}>
       <section className="table match-table">
@@ -577,7 +602,13 @@ export function MatchPage({
             <p className="match-id">Match {matchId}</p>
           </div>
           <div className="actions">
-            <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+            <AccountActions
+              currentUser={currentUser}
+              onNavigate={onNavigate}
+              onSignOut={onSignOut}
+              allowSignOut={allowSignOut}
+              loginNextPath={loginNextPath}
+            />
             <button
               className="icon-button"
               type="button"
@@ -746,8 +777,51 @@ export function MatchPage({
             contextMenuUnit.side === viewerSide
           }
           onActivateItem={(itemId) => handleActivateUnitItem(contextMenuUnit, itemId)}
+          building={buildingAt(match, contextMenuUnit.position)}
+          canActivateBuilding={
+            match.actionStack.length === 0 &&
+            match.activeSide === viewerSide &&
+            contextMenuUnit.side === viewerSide
+          }
+          onActivateBuilding={handleActivateUnitBuilding}
+        />
+      ) : null}
+      {match.phase === "matchOver" ? (
+        <MatchEndOverlay
+          winner={match.winner}
+          viewerSide={viewerSide}
+          onOpenSummary={() => onNavigate(`/matches/${matchId}/summary`)}
         />
       ) : null}
     </main>
+  );
+}
+
+function MatchEndOverlay({
+  winner,
+  viewerSide,
+  onOpenSummary,
+}: {
+  winner: Side | null;
+  viewerSide: Side;
+  onOpenSummary: () => void;
+}) {
+  const result = winner === viewerSide ? "Victory" : "Defeat";
+  const winnerLabel = winner ? `${sideLabel(winner)} wins` : "Match complete";
+
+  return (
+    <section className="match-end-overlay" role="dialog" aria-label="Match complete">
+      <div className={`match-end-panel ${winner === viewerSide ? "victory" : "defeat"}`}>
+        <span className="match-end-icon">
+          <Trophy size={34} />
+        </span>
+        <p className="eyebrow">{winnerLabel}</p>
+        <h2>{result}</h2>
+        <button className="primary-button" type="button" onClick={onOpenSummary}>
+          <Play size={18} />
+          Match Summary
+        </button>
+      </div>
+    </section>
   );
 }

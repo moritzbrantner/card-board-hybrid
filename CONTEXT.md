@@ -1,19 +1,23 @@
 # Rune Lanes
 
-Rune Lanes is a card/board game hybrid about wizards summoning units and casting spells on a shared hex arena.
+Rune Lanes is a card/board game hybrid about heroes summoning units and casting spells on a shared hex arena.
 
 ## Language
 
-**Wizard**:
-The player's avatar on the board. A wizard is both the source of card play and the defeat condition.
-_Avoid_: hero, commander, base
+**Hero**:
+The player's avatar on the board. A hero is both the source of card play and the defeat condition.
+_Avoid_: wizard, commander, base
 
 **Unit**:
 A card-created board piece with attack, armor, and unit action points.
 _Avoid_: creature, minion, troop
 
+**Unit armor**:
+A Unit's renewable durability. Damage lowers current Unit armor; at the beginning of its owner's turn, surviving damaged Units refresh to their max armor.
+_Avoid_: health, hero armor, shield
+
 **Spell**:
-A card that creates an immediate effect from the caster wizard instead of creating a unit.
+A card that creates an immediate effect from the caster hero instead of creating a unit.
 _Avoid_: tactic
 
 **Card interaction**:
@@ -21,12 +25,32 @@ Playing a Card and resolving its card-created effect through the match rules, in
 _Avoid_: card handler, play-card plumbing
 
 **Mana**:
-The per-turn resource spent to play cards, set from the tiles that side controls at the beginning of that side's turn.
+The resource spent to play cards. A side refreshes Mana from its Hero and occupied Mana sources at the beginning of that side's turn, while unspent Mana remains available for reactions until that side's next turn begins.
 _Avoid_: energy
 
-**Wizard action points**:
-The wizard's per-turn action budget for moving, attacking, and playing cards.
-_Avoid_: wizard movement counter
+**Mana source**:
+A board hex marker that grants Mana to the side occupying it at the beginning of that side's turn.
+_Avoid_: mana tile, controlled hex
+
+**Building**:
+A neutral, permanent board feature on a hex. A Building may grant an effect to the occupying side, project an aura, or be activated by its occupying Hero or Unit.
+_Avoid_: structure, owned building
+
+**Building card**:
+A Card that creates a Building on an adjacent empty hex.
+_Avoid_: building spell, structure card
+
+**Building activation**:
+Spending 1 action point from a Hero or Unit occupying a Building to use that Building's activated effect.
+_Avoid_: building trigger, tower action
+
+**Hero shield**:
+A persistent damage buffer on a Hero, created by shield-granting buffs and consumed before Hero HP.
+_Avoid_: hero armor, temporary health
+
+**Hero action points**:
+The hero's per-turn action budget for moving, attacking, and playing cards.
+_Avoid_: hero movement counter
 
 **Unit action points**:
 A unit's per-turn action budget for moving and attacking.
@@ -39,6 +63,14 @@ _Avoid_: cell, square
 **Adjacent**:
 The relationship between two neighboring hexes that share an edge.
 _Avoid_: bordering tile
+
+**Attack range**:
+The maximum hex distance at which a Hero or Unit can attack an enemy piece. Range 1 means adjacent combat.
+_Avoid_: reach, weapon range
+
+**Hero passive**:
+A built-in Hero identity rule active in a match without spending cards, runes, or skill points.
+_Avoid_: base skill, innate perk
 
 **Radius-3 arena**:
 The 37-hex board used by the first hex version of Rune Lanes.
@@ -53,7 +85,7 @@ A saved list of card-template counts used to create a shuffled match deck.
 _Avoid_: deck, pile
 
 **Configured deck recipe**:
-An account-owned deck recipe with a saved Wizard and rune loadout for use as a match loadout.
+An account-owned deck recipe with a saved Hero and rune loadout for use as a match loadout.
 _Avoid_: deck settings, deck profile
 
 **Deck library**:
@@ -73,8 +105,12 @@ A predefined legal recipe shipped by Rune Lanes, used for starter/default play a
 _Avoid_: AI-only deck
 
 **Match loadout**:
-The pre-match choice for one side, combining a Wizard, a deck recipe or system deck recipe, and a rune loadout.
+The pre-match choice for one side, combining a Hero, a deck recipe or system deck recipe, and a rune loadout.
 _Avoid_: build, preset
+
+**Player dashboard**:
+The root account-oriented surface that summarizes player status and routes into play, deck, profile, and match-history workflows.
+_Avoid_: match picker, landing page
 
 **Solo match**:
 A match where one human controls Player and the backend AI controls Opponent.
@@ -93,8 +129,8 @@ A sign-in identity used for profile settings and owned match history.
 _Avoid_: seat
 
 **Account preferences**:
-Account-synced controls and presentation preferences such as theme, motion, animation speed, board scale, and hotkey bindings. Account preferences affect the signed-in player's client experience only; they do not change Profile identity, Wizard progression, match rules, replay data, or private Seat link semantics.
-_Avoid_: profile settings, wizard settings, match settings
+Account-synced controls and presentation preferences such as theme, motion, animation speed, board scale, and hotkey bindings. Account preferences affect the signed-in player's client experience only; they do not change Profile identity, Hero progression, match rules, replay data, or private Seat link semantics.
+_Avoid_: profile settings, hero settings, match settings
 
 **Profile**:
 The player-facing account presentation, including display name, generated avatar, and owned match history.
@@ -108,20 +144,20 @@ _Avoid_: player score, account points
 A derived profile level from account experience, used for broad account progression such as generic rune unlocks.
 _Avoid_: rank
 
-**Wizard mastery**:
-Wizard-specific experience earned by completing matches with that wizard.
-_Avoid_: class level, wizard rank
+**Hero mastery**:
+Hero-specific experience earned by completing matches with that hero.
+_Avoid_: class level, hero rank
 
 **Skill point**:
-A wizard-specific point earned from wizard mastery levels and spent in that wizard's skill tree.
+A hero-specific point earned from hero mastery levels and spent in that hero's skill tree.
 _Avoid_: talent point
 
 **Skill tree**:
-A per-wizard set of unlockable passive skills.
+A per-hero set of unlockable passive skills.
 _Avoid_: talent tree
 
 **Skill**:
-A wizard-specific passive upgrade unlocked with skill points.
+A hero-specific passive upgrade unlocked with skill points.
 _Avoid_: talent, perk
 
 **Rune**:
@@ -137,12 +173,24 @@ A profile avatar made from persisted symbol and color choices, not uploaded medi
 _Avoid_: avatar upload
 
 **Visual identity**:
-The player-facing presentation that makes a Card, Unit, or Wizard recognizable across match surfaces, including art, labels, colors, rarity treatment, token portrait, and unknown fallback.
+The player-facing presentation that makes a Card, Unit, or Hero recognizable across match surfaces, including art, labels, colors, rarity treatment, token portrait, and unknown fallback.
 _Avoid_: skin, cosmetic data, asset lookup
+
+**Targeting indicator**:
+A presentation-only board visual that shows the source, primary target, and optional affected footprint of a selected or queued attack or Spell.
+_Avoid_: threat line, action marker, rules target
 
 **Board visual mode**:
 A player presentation preference that chooses between the complete 2D board and the enhanced 3D board. It is stored on the account profile or locally for anonymous and seat-link play, and never changes match state, replay data, legality, or shared-match protocol semantics.
 _Avoid_: board state, match mode, rules mode
+
+**Board model asset**:
+A presentation-only 3D asset used by Board visual mode to render a Hero or Unit. It is not match state, replay data, card rules, or catalog legality.
+_Avoid_: model, skin, piece data
+
+**Procedural miniature**:
+A code-generated 3D fallback representation for a Hero or Unit when no Board model asset is configured or when that asset cannot load.
+_Avoid_: marker, placeholder, token
 
 **Seat**:
 One side-specific player slot in a shared match, either Player or Opponent.
@@ -153,7 +201,7 @@ A private URL that grants access to exactly one seat in a shared match.
 _Avoid_: public match link
 
 **Match setup**:
-The pre-game state where the creator has chosen a wizard and the invitee has not joined or has not chosen theirs.
+The pre-game state where the creator has chosen a hero and the invitee has not joined or has not chosen theirs.
 _Avoid_: lobby
 
 **Active side**:
@@ -180,6 +228,10 @@ _Avoid_: legendary card
 The list of replay-capable matches stored by the backend.
 _Avoid_: match picker, database browser
 
+**Match summary**:
+The post-match result and reward surface for a completed match, linking the player to replay, the Player dashboard, or the Play section.
+_Avoid_: result screen, post-match report
+
 **Replay event**:
 A durable record of one meaningful match occurrence, such as a turn start, draw, card play, movement, attack, unit destruction, or match end.
 _Avoid_: text log line
@@ -191,3 +243,19 @@ _Avoid_: screenshot, animation frame
 **Replay visibility**:
 The rule that decides whether hidden card information is redacted or revealed in replay responses.
 _Avoid_: debug mode
+
+**Match scenario**:
+An authored local-development starting match state loaded into the Rust rules engine to exercise a specific interaction or board condition. A match scenario creates a normal playable match instance, but is not a player-facing mode, replay format, deck recipe, or production feature.
+_Avoid_: fixture, sandbox match, test deck
+
+**Tutorial mode**:
+A player-facing guided learning flow made from scripted tutorial scenes. Tutorial mode teaches mechanics without creating a persisted match, replay, archive entry, or progression.
+_Avoid_: onboarding match, practice match, match scenario
+
+**Tutorial scene**:
+An authored client-side board, hand, stack, and objective state used by Tutorial mode to demonstrate one or more mechanics.
+_Avoid_: fixture, dev scenario, sandbox match
+
+**Tutorial step**:
+One teaching beat inside a tutorial scene, consisting of a paused concept introduction, highlighted elements, and an expected interaction that can advance the tutorial.
+_Avoid_: tooltip, prompt

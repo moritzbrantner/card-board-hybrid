@@ -3,10 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 import { loadCatalog } from "../api";
 import type { CatalogLoadState } from "../appTypes";
 import { DetailStat, ShellMessage } from "../components/common";
-import { itemActiveLabel, itemPassiveLabel, kindSummary, spellEffectLabel } from "../labels";
+import { buildingEffectLabel, itemActiveLabel, itemPassiveLabel, kindSummary, spellEffectLabel } from "../labels";
 import type { CatalogCard, Rarity } from "../types";
 
-type KindFilter = "all" | "unit" | "spell" | "item";
+type KindFilter = "all" | CatalogCard["kind"]["type"];
 type RarityFilter = "all" | Rarity;
 
 export function CatalogPage({ onNavigate }: { onNavigate: (to: string) => void }) {
@@ -54,8 +54,8 @@ export function CatalogPage({ onNavigate }: { onNavigate: (to: string) => void }
         title="Card Catalog"
         message={loadState.message}
         actions={
-          <button className="primary-button" type="button" onClick={() => onNavigate("/")}>
-            Open match picker
+          <button className="primary-button" type="button" onClick={() => onNavigate("/play")}>
+            Open play
           </button>
         }
       />
@@ -80,7 +80,7 @@ export function CatalogPage({ onNavigate }: { onNavigate: (to: string) => void }
               className="icon-button"
               type="button"
               onClick={() => onNavigate("/")}
-              title="Match picker"
+              title="Dashboard"
             >
               <House size={18} />
             </button>
@@ -106,6 +106,7 @@ export function CatalogPage({ onNavigate }: { onNavigate: (to: string) => void }
               ["unit", "Units"],
               ["spell", "Spells"],
               ["item", "Items"],
+              ["building", "Buildings"],
             ]}
             onChange={(value) => setKindFilter(value as KindFilter)}
           />
@@ -229,7 +230,7 @@ export function CatalogDetail({ card }: { card: CatalogCard | null }) {
               <DetailStat label="Priority" value={card.kind.priority} />
               <DetailStat label="Effect" value={spellEffectLabel(card)} />
             </>
-          ) : (
+          ) : card.kind.type === "item" ? (
             <>
               <DetailStat label="Range" value={card.kind.range} />
               <DetailStat label="Passive" value={itemPassiveLabel(card.kind.passive)} />
@@ -238,6 +239,13 @@ export function CatalogDetail({ card }: { card: CatalogCard | null }) {
                 value={card.kind.active ? itemActiveLabel(card.kind.active) : "None"}
               />
             </>
+          ) : card.kind.type === "building" ? (
+            <>
+              <DetailStat label="Type" value="Building" />
+              <DetailStat label="Effect" value={buildingEffectLabel(card.kind.effect)} />
+            </>
+          ) : (
+            <DetailStat label="Source" value="+1 mana when occupied" />
           )}
         </div>
         <p className="detail-rules">{card.text}</p>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 448" role="img" aria-labelledby="title desc">
+  <title id="title">Mana Well</title>
+  <desc id="desc">A glowing hex well filled with golden mana.</desc>
+  <rect width="320" height="448" rx="26" fill="#17211e"/>
+  <path d="M40 74h240v300H40z" fill="#26352f" stroke="#d9b84f" stroke-width="10"/>
+  <path d="M160 104l86 50v100l-86 50-86-50V154z" fill="#13251f" stroke="#fff2ac" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M160 142l54 31v62l-54 31-54-31v-62z" fill="#d9b84f" opacity=".9"/>
+  <path d="M118 214c28 18 56 18 84 0M116 242c30 22 58 22 88 0" fill="none" stroke="#fff8c7" stroke-width="10" stroke-linecap="round"/>
+  <path d="M160 128v158M92 168l136 78M228 168 92 246" fill="none" stroke="#58b7a1" stroke-width="8" stroke-linecap="round" opacity=".72"/>
+  <path d="M78 340h164" fill="none" stroke="#fff0a6" stroke-width="10" stroke-linecap="round" opacity=".8"/>
+  <path d="M110 372h100" fill="none" stroke="#fff0a6" stroke-width="8" stroke-linecap="round" opacity=".62"/>
+</svg>

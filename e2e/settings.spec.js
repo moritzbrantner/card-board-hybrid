@@ -195,9 +195,13 @@ test("settings normalize malformed stored hotkeys through defaults", async ({ pa
 });
 
 async function mockSettingsApi(page, handlers = {}) {
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/auth/me") {
       await route.fulfill({ json: authUser() });
@@ -235,7 +239,7 @@ function authUser() {
     email: "player@local.dev",
     displayName: "Rune Player",
     avatar: { symbol: "sparkles", color: "emerald" },
-    preferredWizardType: "runekeeper",
+    preferredHeroType: "runekeeper",
     boardVisualMode: "2d",
     progressionSummary: {
       totalXp: 0,

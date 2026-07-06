@@ -36,6 +36,7 @@ export const BOARD_3D_CAMERA = {
 };
 
 export const BOARD_3D_GROUP_ROTATION_Y = Math.PI / 6;
+export const BOARD_3D_TILE_ROTATION_Y = 0;
 
 export function selectBoardRenderer({
   requestedMode,

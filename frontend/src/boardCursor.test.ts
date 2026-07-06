@@ -8,7 +8,7 @@ import {
   moveBoardCursorCoord,
   type BoardCursorDirectionCommand,
 } from "./boardCursor";
-import type { MatchPlayerState, MatchState, Side, WizardType } from "./types";
+import type { MatchPlayerState, MatchState, Side, HeroType } from "./types";
 
 describe("board cursor", () => {
   it("maps the six default cursor commands to radius-3 Hex movement", () => {
@@ -37,8 +37,8 @@ describe("board cursor", () => {
     });
   });
 
-  it("initializes to the viewer Wizard position", () => {
-    const match = matchWithWizardPositions({ player: { q: 0, r: 3 }, opponent: { q: 0, r: -3 } });
+  it("initializes to the viewer Hero position", () => {
+    const match = matchWithHeroPositions({ player: { q: 0, r: 3 }, opponent: { q: 0, r: -3 } });
 
     expect(initialBoardCursorCoord(match, "player")).toEqual({ q: 0, r: 3 });
     expect(initialBoardCursorCoord(match, "opponent")).toEqual({ q: 0, r: -3 });
@@ -49,15 +49,15 @@ describe("board cursor", () => {
       boardCursorConfirmIntent({
         coord: { q: 0, r: 2 },
         selection: null,
-        focusedPiece: { id: "player-wizard", side: "player" },
+        focusedPiece: { id: "player-hero", side: "player" },
         viewerSide: "player",
       }),
-    ).toEqual({ type: "selectPiece", pieceId: "player-wizard" });
+    ).toEqual({ type: "selectPiece", pieceId: "player-hero" });
 
     expect(
       boardCursorConfirmIntent({
         coord: { q: 0, r: 2 },
-        selection: { type: "piece", pieceId: "player-wizard" },
+        selection: { type: "piece", pieceId: "player-hero" },
         focusedPiece: null,
         viewerSide: "player",
       }),
@@ -67,7 +67,7 @@ describe("board cursor", () => {
       boardCursorConfirmIntent({
         coord: { q: 0, r: -3 },
         selection: null,
-        focusedPiece: { id: "opponent-wizard", side: "opponent" },
+        focusedPiece: { id: "opponent-hero", side: "opponent" },
         viewerSide: "player",
       }),
     ).toEqual({ type: "none" });
@@ -81,7 +81,7 @@ describe("board cursor", () => {
   });
 });
 
-function matchWithWizardPositions(positions: Record<Side, { q: number; r: number }>): MatchState {
+function matchWithHeroPositions(positions: Record<Side, { q: number; r: number }>): MatchState {
   return {
     mode: "solo",
     round: 1,
@@ -90,7 +90,7 @@ function matchWithWizardPositions(positions: Record<Side, { q: number; r: number
     prioritySide: null,
     player: participant("player", positions.player),
     opponent: participant("opponent", positions.opponent),
-    board: { radius: 3, tiles: [], units: [], droppedItems: [] },
+    board: { radius: 3, tiles: [], manaSources: [], units: [], droppedItems: [] },
     actionStack: [],
     log: [],
     winner: null,
@@ -98,19 +98,20 @@ function matchWithWizardPositions(positions: Record<Side, { q: number; r: number
 }
 
 function participant(side: Side, position: { q: number; r: number }): MatchPlayerState {
-  const wizardType: WizardType = side === "player" ? "runekeeper" : "pyromancer";
+  const heroType: HeroType = side === "player" ? "runekeeper" : "pyromancer";
 
   return {
     side,
     mana: 5,
     maxMana: 5,
-    wizard: {
-      id: `${side}-wizard`,
+    hero: {
+      id: `${side}-hero`,
       side,
-      wizardType,
+      heroType,
       hp: 20,
       maxHp: 20,
       attack: 1,
+      attackRange: 1,
       position,
       apRemaining: 3,
       maxAp: 3,

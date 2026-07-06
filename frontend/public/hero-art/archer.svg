@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Archer">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#10221b"/>
+      <stop offset=".55" stop-color="#32694f"/>
+      <stop offset="1" stop-color="#dce88f"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="220" fill="url(#bg)"/>
+  <path d="M0 178 C66 150 110 162 158 132 C215 96 264 102 320 72 L320 220 L0 220 Z" fill="#101614" opacity=".75"/>
+  <circle cx="151" cy="84" r="38" fill="#f4d8b7"/>
+  <path d="M103 190 C112 140 132 116 158 116 C185 116 205 140 214 190 Z" fill="#183326"/>
+  <path d="M126 190 C131 152 142 135 158 135 C175 135 187 152 192 190 Z" fill="#4f9a71"/>
+  <path d="M216 48 C185 82 184 129 216 166" fill="none" stroke="#e9f4a3" stroke-width="8" stroke-linecap="round"/>
+  <path d="M207 58 L207 156" stroke="#f9fbdb" stroke-width="3"/>
+  <path d="M84 125 L222 87" stroke="#f5edc1" stroke-width="6" stroke-linecap="round"/>
+</svg>

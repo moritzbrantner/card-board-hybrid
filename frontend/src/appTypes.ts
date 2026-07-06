@@ -6,13 +6,14 @@ import type {
   CatalogCard,
   DeckListResponse,
   MatchReplayResponse,
+  MatchSummaryResponse,
   MatchState,
   MatchSummary,
   ProgressionResponse,
   SharedMatchResponse,
   SystemDeckListResponse,
   Unit,
-  Wizard,
+  Hero,
 } from "./types";
 
 export type LoadState =
@@ -43,7 +44,12 @@ export type MatchArchiveLoadState =
 export type ReplayLoadState =
   | { status: "loading" }
   | { status: "ready"; replay: MatchReplayResponse }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; httpStatus?: number };
+
+export type MatchSummaryLoadState =
+  | { status: "loading" }
+  | { status: "ready"; response: MatchSummaryResponse }
+  | { status: "error"; message: string; httpStatus?: number };
 
 export type SharedLoadState =
   | { status: "loading" }
@@ -73,14 +79,17 @@ export type UnitContextMenu =
     }
   | null;
 
-export type BoardWizard = Wizard & { pieceType: "wizard"; name: string };
+export type BoardHero = Hero & { pieceType: "hero"; name: string };
 export type BoardUnit = Unit & { pieceType: "unit"; hp?: never; maxHp?: never };
-export type BoardPiece = BoardWizard | BoardUnit;
+export type BoardPiece = BoardHero | BoardUnit;
 
 export type AccountProps = {
   currentUser: AuthUser | null;
   onSignOut: () => void;
   onNavigate: (to: string) => void;
+  allowSignOut?: boolean;
+  loginNextPath?: string;
+  activeAccountRoute?: "profile" | "settings" | null;
 };
 
 export type AppliedVisualPreferences = {

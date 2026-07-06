@@ -1,9 +1,9 @@
-import type { HexCoord, MatchState, ReplayEvent, Side, Unit, Wizard } from "./types";
+import type { HexCoord, MatchState, ReplayEvent, Side, Unit, Hero } from "./types";
 
 export const BOARD_ANIMATION_DURATION_MS = 520;
 
 export type AnimatedPieceSnapshot =
-  | (Wizard & { pieceType: "wizard"; name: string })
+  | (Hero & { pieceType: "hero"; name: string })
   | (Unit & { pieceType: "unit"; hp?: never; maxHp?: never });
 
 export type PieceAnimationKind =
@@ -74,14 +74,14 @@ export function createBoardAnimationCue({
 export function piecesInState(match: MatchState): AnimatedPieceSnapshot[] {
   return [
     {
-      ...match.player.wizard,
-      pieceType: "wizard",
-      name: `${sideLabel(match.player.side)} Wizard`,
+      ...match.player.hero,
+      pieceType: "hero",
+      name: `${sideLabel(match.player.side)} Hero`,
     },
     {
-      ...match.opponent.wizard,
-      pieceType: "wizard",
-      name: `${sideLabel(match.opponent.side)} Wizard`,
+      ...match.opponent.hero,
+      pieceType: "hero",
+      name: `${sideLabel(match.opponent.side)} Hero`,
     },
     ...match.board.units.map((unit) => ({ ...unit, pieceType: "unit" as const })),
   ];
@@ -117,6 +117,8 @@ function animationsFromEvent(
     }
     case "pieceHealed":
       return [{ pieceId: event.pieceId, kind: "heal", amount: event.amount }];
+    case "unitArmorRefreshed":
+      return [{ pieceId: event.unitId, kind: "heal", amount: event.amount }];
     case "pieceBuffed":
       return [
         {
@@ -189,7 +191,7 @@ function statChangeAnimation(
     };
   }
 
-  if (previousPiece.pieceType === "wizard" && nextPiece.pieceType === "wizard") {
+  if (previousPiece.pieceType === "hero" && nextPiece.pieceType === "hero") {
     if (nextPiece.hp > previousPiece.hp) {
       return { kind: "heal", amount: nextPiece.hp - previousPiece.hp };
     }

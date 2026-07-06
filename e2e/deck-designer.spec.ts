@@ -58,7 +58,7 @@ test("signed-in players build a Deck recipe from the catalog sidebar", async ({ 
     name: "Arcane Draft",
     cards: [{ templateId: "starfire-bolt", count: 1 }],
     isDefault: false,
-    wizardType: "runekeeper",
+    heroType: "runekeeper",
     runeIds: [],
   });
 
@@ -88,7 +88,7 @@ async function mockDeckDesignerApi(page, savedRequests) {
       id: 10,
       name: "Arcane Draft",
       isDefault: false,
-      wizardType: "runekeeper",
+      heroType: "runekeeper",
       runeIds: [],
       cards: [{ templateId: "ember-squire", count: 1 }],
       legality: legalityFor([{ templateId: "ember-squire", count: 1 }]),
@@ -99,7 +99,7 @@ async function mockDeckDesignerApi(page, savedRequests) {
       id: 11,
       name: "Default Sparks",
       isDefault: true,
-      wizardType: "pyromancer",
+      heroType: "pyromancer",
       runeIds: [],
       cards: [{ templateId: "starfire-bolt", count: 2 }],
       legality: legalityFor([{ templateId: "starfire-bolt", count: 2 }]),
@@ -108,9 +108,13 @@ async function mockDeckDesignerApi(page, savedRequests) {
     },
   ];
 
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/auth/me") {
       await route.fulfill({ json: authUser() });
@@ -174,7 +178,7 @@ async function mockDeckDesignerApi(page, savedRequests) {
         id: deckId,
         name: body.name,
         isDefault: body.isDefault,
-        wizardType: body.wizardType,
+        heroType: body.heroType,
         runeIds: body.runeIds,
         cards: body.cards,
         legality: legalityFor(body.cards),
@@ -191,7 +195,7 @@ async function mockDeckDesignerApi(page, savedRequests) {
         id: 12,
         name: "New Deck",
         isDefault: false,
-        wizardType: "runekeeper",
+        heroType: "runekeeper",
         runeIds: [],
         cards: [],
         legality: legalityFor([]),
@@ -239,7 +243,7 @@ function authUser() {
     email: "player@local.dev",
     displayName: "Rune Player",
     avatar: { symbol: "spark", color: "emerald" },
-    preferredWizardType: "runekeeper",
+    preferredHeroType: "runekeeper",
     boardVisualMode: "2d",
     progressionSummary: {
       totalXp: 0,
@@ -276,7 +280,7 @@ function progression() {
       runeSlots: 1,
     },
     runes: [],
-    wizards: [],
+    heroes: [],
     skillTrees: [],
     loadouts: [],
   };

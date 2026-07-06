@@ -8,8 +8,12 @@ use rand::rngs::OsRng;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-use crate::match_session::WizardType;
+use crate::match_session::HeroType;
 use crate::preferences;
+
+mod handles;
+mod passwords;
+mod sessions;
 
 pub const EXPERIENCED_LOCAL_EMAIL: &str = "experienced@local.dev";
 pub const EXPERIENCED_LOCAL_PASSWORD: &str = "experienced";
@@ -23,7 +27,7 @@ pub struct AccountProfile {
     pub email: String,
     pub display_name: String,
     pub avatar: GeneratedAvatar,
-    pub preferred_wizard_type: WizardType,
+    pub preferred_hero_type: HeroType,
     pub board_visual_mode: BoardVisualMode,
     pub total_xp: i64,
 }
@@ -128,7 +132,7 @@ impl<'a> IdentityModule<'a> {
                 display_name,
                 avatar_symbol,
                 avatar_color,
-                preferred_wizard_type,
+                preferred_hero_type,
                 board_visual_mode,
                 created_at
             )
@@ -141,7 +145,7 @@ impl<'a> IdentityModule<'a> {
                 default_display_name(email),
                 avatar.symbol,
                 avatar.color,
-                wizard_type_to_db(WizardType::default()),
+                hero_type_to_db(HeroType::default()),
                 board_visual_mode_to_db(BoardVisualMode::ThreeD)
             ],
         )?;
@@ -173,7 +177,7 @@ impl<'a> IdentityModule<'a> {
             .connection
             .query_row(
                 "
-                SELECT id, public_handle, email, password_hash, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode, total_xp
+                SELECT id, public_handle, email, password_hash, display_name, avatar_symbol, avatar_color, preferred_hero_type, board_visual_mode, total_xp
                 FROM users
                 WHERE email_normalized = ?1
                 ",
@@ -203,7 +207,7 @@ impl<'a> IdentityModule<'a> {
             display_name,
             avatar_symbol,
             avatar_color,
-            preferred_wizard_type,
+            preferred_hero_type,
             board_visual_mode,
             total_xp,
         )) = row
@@ -224,7 +228,7 @@ impl<'a> IdentityModule<'a> {
                 symbol: avatar_symbol,
                 color: avatar_color,
             },
-            preferred_wizard_type: wizard_type_from_db(&preferred_wizard_type),
+            preferred_hero_type: hero_type_from_db(&preferred_hero_type),
             board_visual_mode: board_visual_mode_from_db(&board_visual_mode),
             total_xp,
         })
@@ -238,7 +242,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT users.id, users.public_handle, users.email, users.display_name, users.avatar_symbol, users.avatar_color, users.preferred_wizard_type, users.board_visual_mode, users.total_xp
+                SELECT users.id, users.public_handle, users.email, users.display_name, users.avatar_symbol, users.avatar_color, users.preferred_hero_type, users.board_visual_mode, users.total_xp
                 FROM auth_sessions
                 JOIN users ON users.id = auth_sessions.user_id
                 WHERE auth_sessions.token = ?1
@@ -255,7 +259,7 @@ impl<'a> IdentityModule<'a> {
                             symbol: row.get(4)?,
                             color: row.get(5)?,
                         },
-                        preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(6)?),
+                        preferred_hero_type: hero_type_from_db(&row.get::<_, String>(6)?),
                         board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(7)?),
                         total_xp: row.get(8)?,
                     })
@@ -271,7 +275,7 @@ impl<'a> IdentityModule<'a> {
         public_handle: &str,
         display_name: &str,
         avatar: GeneratedAvatar,
-        preferred_wizard_type: WizardType,
+        preferred_hero_type: HeroType,
         board_visual_mode: BoardVisualMode,
     ) -> Result<Option<AccountProfile>, IdentityError> {
         let public_handle = normalize_requested_public_handle(public_handle)?;
@@ -287,7 +291,7 @@ impl<'a> IdentityModule<'a> {
                 display_name = ?3,
                 avatar_symbol = ?4,
                 avatar_color = ?5,
-                preferred_wizard_type = ?6,
+                preferred_hero_type = ?6,
                 board_visual_mode = ?7
             WHERE id = ?1
             ",
@@ -297,7 +301,7 @@ impl<'a> IdentityModule<'a> {
                 display_name,
                 avatar.symbol,
                 avatar.color,
-                wizard_type_to_db(preferred_wizard_type),
+                hero_type_to_db(preferred_hero_type),
                 board_visual_mode_to_db(board_visual_mode)
             ],
         )?;
@@ -370,7 +374,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT id, public_handle, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode, total_xp
+                SELECT id, public_handle, email, display_name, avatar_symbol, avatar_color, preferred_hero_type, board_visual_mode, total_xp
                 FROM users
                 WHERE email_normalized = ?1
                 ",
@@ -385,7 +389,7 @@ impl<'a> IdentityModule<'a> {
                             symbol: row.get(4)?,
                             color: row.get(5)?,
                         },
-                        preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(6)?),
+                        preferred_hero_type: hero_type_from_db(&row.get::<_, String>(6)?),
                         board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(7)?),
                         total_xp: row.get(8)?,
                     })
@@ -399,7 +403,7 @@ impl<'a> IdentityModule<'a> {
         self.connection
             .query_row(
                 "
-                SELECT id, public_handle, email, display_name, avatar_symbol, avatar_color, preferred_wizard_type, board_visual_mode, total_xp
+                SELECT id, public_handle, email, display_name, avatar_symbol, avatar_color, preferred_hero_type, board_visual_mode, total_xp
                 FROM users
                 WHERE id = ?1
                 ",
@@ -414,7 +418,7 @@ impl<'a> IdentityModule<'a> {
                             symbol: row.get(4)?,
                             color: row.get(5)?,
                         },
-                        preferred_wizard_type: wizard_type_from_db(&row.get::<_, String>(6)?),
+                        preferred_hero_type: hero_type_from_db(&row.get::<_, String>(6)?),
                         board_visual_mode: board_visual_mode_from_db(&row.get::<_, String>(7)?),
                         total_xp: row.get(8)?,
                     })
@@ -437,7 +441,7 @@ pub fn migrate(connection: &Connection) -> Result<(), IdentityError> {
             display_name TEXT NOT NULL DEFAULT '',
             avatar_symbol TEXT NOT NULL DEFAULT 'sparkles',
             avatar_color TEXT NOT NULL DEFAULT 'emerald',
-            preferred_wizard_type TEXT NOT NULL DEFAULT 'runekeeper',
+            preferred_hero_type TEXT NOT NULL DEFAULT 'runekeeper',
             board_visual_mode TEXT NOT NULL DEFAULT '3d',
             total_xp INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL DEFAULT (unixepoch())
@@ -475,9 +479,19 @@ pub fn migrate(connection: &Connection) -> Result<(), IdentityError> {
     add_column_if_missing(
         connection,
         "users",
-        "preferred_wizard_type",
+        "preferred_hero_type",
         "TEXT NOT NULL DEFAULT 'runekeeper'",
     )?;
+    if column_exists(connection, "users", "preferred_wizard_type")? {
+        connection.execute(
+            "
+            UPDATE users
+            SET preferred_hero_type = COALESCE(preferred_wizard_type, preferred_hero_type)
+            ",
+            [],
+        )?;
+        drop_column_if_exists(connection, "users", "preferred_wizard_type")?;
+    }
     add_column_if_missing(
         connection,
         "users",
@@ -528,7 +542,7 @@ pub fn seed_experienced_local_account(connection: &Connection) -> Result<i64, Id
             display_name,
             avatar_symbol,
             avatar_color,
-            preferred_wizard_type,
+            preferred_hero_type,
             total_xp,
             created_at
         )
@@ -539,7 +553,7 @@ pub fn seed_experienced_local_account(connection: &Connection) -> Result<i64, Id
             display_name = excluded.display_name,
             avatar_symbol = excluded.avatar_symbol,
             avatar_color = excluded.avatar_color,
-            preferred_wizard_type = excluded.preferred_wizard_type,
+            preferred_hero_type = excluded.preferred_hero_type,
             total_xp = excluded.total_xp
         ",
         params![
@@ -738,23 +752,29 @@ fn generated_avatar_for_email(normalized_email: &str) -> GeneratedAvatar {
     }
 }
 
-fn wizard_type_to_db(wizard_type: WizardType) -> &'static str {
-    match wizard_type {
-        WizardType::Runekeeper => "runekeeper",
-        WizardType::Pyromancer => "pyromancer",
-        WizardType::Chronomancer => "chronomancer",
-        WizardType::Warden => "warden",
-        WizardType::Battlemage => "battlemage",
+fn hero_type_to_db(hero_type: HeroType) -> &'static str {
+    match hero_type {
+        HeroType::Runekeeper => "runekeeper",
+        HeroType::Pyromancer => "pyromancer",
+        HeroType::Chronomancer => "chronomancer",
+        HeroType::Warden => "warden",
+        HeroType::Battlemage => "battlemage",
+        HeroType::Barbarian => "barbarian",
+        HeroType::Archer => "archer",
+        HeroType::Builder => "builder",
     }
 }
 
-fn wizard_type_from_db(value: &str) -> WizardType {
+fn hero_type_from_db(value: &str) -> HeroType {
     match value {
-        "pyromancer" => WizardType::Pyromancer,
-        "chronomancer" => WizardType::Chronomancer,
-        "warden" => WizardType::Warden,
-        "battlemage" => WizardType::Battlemage,
-        _ => WizardType::Runekeeper,
+        "pyromancer" => HeroType::Pyromancer,
+        "chronomancer" => HeroType::Chronomancer,
+        "warden" => HeroType::Warden,
+        "battlemage" => HeroType::Battlemage,
+        "barbarian" => HeroType::Barbarian,
+        "archer" => HeroType::Archer,
+        "builder" => HeroType::Builder,
+        _ => HeroType::Runekeeper,
     }
 }
 
@@ -790,6 +810,33 @@ fn add_column_if_missing(
         &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
         [],
     )?;
+    Ok(())
+}
+
+fn column_exists(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, IdentityError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for existing in columns {
+        if existing? == column {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn drop_column_if_exists(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<(), IdentityError> {
+    if column_exists(connection, table, column)? {
+        let _ = connection.execute(&format!("ALTER TABLE {table} DROP COLUMN {column}"), []);
+    }
     Ok(())
 }
 

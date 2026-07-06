@@ -76,7 +76,7 @@ describe("createBoardAnimationCue", () => {
       event: {
         type: "pieceAttacked",
         side: "player",
-        attackerId: "player-wizard",
+        attackerId: "player-hero",
         targetId: "unit-1",
         damageToTarget: 2,
         counterDamageToAttacker: 1,
@@ -85,10 +85,29 @@ describe("createBoardAnimationCue", () => {
     });
 
     expect(cue?.pieces).toEqual([
-      { pieceId: "player-wizard", kind: "attack" },
+      { pieceId: "player-hero", kind: "attack" },
       { pieceId: "unit-1", kind: "damage", amount: 2 },
-      { pieceId: "player-wizard", kind: "damage", amount: 1 },
+      { pieceId: "player-hero", kind: "damage", amount: 1 },
     ]);
+  });
+
+  it("uses armor refresh events as unit heal cues", () => {
+    const previous = matchWithUnit({ id: "unit-1", q: 0, r: 0, armor: 1 });
+    const next = matchWithUnit({ id: "unit-1", q: 0, r: 0, armor: 4 });
+
+    const cue = createBoardAnimationCue({
+      previous,
+      next,
+      event: {
+        type: "unitArmorRefreshed",
+        side: "opponent",
+        unitId: "unit-1",
+        amount: 3,
+      },
+      sequence: 5,
+    });
+
+    expect(cue?.pieces).toEqual([{ pieceId: "unit-1", kind: "heal", amount: 3 }]);
   });
 
   it("suppresses cosmetic cues for reduced-motion users", () => {
@@ -99,7 +118,7 @@ describe("createBoardAnimationCue", () => {
       createBoardAnimationCue({
         previous,
         next,
-        sequence: 5,
+        sequence: 6,
         reducedMotion: true,
       }),
     ).toBeNull();
@@ -122,12 +141,14 @@ function matchWithUnit({
     board: {
       radius: 3,
       tiles: [{ coord: { q, r } }],
+      manaSources: [],
       units: [
         {
           id,
           side: "opponent",
           name: "Test Unit",
           attack: 2,
+          attackRange: 1,
           armor,
           maxArmor: 4,
           position: { q, r },
@@ -153,13 +174,14 @@ function matchWithoutUnits(): MatchState {
       side: "player",
       mana: 1,
       maxMana: 1,
-      wizard: {
-        id: "player-wizard",
+      hero: {
+        id: "player-hero",
         side: "player",
-        wizardType: "runekeeper",
+        heroType: "runekeeper",
         hp: 20,
         maxHp: 20,
         attack: 2,
+        attackRange: 1,
         position: { q: 0, r: 2 },
         apRemaining: 1,
         maxAp: 1,
@@ -175,13 +197,14 @@ function matchWithoutUnits(): MatchState {
       side: "opponent",
       mana: 1,
       maxMana: 1,
-      wizard: {
-        id: "opponent-wizard",
+      hero: {
+        id: "opponent-hero",
         side: "opponent",
-        wizardType: "pyromancer",
+        heroType: "pyromancer",
         hp: 20,
         maxHp: 20,
         attack: 2,
+        attackRange: 1,
         position: { q: 0, r: -2 },
         apRemaining: 1,
         maxAp: 1,
@@ -195,6 +218,7 @@ function matchWithoutUnits(): MatchState {
     board: {
       radius: 3,
       tiles: [],
+      manaSources: [],
       units: [],
       droppedItems: [],
     },

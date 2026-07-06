@@ -1,6 +1,7 @@
-import { WIZARD_OPTIONS } from "./wizards";
+import { HERO_OPTIONS } from "./heroes";
 import type {
   Card,
+  BuildingEffect,
   CatalogCard,
   DeckChoice,
   MatchSummary,
@@ -8,7 +9,7 @@ import type {
   ReplayEvent,
   Side,
   StackItem,
-  WizardType,
+  HeroType,
 } from "./types";
 
 export function kindSummary(card: Card | CatalogCard) {
@@ -20,12 +21,20 @@ export function kindSummary(card: Card | CatalogCard) {
     return `${itemPassiveLabel(card.kind.passive)} rng ${card.kind.range}`;
   }
 
+  if (card.kind.type === "manaSource") {
+    return "Build mana source";
+  }
+
+  if (card.kind.type === "building") {
+    return buildingEffectLabel(card.kind.effect);
+  }
+
   return `${spellEffectLabel(card)} rng ${card.kind.range} pri ${card.kind.priority}`;
 }
 
 export function spellEffectLabel(card: Card | CatalogCard) {
   if (card.kind.type !== "spell") {
-    return "unit";
+    return card.kind.type;
   }
 
   switch (card.kind.effect.type) {
@@ -33,6 +42,8 @@ export function spellEffectLabel(card: Card | CatalogCard) {
       return `heal ${card.kind.effect.amount}`;
     case "buff":
       return `+${card.kind.effect.attack}/+${card.kind.effect.armor}`;
+    case "statBuff":
+      return `+${card.kind.effect.attack}/+${card.kind.effect.armor}/+${card.kind.effect.maxAp} ap`;
     case "damage":
       return `damage ${card.kind.effect.amount}`;
     case "draw":
@@ -41,6 +52,21 @@ export function spellEffectLabel(card: Card | CatalogCard) {
       return `area ${card.kind.effect.amount}`;
     case "lineDamage":
       return `line ${card.kind.effect.amount}`;
+  }
+}
+
+export function buildingEffectLabel(effect: BuildingEffect) {
+  switch (effect.type) {
+    case "turnStartMana":
+      return `+${effect.amount} mana occupied`;
+    case "auraStatBonus":
+      return `aura +${effect.attack}/+${effect.armor}/+${effect.maxAp} ap rng ${effect.range}`;
+    case "activatedDamageLine":
+      return `activate line ${effect.amount} rng ${effect.range}`;
+    case "activatedHeal":
+      return `activate heal ${effect.amount} rng ${effect.range}`;
+    case "activatedStatBonus":
+      return `activate +${effect.attack}/+${effect.armor}/+${effect.maxAp} ap`;
   }
 }
 
@@ -77,8 +103,14 @@ export function stackItemTitle(item: StackItem) {
       return `${sideLabel(item.side)} attacks with ${item.action.attackerId}`;
     case "equipItem":
       return `${sideLabel(item.side)} equips ${item.action.card.name}`;
+    case "buildManaSource":
+      return `${sideLabel(item.side)} builds ${item.action.card.name}`;
+    case "buildBuilding":
+      return `${sideLabel(item.side)} builds ${item.action.card.name}`;
     case "activateItem":
       return `${sideLabel(item.side)} activates ${item.action.itemId}`;
+    case "activateBuilding":
+      return `${sideLabel(item.side)} activates ${item.action.buildingId}`;
   }
 }
 
@@ -134,12 +166,24 @@ export function eventTitle(event: ReplayEvent) {
       return `${event.attackerId} attacked`;
     case "pieceHealed":
       return `${event.pieceId} healed`;
+    case "unitArmorRefreshed":
+      return `${event.unitId} armor refreshed`;
     case "pieceBuffed":
       return `${event.pieceId} buffed`;
     case "pieceDamaged":
       return `${event.pieceId} damaged`;
     case "unitDestroyed":
       return `${event.name} destroyed`;
+    case "manaSourceBuilt":
+      return "Mana source built";
+    case "buildingBuilt":
+      return `${event.name} built`;
+    case "buildingActivated":
+      return `${event.name} activated`;
+    case "heroShielded":
+      return `${event.heroId} shielded`;
+    case "manaGained":
+      return `${sideLabel(event.side)} gained mana`;
     case "itemEquipped":
       return `${event.name} equipped`;
     case "itemDropped":
@@ -154,7 +198,7 @@ export function eventTitle(event: ReplayEvent) {
 export function eventDetail(event: ReplayEvent) {
   switch (event.type) {
     case "matchCreated":
-      return "The wizards enter the hex arena.";
+      return "The heroes enter the hex arena.";
     case "turnStarted":
       return `Round ${event.round} ${sideLabel(event.side).toLocaleLowerCase()} turn.`;
     case "turnEnded":
@@ -177,12 +221,27 @@ export function eventDetail(event: ReplayEvent) {
       return `${event.attackerId} dealt ${event.damageToTarget}; counterdamage was ${event.counterDamageToAttacker}.`;
     case "pieceHealed":
       return `${event.pieceId} healed ${event.amount}.`;
+    case "unitArmorRefreshed":
+      return `${event.unitId} restored ${event.amount} armor.`;
     case "pieceBuffed":
       return `${event.pieceId} gained +${event.attackDelta}/+${event.armorDelta}.`;
     case "pieceDamaged":
       return `${event.pieceId} took ${event.amount} damage.`;
     case "unitDestroyed":
       return `${event.name} left the board.`;
+    case "manaSourceBuilt":
+      return `${sideLabel(event.side)} built a mana source at q ${event.coord.q}, r ${event.coord.r}.`;
+    case "buildingBuilt":
+      return `${sideLabel(event.side)} built ${event.name} at q ${event.coord.q}, r ${event.coord.r}.`;
+    case "buildingActivated":
+      return `${sideLabel(event.side)} activated ${event.name} with ${event.occupantId}.`;
+    case "heroShielded":
+      return `${event.heroId} gained ${event.amount} shield.`;
+    case "manaGained":
+      switch (event.source.type) {
+        case "barbarianKill":
+          return `${event.source.heroId} gained ${event.amount} mana from destroying ${event.source.unitId}.`;
+      }
     case "itemEquipped":
       return `${sideLabel(event.side)} equipped ${event.name} to ${event.unitId}.`;
     case "itemDropped":
@@ -194,16 +253,16 @@ export function eventDetail(event: ReplayEvent) {
   }
 }
 
-export function wizardOptionByType(wizardType: WizardType) {
-  return WIZARD_OPTIONS.find((wizard) => wizard.id === wizardType) ?? WIZARD_OPTIONS[0];
+export function heroOptionByType(heroType: HeroType) {
+  return HERO_OPTIONS.find((hero) => hero.id === heroType) ?? HERO_OPTIONS[0];
 }
 
-export function isWizardType(value: string | null): value is WizardType {
-  return WIZARD_OPTIONS.some((wizard) => wizard.id === value);
+export function isHeroType(value: string | null): value is HeroType {
+  return HERO_OPTIONS.some((hero) => hero.id === value);
 }
 
-export function defaultRuneIdsForWizard(progression: ProgressionResponse, wizardType: WizardType) {
-  return progression.loadouts.find((loadout) => loadout.wizardType === wizardType)?.runeIds ?? [];
+export function defaultRuneIdsForHero(progression: ProgressionResponse, heroType: HeroType) {
+  return progression.loadouts.find((loadout) => loadout.heroType === heroType)?.runeIds ?? [];
 }
 
 export function parseRuneIds(value: string) {
@@ -246,12 +305,12 @@ export function parseDeckChoice(value: string | null): DeckChoice | null {
   }
 }
 
-export function wizardTypeLabel(wizardType: WizardType) {
-  return wizardOptionByType(wizardType).name;
+export function heroTypeLabel(heroType: HeroType) {
+  return heroOptionByType(heroType).name;
 }
 
-export function wizardTokenLabel(wizardType: WizardType) {
-  return wizardOptionByType(wizardType).token;
+export function heroTokenLabel(heroType: HeroType) {
+  return heroOptionByType(heroType).token;
 }
 
 export function avatarSymbolLabel(symbol: string) {

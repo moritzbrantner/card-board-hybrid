@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::card_catalog::card_template_by_id;
 use crate::deck_recipe_legality::{self, DeckRecipeLegalityError, normalize_requested_cards};
-use crate::match_session::{Card, Side, WizardType};
+use crate::match_session::{Card, HeroType, Side};
+
+mod recipes;
+mod system_decks;
 
 pub const DECK_LIMIT_PER_ACCOUNT: usize = 30;
 pub use crate::deck_recipe_legality::{
@@ -26,7 +29,7 @@ pub struct DeckRecipeSummary {
     pub id: i64,
     pub name: String,
     pub is_default: bool,
-    pub wizard_type: WizardType,
+    pub hero_type: HeroType,
     pub rune_ids: Vec<String>,
     pub cards: Vec<DeckCardCount>,
     pub legality: DeckLegality,
@@ -46,7 +49,7 @@ pub struct DeckListResponse {
 pub struct SystemDeckRecipe {
     pub id: String,
     pub name: String,
-    pub wizard_type: WizardType,
+    pub hero_type: HeroType,
     pub cards: Vec<DeckCardCount>,
     pub legality: DeckLegality,
 }
@@ -65,8 +68,8 @@ pub struct SaveDeckRequest {
     pub cards: Vec<DeckCardCountRequest>,
     #[serde(default)]
     pub is_default: Option<bool>,
-    #[serde(default)]
-    pub wizard_type: Option<WizardType>,
+    #[serde(default, alias = "wizardType")]
+    pub hero_type: Option<HeroType>,
     #[serde(default)]
     pub rune_ids: Vec<String>,
 }
@@ -176,7 +179,7 @@ impl<'a> DeckLibrary<'a> {
         let name = normalize_deck_name(&request.name)?;
         let cards = normalize_requested_cards(request.cards)?;
         let is_default = request.is_default.unwrap_or(false);
-        let wizard_type = request.wizard_type.unwrap_or_default();
+        let hero_type = request.hero_type.unwrap_or_default();
         let rune_ids_json = serde_json::to_string(&request.rune_ids)?;
 
         let transaction = self.connection.transaction()?;
@@ -189,7 +192,7 @@ impl<'a> DeckLibrary<'a> {
                 user_id,
                 name,
                 is_default,
-                wizard_type,
+                hero_type,
                 rune_ids_json,
                 created_at,
                 updated_at
@@ -200,7 +203,7 @@ impl<'a> DeckLibrary<'a> {
                 user_id,
                 name,
                 is_default,
-                wizard_type_to_db(wizard_type),
+                hero_type_to_db(hero_type),
                 rune_ids_json
             ],
         )?;
@@ -220,7 +223,7 @@ impl<'a> DeckLibrary<'a> {
     ) -> Result<Option<DeckRecipeSummary>, DeckLibraryError> {
         let name = normalize_deck_name(&request.name)?;
         let cards = normalize_requested_cards(request.cards)?;
-        let wizard_type = request.wizard_type.unwrap_or_default();
+        let hero_type = request.hero_type.unwrap_or_default();
         let rune_ids_json = serde_json::to_string(&request.rune_ids)?;
         let exists = self.deck_exists_for_user(user_id, deck_id)?;
         if !exists {
@@ -236,7 +239,7 @@ impl<'a> DeckLibrary<'a> {
             UPDATE deck_recipes
             SET name = ?3,
                 is_default = CASE WHEN ?4 THEN 1 ELSE is_default END,
-                wizard_type = ?5,
+                hero_type = ?5,
                 rune_ids_json = ?6,
                 updated_at = unixepoch()
             WHERE id = ?1 AND user_id = ?2
@@ -246,7 +249,7 @@ impl<'a> DeckLibrary<'a> {
                 user_id,
                 name,
                 request.is_default.unwrap_or(false),
-                wizard_type_to_db(wizard_type),
+                hero_type_to_db(hero_type),
                 rune_ids_json,
             ],
         )?;
@@ -276,7 +279,7 @@ impl<'a> DeckLibrary<'a> {
                 })
                 .collect(),
             is_default: Some(false),
-            wizard_type: Some(source.wizard_type),
+            hero_type: Some(source.hero_type),
             rune_ids: source.rune_ids,
         };
         self.create_for_user(user_id, request).map(Some)
@@ -329,10 +332,10 @@ impl<'a> DeckLibrary<'a> {
         &mut self,
         user_id: i64,
         deck_id: i64,
-    ) -> Result<Option<(WizardType, Vec<String>)>, DeckLibraryError> {
+    ) -> Result<Option<(HeroType, Vec<String>)>, DeckLibraryError> {
         Ok(self
             .load_for_user(user_id, deck_id)?
-            .map(|deck| (deck.wizard_type, deck.rune_ids)))
+            .map(|deck| (deck.hero_type, deck.rune_ids)))
     }
 
     fn ensure_starter_deck(&mut self, user_id: i64) -> Result<(), DeckLibraryError> {
@@ -353,18 +356,14 @@ impl<'a> DeckLibrary<'a> {
                 user_id,
                 name,
                 is_default,
-                wizard_type,
+                hero_type,
                 rune_ids_json,
                 created_at,
                 updated_at
             )
             VALUES (?1, ?2, 1, ?3, '[]', unixepoch(), unixepoch())
             ",
-            params![
-                user_id,
-                starter.name,
-                wizard_type_to_db(WizardType::Runekeeper)
-            ],
+            params![user_id, starter.name, hero_type_to_db(HeroType::Runekeeper)],
         )?;
         let deck_id = transaction.last_insert_rowid();
         replace_deck_cards(&transaction, deck_id, &starter.cards)?;
@@ -399,7 +398,7 @@ impl<'a> DeckLibrary<'a> {
     fn load_user_decks(&self, user_id: i64) -> Result<Vec<DeckRecipeSummary>, DeckLibraryError> {
         let mut statement = self.connection.prepare(
             "
-            SELECT id, name, is_default, wizard_type, rune_ids_json, created_at, updated_at
+            SELECT id, name, is_default, hero_type, rune_ids_json, created_at, updated_at
             FROM deck_recipes
             WHERE user_id = ?1
             ORDER BY is_default DESC, updated_at DESC, id ASC
@@ -410,7 +409,7 @@ impl<'a> DeckLibrary<'a> {
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)? == 1,
-                wizard_type_from_db(&row.get::<_, String>(3)?),
+                hero_type_from_db(&row.get::<_, String>(3)?),
                 row.get::<_, String>(4)?,
                 row.get::<_, i64>(5)?,
                 row.get::<_, i64>(6)?,
@@ -419,13 +418,13 @@ impl<'a> DeckLibrary<'a> {
 
         let mut decks = Vec::new();
         for row in rows {
-            let (id, name, is_default, wizard_type, rune_ids_json, created_at, updated_at) = row?;
+            let (id, name, is_default, hero_type, rune_ids_json, created_at, updated_at) = row?;
             let cards = load_deck_cards(self.connection, id)?;
             decks.push(DeckRecipeSummary {
                 id,
                 name,
                 is_default,
-                wizard_type,
+                hero_type,
                 rune_ids: serde_json::from_str(&rune_ids_json)?,
                 legality: validate_recipe(&cards),
                 cards,
@@ -445,7 +444,7 @@ impl<'a> DeckLibrary<'a> {
             .connection
             .query_row(
                 "
-            SELECT id, name, is_default, wizard_type, rune_ids_json, created_at, updated_at
+            SELECT id, name, is_default, hero_type, rune_ids_json, created_at, updated_at
             FROM deck_recipes
             WHERE id = ?1 AND user_id = ?2
             ",
@@ -455,7 +454,7 @@ impl<'a> DeckLibrary<'a> {
                         row.get::<_, i64>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, i64>(2)? == 1,
-                        wizard_type_from_db(&row.get::<_, String>(3)?),
+                        hero_type_from_db(&row.get::<_, String>(3)?),
                         row.get::<_, String>(4)?,
                         row.get::<_, i64>(5)?,
                         row.get::<_, i64>(6)?,
@@ -465,13 +464,13 @@ impl<'a> DeckLibrary<'a> {
             .optional()?;
 
         row.map(
-            |(id, name, is_default, wizard_type, rune_ids_json, created_at, updated_at)| {
+            |(id, name, is_default, hero_type, rune_ids_json, created_at, updated_at)| {
                 let cards = load_deck_cards(self.connection, id)?;
                 Ok(DeckRecipeSummary {
                     id,
                     name,
                     is_default,
-                    wizard_type,
+                    hero_type,
                     rune_ids: serde_json::from_str(&rune_ids_json)?,
                     legality: validate_recipe(&cards),
                     cards,
@@ -504,7 +503,7 @@ pub fn migrate(connection: &Connection) -> Result<(), DeckLibraryError> {
             user_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             is_default INTEGER NOT NULL DEFAULT 0,
-            wizard_type TEXT NOT NULL DEFAULT 'runekeeper',
+            hero_type TEXT NOT NULL DEFAULT 'runekeeper',
             rune_ids_json TEXT NOT NULL DEFAULT '[]',
             created_at INTEGER NOT NULL DEFAULT (unixepoch()),
             updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
@@ -521,10 +520,10 @@ pub fn migrate(connection: &Connection) -> Result<(), DeckLibraryError> {
             ON deck_recipes(user_id);
         ",
     )?;
-    let wizard_type_added = add_column_if_missing(
+    let hero_type_added = add_column_if_missing(
         connection,
         "deck_recipes",
-        "wizard_type",
+        "hero_type",
         "TEXT NOT NULL DEFAULT 'runekeeper'",
     )?;
     let rune_ids_added = add_column_if_missing(
@@ -533,15 +532,25 @@ pub fn migrate(connection: &Connection) -> Result<(), DeckLibraryError> {
         "rune_ids_json",
         "TEXT NOT NULL DEFAULT '[]'",
     )?;
-    if wizard_type_added {
+    let had_legacy_hero_type = column_exists(connection, "deck_recipes", "wizard_type")?;
+    if had_legacy_hero_type {
         connection.execute_batch(
             "
             UPDATE deck_recipes
-            SET wizard_type = COALESCE((
-                SELECT users.preferred_wizard_type
+            SET hero_type = COALESCE(wizard_type, hero_type);
+            ",
+        )?;
+        drop_column_if_exists(connection, "deck_recipes", "wizard_type")?;
+    }
+    if hero_type_added && !had_legacy_hero_type {
+        connection.execute_batch(
+            "
+            UPDATE deck_recipes
+            SET hero_type = COALESCE((
+                SELECT users.preferred_hero_type
                 FROM users
                 WHERE users.id = deck_recipes.user_id
-            ), wizard_type);
+            ), hero_type);
             ",
         )?;
     }
@@ -553,7 +562,20 @@ pub fn migrate(connection: &Connection) -> Result<(), DeckLibraryError> {
                 SELECT wizard_rune_loadouts.rune_ids_json
                 FROM wizard_rune_loadouts
                 WHERE wizard_rune_loadouts.user_id = deck_recipes.user_id
-                  AND wizard_rune_loadouts.wizard_type = deck_recipes.wizard_type
+                  AND wizard_rune_loadouts.wizard_type = deck_recipes.hero_type
+            ), rune_ids_json);
+            ",
+        )?;
+    }
+    if rune_ids_added && table_exists(connection, "hero_rune_loadouts")? {
+        connection.execute_batch(
+            "
+            UPDATE deck_recipes
+            SET rune_ids_json = COALESCE((
+                SELECT hero_rune_loadouts.rune_ids_json
+                FROM hero_rune_loadouts
+                WHERE hero_rune_loadouts.user_id = deck_recipes.user_id
+                  AND hero_rune_loadouts.hero_type = deck_recipes.hero_type
             ), rune_ids_json);
             ",
         )?;
@@ -633,18 +655,19 @@ fn system_decks() -> Vec<SystemDeckRecipe> {
         system_deck(
             "balanced-starter",
             "Balanced Starter",
-            WizardType::Runekeeper,
+            HeroType::Runekeeper,
             &[
-                ("ember-squire", 5),
+                ("ember-squire", 4),
                 ("swift-familiar", 4),
                 ("stoneguard", 4),
                 ("rune-bruiser", 4),
                 ("quick-salve", 4),
                 ("spark-jolt", 4),
-                ("rune-charm", 5),
-                ("rune-runner", 5),
-                ("ash-hound", 5),
-                ("prism-initiate", 5),
+                ("rune-charm", 4),
+                ("rune-runner", 4),
+                ("ash-hound", 4),
+                ("prism-initiate", 4),
+                ("mana-well", 5),
                 ("runic-insight", 5),
                 ("blade-dancer", 1),
                 ("shield-adept", 1),
@@ -661,13 +684,14 @@ fn system_decks() -> Vec<SystemDeckRecipe> {
         system_deck(
             "ember-burn",
             "Ember Burn",
-            WizardType::Pyromancer,
+            HeroType::Pyromancer,
             &[
-                ("ember-squire", 5),
-                ("ash-hound", 5),
-                ("spark-jolt", 5),
-                ("quick-salve", 5),
-                ("rune-runner", 5),
+                ("ember-squire", 4),
+                ("ash-hound", 4),
+                ("spark-jolt", 4),
+                ("quick-salve", 4),
+                ("rune-runner", 4),
+                ("mana-well", 5),
                 ("swift-familiar", 5),
                 ("rune-bruiser", 5),
                 ("prism-initiate", 5),
@@ -682,18 +706,22 @@ fn system_decks() -> Vec<SystemDeckRecipe> {
         system_deck(
             "tempo-lines",
             "Tempo Lines",
-            WizardType::Chronomancer,
+            HeroType::Chronomancer,
             &[
-                ("swift-familiar", 5),
-                ("rune-runner", 5),
-                ("spark-jolt", 5),
-                ("quick-salve", 5),
-                ("prism-initiate", 5),
+                ("swift-familiar", 4),
+                ("rune-runner", 4),
+                ("spark-jolt", 4),
+                ("quick-salve", 4),
+                ("prism-initiate", 4),
+                ("mana-well", 5),
                 ("ember-squire", 5),
                 ("ash-hound", 5),
                 ("rune-bruiser", 5),
-                ("warding-sigil", 5),
+                ("warding-sigil", 2),
                 ("stoneguard", 2),
+                ("watchtower", 1),
+                ("overclock-bracers", 1),
+                ("surge-protocol", 1),
                 ("starlit-study", 4),
                 ("prism-ray", 4),
                 ("mending-rune", 4),
@@ -703,18 +731,22 @@ fn system_decks() -> Vec<SystemDeckRecipe> {
         system_deck(
             "rune-fortress",
             "Rune Fortress",
-            WizardType::Warden,
+            HeroType::Warden,
             &[
-                ("stoneguard", 5),
-                ("prism-initiate", 5),
-                ("warding-sigil", 5),
-                ("quick-salve", 5),
-                ("ember-squire", 5),
-                ("rune-bruiser", 5),
+                ("stoneguard", 4),
+                ("prism-initiate", 4),
+                ("warding-sigil", 4),
+                ("quick-salve", 4),
+                ("ember-squire", 4),
+                ("mana-well", 5),
+                ("rune-bruiser", 2),
                 ("swift-familiar", 5),
                 ("rune-runner", 5),
                 ("runic-insight", 3),
                 ("spark-jolt", 2),
+                ("stone-bastion", 1),
+                ("titan-plate", 1),
+                ("colossus-oath", 1),
                 ("shield-adept", 4),
                 ("bastion-rune", 4),
                 ("mending-rune", 4),
@@ -724,22 +756,100 @@ fn system_decks() -> Vec<SystemDeckRecipe> {
         system_deck(
             "unit-pressure",
             "Unit Pressure",
-            WizardType::Battlemage,
+            HeroType::Battlemage,
             &[
-                ("rune-bruiser", 5),
-                ("ash-hound", 5),
-                ("rune-runner", 5),
-                ("ember-squire", 5),
-                ("swift-familiar", 5),
-                ("stoneguard", 5),
+                ("rune-bruiser", 4),
+                ("ash-hound", 4),
+                ("rune-runner", 4),
+                ("ember-squire", 4),
+                ("swift-familiar", 4),
+                ("mana-well", 5),
+                ("stoneguard", 2),
                 ("prism-initiate", 5),
                 ("warding-sigil", 5),
                 ("spark-jolt", 4),
                 ("quick-salve", 4),
+                ("war-foundry", 1),
+                ("sunforged-halberd", 1),
+                ("surge-protocol", 1),
                 ("glass-duelist", 4),
                 ("prism-ray", 4),
                 ("war-chant", 2),
                 ("phoenix-adept", 2),
+            ],
+        ),
+        system_deck(
+            "barbarian-fury-line",
+            "Barbarian Fury Line",
+            HeroType::Barbarian,
+            &[
+                ("ridge-berserker", 4),
+                ("rune-bruiser", 4),
+                ("ash-hound", 4),
+                ("ember-squire", 4),
+                ("swift-familiar", 4),
+                ("mana-well", 5),
+                ("rune-runner", 5),
+                ("prism-initiate", 5),
+                ("spark-jolt", 2),
+                ("crushing-roar", 4),
+                ("war-chant", 4),
+                ("ember-lance", 4),
+                ("glass-duelist", 4),
+                ("breaker-axe", 2),
+                ("rift-gauntlet", 1),
+                ("watchtower", 1),
+                ("colossus-oath", 1),
+                ("phoenix-adept", 1),
+                ("eclipse-strike", 1),
+            ],
+        ),
+        system_deck(
+            "archer-volley-line",
+            "Archer Volley Line",
+            HeroType::Archer,
+            &[
+                ("pathfinder", 4),
+                ("swift-familiar", 4),
+                ("rune-runner", 4),
+                ("ash-hound", 4),
+                ("spark-jolt", 4),
+                ("mana-well", 5),
+                ("runic-insight", 5),
+                ("ember-squire", 5),
+                ("prism-initiate", 5),
+                ("piercing-volley", 4),
+                ("prism-ray", 4),
+                ("temporal-bolt", 4),
+                ("starlit-study", 4),
+                ("deadeye-mark", 2),
+                ("thunder-rail", 2),
+            ],
+        ),
+        system_deck(
+            "builder-worksite",
+            "Builder Worksite",
+            HeroType::Builder,
+            &[
+                ("field-mason", 4),
+                ("stoneguard", 4),
+                ("prism-initiate", 4),
+                ("warding-sigil", 4),
+                ("rune-charm", 4),
+                ("mana-well", 5),
+                ("ember-squire", 1),
+                ("rune-bruiser", 5),
+                ("quick-salve", 5),
+                ("fortify-position", 4),
+                ("arcane-parry", 4),
+                ("bastion-rune", 4),
+                ("shield-adept", 4),
+                ("clockwork-rig", 2),
+                ("stone-bastion", 1),
+                ("healing-font", 1),
+                ("titan-plate", 1),
+                ("guardian-harness", 1),
+                ("vanguard-golem", 2),
             ],
         ),
     ]
@@ -748,7 +858,7 @@ fn system_decks() -> Vec<SystemDeckRecipe> {
 fn system_deck(
     id: &str,
     name: &str,
-    wizard_type: WizardType,
+    hero_type: HeroType,
     counts: &[(&str, u16)],
 ) -> SystemDeckRecipe {
     let cards = counts
@@ -761,7 +871,7 @@ fn system_deck(
     SystemDeckRecipe {
         id: id.to_string(),
         name: name.to_string(),
-        wizard_type,
+        hero_type,
         legality: validate_recipe(&cards),
         cards,
     }
@@ -840,23 +950,56 @@ fn table_exists(connection: &Connection, table: &str) -> Result<bool, DeckLibrar
     Ok(exists.is_some())
 }
 
-fn wizard_type_to_db(wizard_type: WizardType) -> &'static str {
-    match wizard_type {
-        WizardType::Runekeeper => "runekeeper",
-        WizardType::Pyromancer => "pyromancer",
-        WizardType::Chronomancer => "chronomancer",
-        WizardType::Warden => "warden",
-        WizardType::Battlemage => "battlemage",
+fn column_exists(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, DeckLibraryError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for existing in columns {
+        if existing? == column {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn drop_column_if_exists(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<(), DeckLibraryError> {
+    if column_exists(connection, table, column)? {
+        let _ = connection.execute(&format!("ALTER TABLE {table} DROP COLUMN {column}"), []);
+    }
+    Ok(())
+}
+
+fn hero_type_to_db(hero_type: HeroType) -> &'static str {
+    match hero_type {
+        HeroType::Runekeeper => "runekeeper",
+        HeroType::Pyromancer => "pyromancer",
+        HeroType::Chronomancer => "chronomancer",
+        HeroType::Warden => "warden",
+        HeroType::Battlemage => "battlemage",
+        HeroType::Barbarian => "barbarian",
+        HeroType::Archer => "archer",
+        HeroType::Builder => "builder",
     }
 }
 
-fn wizard_type_from_db(value: &str) -> WizardType {
+fn hero_type_from_db(value: &str) -> HeroType {
     match value {
-        "pyromancer" => WizardType::Pyromancer,
-        "chronomancer" => WizardType::Chronomancer,
-        "warden" => WizardType::Warden,
-        "battlemage" => WizardType::Battlemage,
-        _ => WizardType::Runekeeper,
+        "pyromancer" => HeroType::Pyromancer,
+        "chronomancer" => HeroType::Chronomancer,
+        "warden" => HeroType::Warden,
+        "battlemage" => HeroType::Battlemage,
+        "barbarian" => HeroType::Barbarian,
+        "archer" => HeroType::Archer,
+        "builder" => HeroType::Builder,
+        _ => HeroType::Runekeeper,
     }
 }
 

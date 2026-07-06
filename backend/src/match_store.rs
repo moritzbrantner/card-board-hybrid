@@ -4,25 +4,32 @@ use std::ffi::OsString;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use rand::RngCore;
-use rand::rngs::OsRng;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::deck_library::{self, DeckLibraryError, DeckRecipeSnapshot};
 use crate::identity;
 use crate::match_session::{
-    Card, MatchActionRequest, MatchProgressionLoadout, MatchState, RecordedReplayFrame,
-    ReplayEvent, Side, WizardType,
+    Card, HeroType, MatchActionRequest, MatchProgressionLoadout, MatchState, RecordedReplayFrame,
+    ReplayEvent, Side,
 };
 use crate::progression;
+
+mod db_values;
+mod ids;
+mod matches;
+mod replays;
+mod rows;
+mod schema;
+mod shared_matches;
+use db_values::*;
+use ids::*;
 
 pub const MATCH_DATABASE_PATH_ENV: &str = "RUNE_LANES_DB_PATH";
 
 type ReadySharedLoadouts = (
-    WizardType,
-    WizardType,
+    HeroType,
+    HeroType,
     DeckRecipeSnapshot,
     DeckRecipeSnapshot,
     MatchProgressionLoadout,
@@ -75,7 +82,7 @@ pub struct StoredSharedSeat {
     pub side: Side,
     pub seat_token: String,
     pub participant_user_id: Option<i64>,
-    pub wizard_type: Option<WizardType>,
+    pub hero_type: Option<HeroType>,
     pub deck_recipe_name: Option<String>,
     pub deck_recipe_snapshot: Option<DeckRecipeSnapshot>,
     pub progression_loadout: MatchProgressionLoadout,
@@ -177,89 +184,7 @@ impl SqliteMatchStore {
 
         let connection = Connection::open(path)?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
-        connection.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS matches (
-                id TEXT PRIMARY KEY NOT NULL,
-                snapshot_json TEXT NOT NULL,
-                initial_snapshot_json TEXT,
-                completed_at INTEGER,
-                mode TEXT NOT NULL DEFAULT 'solo',
-                owner_user_id INTEGER,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            );
-            CREATE TABLE IF NOT EXISTS match_actions (
-                match_id TEXT NOT NULL,
-                action_index INTEGER NOT NULL,
-                request_json TEXT NOT NULL,
-                accepted_at INTEGER NOT NULL,
-                PRIMARY KEY (match_id, action_index)
-            );
-            CREATE TABLE IF NOT EXISTS match_replay_frames (
-                match_id TEXT NOT NULL,
-                frame_index INTEGER NOT NULL,
-                action_index INTEGER,
-                event_json TEXT NOT NULL,
-                snapshot_json TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                PRIMARY KEY (match_id, frame_index)
-            );
-            CREATE TABLE IF NOT EXISTS shared_matches (
-                match_id TEXT PRIMARY KEY NOT NULL,
-                status TEXT NOT NULL,
-                creator_user_id INTEGER,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                forfeit_winner TEXT
-            );
-            CREATE TABLE IF NOT EXISTS match_seats (
-                match_id TEXT NOT NULL,
-                side TEXT NOT NULL,
-                seat_token TEXT NOT NULL UNIQUE,
-                wizard_type TEXT,
-                joined_at INTEGER,
-                last_seen_at INTEGER,
-                disconnected_at INTEGER,
-                deck_recipe_name TEXT,
-                deck_recipe_snapshot_json TEXT,
-                progression_loadout_json TEXT,
-                PRIMARY KEY (match_id, side)
-            );
-            ",
-        )?;
-        identity::migrate(&connection)?;
-        deck_library::migrate(&connection)?;
-        progression::migrate(&connection)?;
-        #[cfg(debug_assertions)]
-        {
-            let experienced_user_id = identity::seed_experienced_local_account(&connection)?;
-            progression::seed_experienced_local_mastery(&connection, experienced_user_id)?;
-        }
-        add_column_if_missing(&connection, "matches", "initial_snapshot_json", "TEXT")?;
-        add_column_if_missing(&connection, "matches", "completed_at", "INTEGER")?;
-        add_column_if_missing(
-            &connection,
-            "matches",
-            "mode",
-            "TEXT NOT NULL DEFAULT 'solo'",
-        )?;
-        add_column_if_missing(&connection, "matches", "owner_user_id", "INTEGER")?;
-        add_column_if_missing(&connection, "shared_matches", "creator_user_id", "INTEGER")?;
-        add_column_if_missing(&connection, "match_seats", "participant_user_id", "INTEGER")?;
-        add_column_if_missing(&connection, "match_seats", "deck_recipe_name", "TEXT")?;
-        add_column_if_missing(
-            &connection,
-            "match_seats",
-            "deck_recipe_snapshot_json",
-            "TEXT",
-        )?;
-        add_column_if_missing(
-            &connection,
-            "match_seats",
-            "progression_loadout_json",
-            "TEXT",
-        )?;
+        schema::prepare_connection(&connection)?;
 
         Ok(Self { connection })
     }
@@ -274,15 +199,15 @@ impl SqliteMatchStore {
     )]
     pub fn create_match_for_user(
         &mut self,
-        player_wizard_type: WizardType,
+        player_hero_type: HeroType,
         owner_user_id: Option<i64>,
     ) -> Result<StoredMatch, MatchStoreError> {
         let starter = deck_library::starter_deck_snapshot();
         let player_deck = deck_library::deck_from_snapshot(Side::Player, &starter)?;
         let opponent_deck = deck_library::deck_from_snapshot(Side::Opponent, &starter)?;
         self.create_match_for_user_with_decks(
-            player_wizard_type,
-            WizardType::Runekeeper,
+            player_hero_type,
+            HeroType::Runekeeper,
             player_deck,
             opponent_deck,
             MatchProgressionLoadout::default(),
@@ -297,8 +222,8 @@ impl SqliteMatchStore {
     )]
     pub fn create_match_for_user_with_decks(
         &mut self,
-        player_wizard_type: WizardType,
-        opponent_wizard_type: WizardType,
+        player_hero_type: HeroType,
+        opponent_hero_type: HeroType,
         player_deck: Vec<Card>,
         opponent_deck: Vec<Card>,
         player_progression: MatchProgressionLoadout,
@@ -308,8 +233,8 @@ impl SqliteMatchStore {
         for attempt in 0..8 {
             let id = readable_match_id(attempt);
             let state = MatchState::new_with_progression_loadouts(
-                player_wizard_type,
-                opponent_wizard_type,
+                player_hero_type,
+                opponent_hero_type,
                 player_deck.clone(),
                 opponent_deck.clone(),
                 player_progression.clone(),
@@ -346,8 +271,8 @@ impl SqliteMatchStore {
 
         let id = readable_match_id(99);
         let state = MatchState::new_with_progression_loadouts(
-            player_wizard_type,
-            opponent_wizard_type,
+            player_hero_type,
+            opponent_hero_type,
             player_deck,
             opponent_deck,
             player_progression,
@@ -439,6 +364,49 @@ impl SqliteMatchStore {
         ))
     }
 
+    #[cfg(any(test, debug_assertions))]
+    pub fn create_scenario_match(
+        &mut self,
+        scenario_id: &str,
+        state: MatchState,
+    ) -> Result<StoredMatch, MatchStoreError> {
+        for attempt in 0..8 {
+            let id = scenario_match_id(scenario_id, attempt);
+            let snapshot = state.to_snapshot_json()?;
+            let initial_frame = state.initial_replay_frame();
+            let event_json = serde_json::to_string(&initial_frame.event)?;
+
+            let transaction = self.connection.transaction()?;
+            let inserted = transaction.execute(
+                "
+                INSERT OR IGNORE INTO matches (
+                    id,
+                    snapshot_json,
+                    initial_snapshot_json,
+                    mode,
+                    owner_user_id,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?1, ?2, ?2, 'solo', NULL, unixepoch(), unixepoch())
+                ",
+                params![id, snapshot],
+            )?;
+
+            if inserted == 1 {
+                insert_replay_frame(&transaction, &id, 0, &initial_frame, &event_json)?;
+                transaction.commit()?;
+                return Ok(StoredMatch { id, state });
+            }
+
+            transaction.commit()?;
+        }
+
+        Err(MatchStoreError::Sqlite(
+            rusqlite::Error::ExecuteReturnedResults,
+        ))
+    }
+
     pub fn load_shared_match_for_seat(
         &self,
         id: &str,
@@ -487,7 +455,7 @@ impl SqliteMatchStore {
         &mut self,
         id: &str,
         seat_token: &str,
-        wizard_type: WizardType,
+        hero_type: HeroType,
         deck_recipe: DeckRecipeSnapshot,
         progression_loadout: MatchProgressionLoadout,
         participant_user_id: Option<i64>,
@@ -503,7 +471,7 @@ impl SqliteMatchStore {
         transaction.execute(
             "
             UPDATE match_seats
-            SET wizard_type = ?3,
+            SET hero_type = ?3,
                 deck_recipe_name = ?4,
                 deck_recipe_snapshot_json = ?5,
                 participant_user_id = COALESCE(participant_user_id, ?6),
@@ -516,7 +484,7 @@ impl SqliteMatchStore {
             params![
                 id,
                 seat_token,
-                wizard_type.to_db(),
+                hero_type.to_db(),
                 deck_recipe.name,
                 serde_json::to_string(&deck_recipe)?,
                 participant_user_id,
@@ -525,8 +493,8 @@ impl SqliteMatchStore {
         )?;
 
         if let Some((
-            player_wizard_type,
-            opponent_wizard_type,
+            player_hero_type,
+            opponent_hero_type,
             player_recipe,
             opponent_recipe,
             player_progression,
@@ -536,8 +504,8 @@ impl SqliteMatchStore {
             let player_deck = deck_library::deck_from_snapshot(Side::Player, &player_recipe)?;
             let opponent_deck = deck_library::deck_from_snapshot(Side::Opponent, &opponent_recipe)?;
             let state = MatchState::new_shared_with_progression_loadouts(
-                player_wizard_type,
-                opponent_wizard_type,
+                player_hero_type,
+                opponent_hero_type,
                 player_deck,
                 opponent_deck,
                 player_progression,
@@ -651,6 +619,29 @@ impl SqliteMatchStore {
             .map_err(MatchStoreError::from)
     }
 
+    pub fn completed_shared_participant_side(
+        &self,
+        match_id: &str,
+        user_id: i64,
+    ) -> Result<Option<Side>, MatchStoreError> {
+        let side = self
+            .connection
+            .query_row(
+                "
+                SELECT match_seats.side
+                FROM match_seats
+                JOIN shared_matches ON shared_matches.match_id = match_seats.match_id
+                WHERE match_seats.match_id = ?1
+                    AND match_seats.participant_user_id = ?2
+                    AND shared_matches.status IN ('completed', 'forfeited')
+                ",
+                params![match_id, user_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(side.and_then(|side| side_from_db(&side)))
+    }
+
     pub fn next_action_index(&self, id: &str) -> Result<u32, MatchStoreError> {
         let next = self.connection.query_row(
             "
@@ -674,9 +665,17 @@ impl SqliteMatchStore {
         frames: &[RecordedReplayFrame],
     ) -> Result<(), MatchStoreError> {
         let request_json = serde_json::to_string(action)?;
-        self.save_action_json_and_replay_frames(id, action_index, &request_json, state, frames)
+        self.save_action_json_and_replay_frames(
+            id,
+            action_index,
+            &request_json,
+            state,
+            frames,
+            None,
+        )
     }
 
+    #[allow(dead_code, reason = "kept for tests and non-command store callers")]
     pub fn save_custom_action_and_replay_frames(
         &mut self,
         id: &str,
@@ -685,7 +684,26 @@ impl SqliteMatchStore {
         state: &MatchState,
         frames: &[RecordedReplayFrame],
     ) -> Result<(), MatchStoreError> {
-        self.save_action_json_and_replay_frames(id, action_index, request_json, state, frames)
+        self.save_action_json_and_replay_frames(id, action_index, request_json, state, frames, None)
+    }
+
+    pub fn save_forfeit_action_and_replay_frames(
+        &mut self,
+        id: &str,
+        action_index: u32,
+        request_json: &str,
+        state: &MatchState,
+        frames: &[RecordedReplayFrame],
+        winner: Side,
+    ) -> Result<(), MatchStoreError> {
+        self.save_action_json_and_replay_frames(
+            id,
+            action_index,
+            request_json,
+            state,
+            frames,
+            Some(winner),
+        )
     }
 
     fn save_action_json_and_replay_frames(
@@ -695,6 +713,7 @@ impl SqliteMatchStore {
         request_json: &str,
         state: &MatchState,
         frames: &[RecordedReplayFrame],
+        forfeit_winner: Option<Side>,
     ) -> Result<(), MatchStoreError> {
         let snapshot = state.to_snapshot_json()?;
         let completed_at = if state.winner.is_some() {
@@ -735,25 +754,39 @@ impl SqliteMatchStore {
             ),
             params![id, snapshot],
         )?;
-        transaction.commit()?;
         if state.winner.is_some() {
-            self.connection.execute(
-                "
-                UPDATE shared_matches
-                SET status = CASE status
-                        WHEN 'forfeited' THEN 'forfeited'
-                        ELSE 'completed'
-                    END,
-                    updated_at = unixepoch()
-                WHERE match_id = ?1
-                ",
-                params![id],
-            )?;
-            progression::award_completed_match(&mut self.connection, id)?;
+            if let Some(winner) = forfeit_winner {
+                transaction.execute(
+                    "
+                    UPDATE shared_matches
+                    SET status = 'forfeited',
+                        forfeit_winner = ?2,
+                        updated_at = unixepoch()
+                    WHERE match_id = ?1
+                    ",
+                    params![id, winner.to_db()],
+                )?;
+            } else {
+                transaction.execute(
+                    "
+                    UPDATE shared_matches
+                    SET status = CASE status
+                            WHEN 'forfeited' THEN 'forfeited'
+                            ELSE 'completed'
+                        END,
+                        updated_at = unixepoch()
+                    WHERE match_id = ?1
+                    ",
+                    params![id],
+                )?;
+            }
+            progression::award_completed_match_in_transaction(&transaction, id)?;
         }
+        transaction.commit()?;
         Ok(())
     }
 
+    #[allow(dead_code, reason = "kept for tests and legacy direct store callers")]
     pub fn mark_shared_match_forfeited(
         &mut self,
         id: &str,
@@ -982,7 +1015,7 @@ impl SqliteMatchStore {
                 side,
                 seat_token,
                 participant_user_id,
-                wizard_type,
+                hero_type,
                 deck_recipe_name,
                 deck_recipe_snapshot_json,
                 progression_loadout_json,
@@ -995,7 +1028,7 @@ impl SqliteMatchStore {
         )?;
         let rows = statement.query_map(params![match_id], |row| {
             let side = row.get::<_, String>(0)?;
-            let wizard_type = row.get::<_, Option<String>>(3)?;
+            let hero_type = row.get::<_, Option<String>>(3)?;
             let snapshot_json = row.get::<_, Option<String>>(5)?;
             let progression_loadout_json = row.get::<_, Option<String>>(6)?;
             let deck_recipe_snapshot = snapshot_json
@@ -1025,7 +1058,7 @@ impl SqliteMatchStore {
                 side: side_from_db(&side).expect("stored side should be valid"),
                 seat_token: row.get(1)?,
                 participant_user_id: row.get(2)?,
-                wizard_type: wizard_type.as_deref().and_then(wizard_type_from_db),
+                hero_type: hero_type.as_deref().and_then(hero_type_from_db),
                 deck_recipe_name: row.get(4)?,
                 deck_recipe_snapshot,
                 progression_loadout,
@@ -1042,73 +1075,12 @@ impl SqliteMatchStore {
     }
 }
 
-impl SharedMatchStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Setup => "setup",
-            Self::Active => "active",
-            Self::Completed => "completed",
-            Self::Forfeited => "forfeited",
-        }
-    }
-
-    fn from_db(value: &str) -> Self {
-        match value {
-            "setup" => Self::Setup,
-            "active" => Self::Active,
-            "completed" => Self::Completed,
-            "forfeited" => Self::Forfeited,
-            _ => Self::Setup,
-        }
-    }
-}
-
-impl Side {
-    fn to_db(self) -> &'static str {
-        match self {
-            Self::Player => "player",
-            Self::Opponent => "opponent",
-        }
-    }
-}
-
-impl WizardType {
-    fn to_db(self) -> &'static str {
-        match self {
-            Self::Runekeeper => "runekeeper",
-            Self::Pyromancer => "pyromancer",
-            Self::Chronomancer => "chronomancer",
-            Self::Warden => "warden",
-            Self::Battlemage => "battlemage",
-        }
-    }
-}
-
-fn side_from_db(value: &str) -> Option<Side> {
-    match value {
-        "player" => Some(Side::Player),
-        "opponent" => Some(Side::Opponent),
-        _ => None,
-    }
-}
-
-fn wizard_type_from_db(value: &str) -> Option<WizardType> {
-    match value {
-        "runekeeper" => Some(WizardType::Runekeeper),
-        "pyromancer" => Some(WizardType::Pyromancer),
-        "chronomancer" => Some(WizardType::Chronomancer),
-        "warden" => Some(WizardType::Warden),
-        "battlemage" => Some(WizardType::Battlemage),
-        _ => None,
-    }
-}
-
 fn insert_shared_seat(
     transaction: &Transaction<'_>,
     match_id: &str,
     side: Side,
     seat_token: &str,
-    wizard_type: Option<WizardType>,
+    hero_type: Option<HeroType>,
     joined: bool,
 ) -> Result<(), MatchStoreError> {
     let joined_expr = if joined { "unixepoch()" } else { "NULL" };
@@ -1119,7 +1091,7 @@ fn insert_shared_seat(
                 match_id,
                 side,
                 seat_token,
-                wizard_type,
+                hero_type,
                 joined_at,
                 last_seen_at
             )
@@ -1130,7 +1102,7 @@ fn insert_shared_seat(
             match_id,
             side.to_db(),
             seat_token,
-            wizard_type.map(WizardType::to_db)
+            hero_type.map(HeroType::to_db)
         ],
     )?;
     Ok(())
@@ -1142,7 +1114,7 @@ fn ready_shared_loadouts(
 ) -> Result<Option<ReadySharedLoadouts>, MatchStoreError> {
     let mut statement = transaction.prepare(
         "
-        SELECT side, wizard_type, deck_recipe_snapshot_json, progression_loadout_json, joined_at
+        SELECT side, hero_type, deck_recipe_snapshot_json, progression_loadout_json, joined_at
         FROM match_seats
         WHERE match_id = ?1
         ",
@@ -1157,18 +1129,18 @@ fn ready_shared_loadouts(
         ))
     })?;
 
-    let mut player_wizard_type = None;
-    let mut opponent_wizard_type = None;
+    let mut player_hero_type = None;
+    let mut opponent_hero_type = None;
     let mut player_deck = None;
     let mut opponent_deck = None;
     let mut player_progression = None;
     let mut opponent_progression = None;
     for row in rows {
-        let (side, wizard_type, deck_snapshot_json, progression_loadout_json, joined_at) = row?;
+        let (side, hero_type, deck_snapshot_json, progression_loadout_json, joined_at) = row?;
         if joined_at.is_none() {
             continue;
         }
-        let Some(wizard_type) = wizard_type.as_deref().and_then(wizard_type_from_db) else {
+        let Some(hero_type) = hero_type.as_deref().and_then(hero_type_from_db) else {
             continue;
         };
         let Some(deck_snapshot_json) = deck_snapshot_json else {
@@ -1182,12 +1154,12 @@ fn ready_shared_loadouts(
             .unwrap_or_default();
         match side_from_db(&side) {
             Some(Side::Player) => {
-                player_wizard_type = Some(wizard_type);
+                player_hero_type = Some(hero_type);
                 player_deck = Some(deck_snapshot);
                 player_progression = Some(progression_loadout);
             }
             Some(Side::Opponent) => {
-                opponent_wizard_type = Some(wizard_type);
+                opponent_hero_type = Some(hero_type);
                 opponent_deck = Some(deck_snapshot);
                 opponent_progression = Some(progression_loadout);
             }
@@ -1197,23 +1169,23 @@ fn ready_shared_loadouts(
 
     Ok(
         match (
-            player_wizard_type,
-            opponent_wizard_type,
+            player_hero_type,
+            opponent_hero_type,
             player_deck,
             opponent_deck,
             player_progression,
             opponent_progression,
         ) {
             (
-                Some(player_wizard_type),
-                Some(opponent_wizard_type),
+                Some(player_hero_type),
+                Some(opponent_hero_type),
                 Some(player_deck),
                 Some(opponent_deck),
                 Some(player_progression),
                 Some(opponent_progression),
             ) => Some((
-                player_wizard_type,
-                opponent_wizard_type,
+                player_hero_type,
+                opponent_hero_type,
                 player_deck,
                 opponent_deck,
                 player_progression,
@@ -1222,27 +1194,6 @@ fn ready_shared_loadouts(
             _ => None,
         },
     )
-}
-
-fn add_column_if_missing(
-    connection: &Connection,
-    table: &str,
-    column: &str,
-    definition: &str,
-) -> Result<(), MatchStoreError> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
-    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
-    for existing in columns {
-        if existing? == column {
-            return Ok(());
-        }
-    }
-
-    connection.execute(
-        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
-        [],
-    )?;
-    Ok(())
 }
 
 fn next_frame_index(transaction: &Transaction<'_>, id: &str) -> Result<u32, MatchStoreError> {
@@ -1299,209 +1250,5 @@ pub fn database_path_from_override(value: Option<OsString>) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("data/rune-lanes.sqlite3"))
 }
 
-fn readable_match_id(attempt: u32) -> String {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(1);
-    let suffix = if attempt == 0 {
-        String::new()
-    } else {
-        format!("-{}", to_base36(u64::from(attempt)))
-    };
-    format!("rl-{}{}", to_base36(millis), suffix)
-}
-
-fn random_seat_token() -> String {
-    random_hex_token(24)
-}
-
-fn random_hex_token(byte_count: usize) -> String {
-    let mut bytes = [0_u8; 24];
-    let mut dynamic_bytes;
-    let bytes = if byte_count == bytes.len() {
-        OsRng.fill_bytes(&mut bytes);
-        bytes.as_slice()
-    } else {
-        dynamic_bytes = vec![0_u8; byte_count];
-        OsRng.fill_bytes(&mut dynamic_bytes);
-        dynamic_bytes.as_slice()
-    };
-    let mut token = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        token.push_str(&format!("{byte:02x}"));
-    }
-    token
-}
-
-fn to_base36(mut value: u64) -> String {
-    const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
-    if value == 0 {
-        return "0".to_string();
-    }
-
-    let mut out = Vec::new();
-    while value > 0 {
-        out.push(DIGITS[(value % 36) as usize]);
-        value /= 36;
-    }
-    out.reverse();
-    String::from_utf8(out).expect("base36 should be valid ASCII")
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_db_path(name: &str) -> PathBuf {
-        let mut path = env::temp_dir();
-        path.push(format!(
-            "rune-lanes-{name}-{}.sqlite3",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system clock should be after epoch")
-                .as_nanos()
-        ));
-        path
-    }
-
-    #[test]
-    fn created_matches_can_be_loaded_from_sqlite() {
-        let path = test_db_path("create-load");
-        let created = {
-            let mut store = SqliteMatchStore::new(&path).expect("store should open");
-            store
-                .create_match_for_user(WizardType::default(), None)
-                .expect("match should be created")
-        };
-
-        let reopened = SqliteMatchStore::new(&path)
-            .expect("store should reopen")
-            .load_match(&created.id)
-            .expect("match should load")
-            .expect("match should exist");
-
-        assert_eq!(reopened.id, created.id);
-        assert_eq!(reopened.state.round, created.state.round);
-        assert_eq!(
-            reopened.state.player.hand.len(),
-            created.state.player.hand.len()
-        );
-        assert_eq!(
-            reopened.state.opponent.deck_count,
-            created.state.opponent.deck_count
-        );
-
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn missing_matches_load_as_none() {
-        let path = test_db_path("missing");
-        let store = SqliteMatchStore::new(&path).expect("store should open");
-
-        let missing = store
-            .load_match("rl-missing")
-            .expect("lookup should succeed");
-
-        assert!(missing.is_none());
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn legacy_matches_without_replay_metadata_are_excluded_from_replays() {
-        let path = test_db_path("legacy");
-        let store = SqliteMatchStore::new(&path).expect("store should open");
-        let legacy_state = MatchState::new();
-        let snapshot = legacy_state
-            .to_snapshot_json()
-            .expect("snapshot should serialize");
-        store
-            .connection
-            .execute(
-                "
-                INSERT INTO matches (id, snapshot_json, created_at, updated_at)
-                VALUES (?1, ?2, unixepoch(), unixepoch())
-                ",
-                params!["rl-legacy", snapshot],
-            )
-            .expect("legacy row should insert");
-
-        assert!(
-            store
-                .list_replayable_matches_for_user(1)
-                .expect("archive should load")
-                .is_empty()
-        );
-        assert!(
-            store
-                .load_replay("rl-legacy")
-                .expect("replay lookup should succeed")
-                .is_none()
-        );
-
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn replayable_shared_matches_are_filtered_to_joined_accounts() {
-        let path = test_db_path("shared-participants");
-        let mut store = SqliteMatchStore::new(&path).expect("store should open");
-
-        let created = store
-            .create_shared_match(Some(99))
-            .expect("shared match should be created");
-        store
-            .join_shared_match(
-                &created.match_id,
-                &created.player_token,
-                WizardType::Chronomancer,
-                deck_library::starter_deck_snapshot(),
-                MatchProgressionLoadout::default(),
-                Some(1),
-            )
-            .expect("player should join");
-        store
-            .join_shared_match(
-                &created.match_id,
-                &created.opponent_token,
-                WizardType::Pyromancer,
-                deck_library::starter_deck_snapshot(),
-                MatchProgressionLoadout::default(),
-                Some(2),
-            )
-            .expect("opponent should join");
-        store
-            .connection
-            .execute(
-                "UPDATE shared_matches SET status = 'completed' WHERE match_id = ?1",
-                params![&created.match_id],
-            )
-            .expect("shared match should be markable complete");
-
-        let player_matches = store
-            .list_replayable_matches_for_user(1)
-            .expect("archive should load");
-        let unrelated_matches = store
-            .list_replayable_matches_for_user(3)
-            .expect("archive should load");
-        let creator_matches = store
-            .list_replayable_matches_for_user(99)
-            .expect("archive should load");
-
-        assert_eq!(player_matches.len(), 1);
-        assert_eq!(player_matches[0].id, created.match_id);
-        assert!(unrelated_matches.is_empty());
-        assert!(creator_matches.is_empty());
-
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn database_path_override_uses_given_value() {
-        assert_eq!(
-            database_path_from_override(Some(OsString::from("/tmp/rune-lanes-test.sqlite3"))),
-            PathBuf::from("/tmp/rune-lanes-test.sqlite3")
-        );
-    }
-}
+mod tests;

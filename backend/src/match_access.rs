@@ -33,6 +33,15 @@ impl<'a> MatchAccess<'a> {
 
     pub fn can_load_replay(&self, actor: &Actor, match_id: &str) -> bool {
         self.account_can_access_owned_match(actor, match_id)
+            || match actor {
+                Actor::Account { user_id } => self
+                    .store
+                    .completed_shared_participant_side(match_id, *user_id)
+                    .ok()
+                    .flatten()
+                    .is_some(),
+                _ => false,
+            }
     }
 
     pub fn list_profile_matches(

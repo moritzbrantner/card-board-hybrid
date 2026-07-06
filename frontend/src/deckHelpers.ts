@@ -8,7 +8,7 @@ import type {
   SkillNodeDefinition,
   SoloAiOpponentSelection,
   SystemDeckRecipe,
-  WizardType,
+  HeroType,
 } from "./types";
 
 export function countsFromCards(cards: DeckCardCount[]) {
@@ -46,7 +46,7 @@ export function rarityLabel(rarity: Rarity) {
 
 export function aiSelectionFromValue(
   value: string,
-  accountWizardType: WizardType,
+  accountHeroType: HeroType,
 ): SoloAiOpponentSelection | null {
   if (value.startsWith("system:")) {
     return { source: "system", systemDeckId: value.slice("system:".length) };
@@ -54,7 +54,7 @@ export function aiSelectionFromValue(
   if (value.startsWith("account:")) {
     const deckId = Number(value.slice("account:".length));
     return Number.isFinite(deckId)
-      ? { source: "account", deckId, wizardType: accountWizardType }
+      ? { source: "account", deckId, heroType: accountHeroType }
       : null;
   }
   return null;
@@ -93,7 +93,7 @@ export type HomeLoadout =
       kind: "system";
       id: string;
       name: string;
-      wizardType: WizardType;
+      heroType: HeroType;
       cardCount: number;
       legal: boolean;
       runeIds: string[];
@@ -104,7 +104,7 @@ export type HomeLoadout =
       kind: "account";
       id: string;
       name: string;
-      wizardType: WizardType;
+      heroType: HeroType;
       cardCount: number;
       legal: boolean;
       runeIds: string[];
@@ -118,7 +118,7 @@ export function systemDeckToLoadout(deck: SystemDeckRecipe): HomeLoadout {
     kind: "system",
     id: `system:${deck.id}`,
     name: deck.name,
-    wizardType: deck.wizardType,
+    heroType: deck.heroType,
     cardCount: deck.legality.totalCards,
     legal: deck.legality.legal,
     runeIds: [],
@@ -131,7 +131,7 @@ export function accountDeckToLoadout(deck: DeckRecipeSummary): HomeLoadout {
     kind: "account",
     id: `account:${deck.id}`,
     name: deck.name,
-    wizardType: deck.wizardType,
+    heroType: deck.heroType,
     cardCount: deck.legality.totalCards,
     legal: deck.legality.legal,
     runeIds: deck.runeIds,
@@ -147,18 +147,18 @@ export function runeNamesForLoadout(progression: ProgressionResponse | null, run
   return runeIds.map((runeId) => progression.runes.find((rune) => rune.id === runeId)?.name ?? runeId);
 }
 
-export function skillNamesForWizard(progression: ProgressionResponse | null, wizardType: WizardType) {
+export function skillNamesForHero(progression: ProgressionResponse | null, heroType: HeroType) {
   if (!progression) {
     return [];
   }
-  const wizard = progression.wizards.find((candidate) => candidate.wizardType === wizardType);
-  const tree = progression.skillTrees.find((candidate) => candidate.wizardType === wizardType);
+  const hero = progression.heroes.find((candidate) => candidate.heroType === heroType);
+  const tree = progression.skillTrees.find((candidate) => candidate.heroType === heroType);
   if (!tree) {
     return [];
   }
   const activeSkillIds = new Set([
     ...tree.nodes.filter((node) => node.root).map((node) => node.id),
-    ...(wizard?.unlockedSkillIds ?? []),
+    ...(hero?.unlockedSkillIds ?? []),
   ]);
   return tree.nodes
     .filter((node: SkillNodeDefinition) => activeSkillIds.has(node.id))

@@ -1,21 +1,27 @@
-import { ChevronLeft, ChevronRight, Eye, EyeOff, History, Play } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, EyeOff, History, LogIn, Play } from "lucide-react";
 import { useEffect, useState } from "react";
-import { loadReplay } from "../api";
+import { ApiRequestError, loadReplay, loadSharedReplay } from "../api";
 import type { AccountPreferenceProps, ReplayLoadState } from "../appTypes";
 import { createBoardAnimationCue } from "../boardAnimations";
 import { Board, PlayerBadge } from "../components/board";
 import { AccountActions, ShellMessage } from "../components/common";
 import { useMatchChromeMinimized } from "../appHooks";
 import { eventDetail, eventSideLabel, eventTitle, sideLabel } from "../labels";
+import { protectedLoginRoute } from "../routes";
+import { shouldOfferCompletedMatchLogin } from "./privateMatchAccess";
 
 export function ReplayPage({
   matchId,
+  seatToken,
   onNavigate,
   currentUser,
   onSignOut,
+  allowSignOut,
+  loginNextPath,
   visualPreferences,
 }: {
   matchId: string;
+  seatToken?: string;
   onNavigate: (to: string) => void;
 } & AccountPreferenceProps) {
   const boardVisualMode = visualPreferences.preferences.boardVisualMode;
@@ -27,21 +33,47 @@ export function ReplayPage({
   useEffect(() => {
     setLoadState({ status: "loading" });
     setFrameIndex(0);
-    loadReplay(matchId)
+    const load = seatToken ? loadSharedReplay(matchId, seatToken) : loadReplay(matchId);
+    load
       .then((response) => setLoadState({ status: "ready", replay: response }))
       .catch((error: unknown) =>
         setLoadState({
           status: "error",
           message: error instanceof Error ? error.message : "Could not load replay",
+          httpStatus: error instanceof ApiRequestError ? error.status : undefined,
         }),
       );
-  }, [matchId]);
+  }, [matchId, seatToken]);
 
   if (loadState.status === "loading") {
     return <ShellMessage title={`Replay ${matchId}`} message="Loading replay" />;
   }
 
   if (loadState.status === "error") {
+    if (shouldOfferCompletedMatchLogin({ currentUser, seatToken, httpStatus: loadState.httpStatus })) {
+      const loginPath = protectedLoginRoute(
+        loginNextPath ?? `/matches/${encodeURIComponent(matchId)}/replay`,
+      );
+
+      return (
+        <ShellMessage
+          title={`Replay ${matchId}`}
+          message="Sign in to view this replay"
+          actions={
+            <>
+              <button className="primary-button" type="button" onClick={() => onNavigate(loginPath)}>
+                <LogIn size={18} />
+                Sign In
+              </button>
+              <button className="secondary-link" type="button" onClick={() => onNavigate("/matches")}>
+                Match Archive
+              </button>
+            </>
+          }
+        />
+      );
+    }
+
     return (
       <ShellMessage
         title={`Replay ${matchId}`}
@@ -80,7 +112,13 @@ export function ReplayPage({
             <p className="match-id">Match {matchId}</p>
           </div>
           <div className="actions">
-            <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+            <AccountActions
+              currentUser={currentUser}
+              onNavigate={onNavigate}
+              onSignOut={onSignOut}
+              allowSignOut={allowSignOut}
+              loginNextPath={loginNextPath}
+            />
             <button
               className="icon-button"
               type="button"

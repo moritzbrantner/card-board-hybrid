@@ -1,7 +1,7 @@
-import type { WizardType } from "./types";
+import type { HeroType } from "./types";
 
-export type WizardOption = {
-  id: WizardType;
+export type HeroOption = {
+  id: HeroType;
   name: string;
   role: string;
   hp: number;
@@ -11,7 +11,7 @@ export type WizardOption = {
   token: string;
 };
 
-export const WIZARD_OPTIONS = [
+export const HERO_OPTIONS = [
   {
     id: "runekeeper",
     name: "Runekeeper",
@@ -62,4 +62,34 @@ export const WIZARD_OPTIONS = [
     text: "Tougher frontline duelist with fewer actions.",
     token: "Bat",
   },
-] as const satisfies readonly WizardOption[];
+  {
+    id: "barbarian",
+    name: "Barbarian",
+    role: "Brawler",
+    hp: 22,
+    attack: 3,
+    ap: 2,
+    text: "Heavy melee pressure that gains mana when the hero destroys units.",
+    token: "Bar",
+  },
+  {
+    id: "archer",
+    name: "Archer",
+    role: "Skirmisher",
+    hp: 16,
+    attack: 2,
+    ap: 4,
+    text: "Fast positioning with range-2 hero attacks.",
+    token: "Arc",
+  },
+  {
+    id: "builder",
+    name: "Builder",
+    role: "Support",
+    hp: 24,
+    attack: 1,
+    ap: 2,
+    text: "Durable support for armor-heavy boards.",
+    token: "Bld",
+  },
+] as const satisfies readonly HeroOption[];

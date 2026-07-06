@@ -2,7 +2,7 @@
 
 Rune Lanes is a small vertical slice for a card game / board game hybrid.
 
-Players control wizards on a radius-3 hex arena. Cards cost mana and wizard action points to summon units or cast spells; units then spend their own action points to move across adjacent hexes and attack neighboring enemies.
+Players control heroes on a radius-3 hex arena. Cards cost mana and hero action points to summon units or cast spells; units then spend their own action points to move across adjacent hexes and attack enemies within their attack range.
 
 ## Stack
 
@@ -79,7 +79,7 @@ including isolated temporary databases for tests or local experiments.
 
 The match picker can create a solo AI match or a multiplayer match. Multiplayer
 matches create private seat links for Player and Opponent. The creator shares the
-invite link, the invitee chooses a wizard, and both browsers play over a
+invite link, the invitee chooses a hero, and both browsers play over a
 server-authoritative WebSocket connection. Active multiplayer matches are only
 viewable from their seat links; completed matches can be replayed from the
 archive.

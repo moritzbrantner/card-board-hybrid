@@ -1,6 +1,7 @@
 use super::{
-    ActionTarget, Card, CardKind, CardSummary, CarriedItem, HexBoard, HexCoord, ItemActiveEffect,
-    ItemPassiveEffect, MatchError, MatchProgressionLoadout, PieceView, Side, SpellEffect, Unit,
+    ActionTarget, BuffTargetPolicy, Card, CardKind, CardSummary, CarriedItem, HexBoard, HexCoord,
+    ItemActiveEffect, ItemPassiveEffect, MatchError, MatchProgressionLoadout, PieceView, Side,
+    SpellEffect, Unit,
 };
 
 pub(crate) struct PlannedUnitPlay {
@@ -25,6 +26,8 @@ pub(crate) enum ResolvedSpellEffect {
         piece_id: String,
         attack: i32,
         armor: i32,
+        max_ap: i8,
+        targets: BuffTargetPolicy,
     },
     Damage {
         piece_ids: Vec<String>,
@@ -83,7 +86,7 @@ pub(crate) fn plan_spell_play(
     target: ActionTarget,
     side: Side,
     caster_position: HexCoord,
-    caster_wizard_id: &str,
+    caster_hero_id: &str,
     target_piece: &PieceView,
 ) -> Result<PlannedSpellPlay, MatchError> {
     let CardKind::Spell { priority, .. } = &card.kind else {
@@ -98,7 +101,7 @@ pub(crate) fn plan_spell_play(
         return Err(MatchError::PieceNotFound);
     }
 
-    if !spell_target_is_legal(card, side, caster_position, caster_wizard_id, target_piece) {
+    if !spell_target_is_legal(card, side, caster_position, caster_hero_id, target_piece) {
         return Err(MatchError::InvalidTarget);
     }
 
@@ -138,14 +141,12 @@ pub(crate) fn legal_spell_targets<'a>(
     card: &Card,
     side: Side,
     caster_position: HexCoord,
-    caster_wizard_id: &str,
+    caster_hero_id: &str,
     candidates: impl IntoIterator<Item = &'a PieceView>,
 ) -> Vec<&'a PieceView> {
     candidates
         .into_iter()
-        .filter(|target| {
-            spell_target_is_legal(card, side, caster_position, caster_wizard_id, target)
-        })
+        .filter(|target| spell_target_is_legal(card, side, caster_position, caster_hero_id, target))
         .collect()
 }
 
@@ -153,7 +154,7 @@ fn spell_target_is_legal(
     card: &Card,
     side: Side,
     caster_position: HexCoord,
-    caster_wizard_id: &str,
+    caster_hero_id: &str,
     target: &PieceView,
 ) -> bool {
     let CardKind::Spell { range, effect, .. } = &card.kind else {
@@ -161,18 +162,20 @@ fn spell_target_is_legal(
     };
 
     caster_position.distance(target.position) <= i32::from(*range)
-        && validate_spell_target(side, effect, caster_position, caster_wizard_id, target).is_ok()
+        && validate_spell_target(side, effect, caster_position, caster_hero_id, target).is_ok()
 }
 
 pub(crate) fn validate_spell_target(
     side: Side,
     effect: &SpellEffect,
     caster_position: HexCoord,
-    caster_wizard_id: &str,
+    caster_hero_id: &str,
     target: &PieceView,
 ) -> Result<(), MatchError> {
     match effect {
-        SpellEffect::Heal { .. } | SpellEffect::Buff { .. } if target.side != side => {
+        SpellEffect::Heal { .. } | SpellEffect::Buff { .. } | SpellEffect::StatBuff { .. }
+            if target.side != side =>
+        {
             Err(MatchError::InvalidTarget)
         }
         SpellEffect::Damage { .. }
@@ -182,7 +185,7 @@ pub(crate) fn validate_spell_target(
         {
             Err(MatchError::InvalidTarget)
         }
-        SpellEffect::Draw { .. } if target.side != side || target.id != caster_wizard_id => {
+        SpellEffect::Draw { .. } if target.side != side || target.id != caster_hero_id => {
             Err(MatchError::InvalidTarget)
         }
         SpellEffect::LineDamage { .. }
@@ -190,7 +193,12 @@ pub(crate) fn validate_spell_target(
         {
             Err(MatchError::InvalidTarget)
         }
-        SpellEffect::Buff { .. } if target.id == caster_wizard_id => Err(MatchError::InvalidTarget),
+        SpellEffect::Buff { .. } if target.id == caster_hero_id => Err(MatchError::InvalidTarget),
+        SpellEffect::StatBuff { targets, .. }
+            if !target_policy_allows(*targets, target.is_hero) =>
+        {
+            Err(MatchError::InvalidTarget)
+        }
         _ => Ok(()),
     }
 }
@@ -212,7 +220,7 @@ pub(crate) fn resolve_spell(
     card: &CardSummary,
     side: Side,
     caster_position: HexCoord,
-    caster_wizard_id: &str,
+    caster_hero_id: &str,
     target: &PieceView,
     enemy_pieces: &[PieceView],
     progression: &MatchProgressionLoadout,
@@ -221,7 +229,7 @@ pub(crate) fn resolve_spell(
         return Err(MatchError::InvalidTarget);
     };
 
-    validate_spell_target(side, effect, caster_position, caster_wizard_id, target)?;
+    validate_spell_target(side, effect, caster_position, caster_hero_id, target)?;
 
     let resolved = match effect {
         SpellEffect::Heal { amount } => ResolvedSpell {
@@ -238,6 +246,25 @@ pub(crate) fn resolve_spell(
                 piece_id: target.id.clone(),
                 attack: *attack,
                 armor: *armor,
+                max_ap: 0,
+                targets: BuffTargetPolicy::UnitsOnly,
+            },
+            log: SpellLog::Buff {
+                piece_id: target.id.clone(),
+            },
+        },
+        SpellEffect::StatBuff {
+            attack,
+            armor,
+            max_ap,
+            targets,
+        } => ResolvedSpell {
+            effect: ResolvedSpellEffect::Buff {
+                piece_id: target.id.clone(),
+                attack: *attack,
+                armor: *armor,
+                max_ap: *max_ap,
+                targets: *targets,
             },
             log: SpellLog::Buff {
                 piece_id: target.id.clone(),
@@ -290,6 +317,14 @@ pub(crate) fn resolve_spell(
     };
 
     Ok(resolved)
+}
+
+pub(crate) fn target_policy_allows(targets: BuffTargetPolicy, is_hero: bool) -> bool {
+    match targets {
+        BuffTargetPolicy::UnitsOnly => !is_hero,
+        BuffTargetPolicy::HeroesOnly => is_hero,
+        BuffTargetPolicy::UnitsAndHeroes => true,
+    }
 }
 
 pub(crate) fn equip_item_from_card(
@@ -378,6 +413,7 @@ pub(crate) fn summon_unit_from_card(
         name: card.name.clone(),
         template_id: Some(card.template_id.clone()),
         attack: *attack,
+        attack_range: 1,
         armor,
         max_armor: armor,
         position: coord,

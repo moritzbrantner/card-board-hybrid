@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 use super::{
-    ActionTarget, Card, CardKind, HexCoord, PieceView, Side, SpellEffect, card_interactions,
+    ActionTarget, BuildingEffect, Card, CardKind, HexCoord, PieceView, Side, SpellEffect,
+    card_interactions,
 };
 
 #[derive(Clone, Debug)]
@@ -13,10 +14,11 @@ impl Default for SoloAiPolicy {
     fn default() -> Self {
         Self {
             rules: vec![
-                SoloAiRuleId::AdjacentAttack,
+                SoloAiRuleId::InRangeAttack,
                 SoloAiRuleId::UsefulSpell,
+                SoloAiRuleId::BuildManaSource,
                 SoloAiRuleId::HighestCostUnitSummon,
-                SoloAiRuleId::MoveTowardPlayerWizard,
+                SoloAiRuleId::MoveTowardPlayerHero,
             ],
         }
     }
@@ -40,17 +42,18 @@ impl SoloAiPolicy {
 
     fn evaluate_rule(&self, rule: SoloAiRuleId, view: &SoloAiView) -> Option<SoloAiActionIntent> {
         match rule {
-            SoloAiRuleId::AdjacentAttack => self.adjacent_attack(view),
+            SoloAiRuleId::InRangeAttack => self.in_range_attack(view),
             SoloAiRuleId::UsefulSpell => self.useful_spell(view),
+            SoloAiRuleId::BuildManaSource => self.build_mana_source(view),
             SoloAiRuleId::HighestCostUnitSummon => self.highest_cost_unit_summon(view),
-            SoloAiRuleId::MoveTowardPlayerWizard => self.move_toward_player_wizard(view),
+            SoloAiRuleId::MoveTowardPlayerHero => self.move_toward_player_hero(view),
         }
     }
 
-    fn adjacent_attack(&self, view: &SoloAiView) -> Option<SoloAiActionIntent> {
+    fn in_range_attack(&self, view: &SoloAiView) -> Option<SoloAiActionIntent> {
         let mut attackers = view.opponent_pieces.clone();
         attackers.sort_by_key(|piece| {
-            if piece.id == view.opponent_wizard.id {
+            if piece.id == view.opponent_hero.id {
                 1
             } else {
                 0
@@ -61,16 +64,16 @@ impl SoloAiPolicy {
             if attacker.ap_remaining == 0 || attacker.has_attacked {
                 continue;
             }
-            if attacker.position.is_adjacent(view.player_wizard.position) {
+            if piece_can_attack(&attacker, &view.player_hero) {
                 return Some(SoloAiActionIntent::Attack {
                     attacker_id: attacker.id,
-                    target_id: view.player_wizard.id.clone(),
+                    target_id: view.player_hero.id.clone(),
                 });
             }
             if let Some(target) = view
                 .player_units
                 .iter()
-                .find(|unit| attacker.position.is_adjacent(unit.position))
+                .find(|unit| piece_can_attack(&attacker, unit))
             {
                 return Some(SoloAiActionIntent::Attack {
                     attacker_id: attacker.id,
@@ -83,7 +86,7 @@ impl SoloAiPolicy {
     }
 
     fn useful_spell(&self, view: &SoloAiView) -> Option<SoloAiActionIntent> {
-        if view.opponent_wizard.ap_remaining == 0 {
+        if view.opponent_hero.ap_remaining == 0 {
             return None;
         }
 
@@ -102,7 +105,7 @@ impl SoloAiPolicy {
                     legal_targets
                         .iter()
                         .copied()
-                        .find(|piece| piece.id == view.player_wizard.id)
+                        .find(|piece| piece.id == view.player_hero.id)
                         .or_else(|| legal_targets.into_iter().next())
                 }
                 SpellEffect::AreaDamage { .. } | SpellEffect::LineDamage { .. } => {
@@ -115,7 +118,7 @@ impl SoloAiPolicy {
                         .into_iter()
                         .find(|piece| view.damaged_piece_ids.contains(&piece.id))
                 }
-                SpellEffect::Buff { .. } => {
+                SpellEffect::Buff { .. } | SpellEffect::StatBuff { .. } => {
                     legal_spell_targets_for_ai(card, view, &view.opponent_units)
                         .into_iter()
                         .max_by_key(|piece| piece.attack)
@@ -125,13 +128,13 @@ impl SoloAiPolicy {
                         && legal_spell_targets_for_ai(
                             card,
                             view,
-                            std::slice::from_ref(&view.opponent_wizard),
+                            std::slice::from_ref(&view.opponent_hero),
                         )
                         .into_iter()
                         .next()
                         .is_some()
                     {
-                        Some(&view.opponent_wizard)
+                        Some(&view.opponent_hero)
                     } else {
                         None
                     }
@@ -152,7 +155,7 @@ impl SoloAiPolicy {
     }
 
     fn highest_cost_unit_summon(&self, view: &SoloAiView) -> Option<SoloAiActionIntent> {
-        if view.opponent_wizard.ap_remaining == 0 {
+        if view.opponent_hero.ap_remaining == 0 {
             return None;
         }
 
@@ -171,18 +174,47 @@ impl SoloAiPolicy {
         })
     }
 
-    fn move_toward_player_wizard(&self, view: &SoloAiView) -> Option<SoloAiActionIntent> {
-        let player_wizard = view.player_wizard.position;
+    fn build_mana_source(&self, view: &SoloAiView) -> Option<SoloAiActionIntent> {
+        if view.opponent_hero.ap_remaining == 0 {
+            return None;
+        }
+
+        let card = view.opponent_hand.iter().find(|card| {
+            card.cost <= view.opponent_mana
+                && matches!(
+                    card.kind,
+                    CardKind::ManaSource
+                        | CardKind::Building {
+                            effect: BuildingEffect::TurnStartMana { .. }
+                        }
+                )
+        })?;
+        let coord = self.best_mana_source_hex(view)?;
+
+        Some(SoloAiActionIntent::PlayCard {
+            card_id: card.id.clone(),
+            target: ActionTarget::Hex { coord },
+        })
+    }
+
+    fn move_toward_player_hero(&self, view: &SoloAiView) -> Option<SoloAiActionIntent> {
+        let player_hero = view.player_hero.position;
         let (piece, destination) = view
             .opponent_pieces
             .iter()
             .filter(|piece| piece.ap_remaining > 0)
+            .filter(|piece| {
+                !view
+                    .player_pieces
+                    .iter()
+                    .any(|target| piece_can_attack(piece, target))
+            })
             .filter_map(|piece| {
                 self.empty_neighbors(view, piece.position)
                     .into_iter()
-                    .min_by_key(|coord| coord.distance(player_wizard))
+                    .min_by_key(|coord| coord.distance(player_hero))
                     .filter(|coord| {
-                        coord.distance(player_wizard) < piece.position.distance(player_wizard)
+                        coord.distance(player_hero) < piece.position.distance(player_hero)
                     })
                     .map(|coord| (piece, coord))
             })
@@ -195,9 +227,16 @@ impl SoloAiPolicy {
     }
 
     fn best_summon_hex(&self, view: &SoloAiView) -> Option<HexCoord> {
-        self.empty_neighbors(view, view.opponent_wizard.position)
+        self.empty_neighbors(view, view.opponent_hero.position)
             .into_iter()
-            .min_by_key(|coord| coord.distance(view.player_wizard.position))
+            .min_by_key(|coord| coord.distance(view.player_hero.position))
+    }
+
+    fn best_mana_source_hex(&self, view: &SoloAiView) -> Option<HexCoord> {
+        self.empty_neighbors(view, view.opponent_hero.position)
+            .into_iter()
+            .filter(|coord| !view.mana_sources.contains(coord))
+            .min_by_key(|coord| coord.distance(view.player_hero.position))
     }
 
     fn empty_neighbors(&self, view: &SoloAiView, coord: HexCoord) -> Vec<HexCoord> {
@@ -218,16 +257,16 @@ fn legal_spell_targets_for_ai<'a>(
     card_interactions::legal_spell_targets(
         card,
         Side::Opponent,
-        view.opponent_wizard.position,
-        &view.opponent_wizard.id,
+        view.opponent_hero.position,
+        &view.opponent_hero.id,
         candidates.iter(),
     )
 }
 
 #[derive(Clone, Debug)]
 pub(super) struct SoloAiView {
-    pub(super) opponent_wizard: PieceView,
-    pub(super) player_wizard: PieceView,
+    pub(super) opponent_hero: PieceView,
+    pub(super) player_hero: PieceView,
     pub(super) opponent_pieces: Vec<PieceView>,
     pub(super) player_pieces: Vec<PieceView>,
     pub(super) opponent_units: Vec<PieceView>,
@@ -238,6 +277,7 @@ pub(super) struct SoloAiView {
     pub(super) opponent_discard_count: usize,
     pub(super) valid_hexes: HashSet<HexCoord>,
     pub(super) occupied_hexes: HashSet<HexCoord>,
+    pub(super) mana_sources: HashSet<HexCoord>,
     pub(super) damaged_piece_ids: HashSet<String>,
 }
 
@@ -265,10 +305,16 @@ pub(super) enum SoloAiActionIntent {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SoloAiRuleId {
-    AdjacentAttack,
+    InRangeAttack,
     UsefulSpell,
+    BuildManaSource,
     HighestCostUnitSummon,
-    MoveTowardPlayerWizard,
+    MoveTowardPlayerHero,
+}
+
+fn piece_can_attack(attacker: &PieceView, target: &PieceView) -> bool {
+    let distance = attacker.position.distance(target.position);
+    distance >= 1 && distance <= i32::from(attacker.attack_range)
 }
 
 #[cfg(test)]
@@ -281,21 +327,21 @@ mod tests {
     }
 
     fn base_view() -> SoloAiView {
-        let opponent_wizard = piece("opponent-wizard", Side::Opponent, hex(0, -3));
-        let player_wizard = piece("player-wizard", Side::Player, hex(0, 3));
-        let opponent_pieces = vec![opponent_wizard.clone()];
-        let player_pieces = vec![player_wizard.clone()];
+        let opponent_hero = piece("opponent-hero", Side::Opponent, hex(0, -3));
+        let player_hero = piece("player-hero", Side::Player, hex(0, 3));
+        let opponent_pieces = vec![opponent_hero.clone()];
+        let player_pieces = vec![player_hero.clone()];
         let valid_hexes = (-3..=3)
             .flat_map(|q| (-3..=3).map(move |r| hex(q, r)))
             .filter(|coord| coord.distance(hex(0, 0)) <= 3)
             .collect();
-        let occupied_hexes = vec![opponent_wizard.position, player_wizard.position]
+        let occupied_hexes = vec![opponent_hero.position, player_hero.position]
             .into_iter()
             .collect();
 
         SoloAiView {
-            opponent_wizard,
-            player_wizard,
+            opponent_hero,
+            player_hero,
             opponent_pieces,
             player_pieces,
             opponent_units: Vec::new(),
@@ -306,6 +352,7 @@ mod tests {
             opponent_discard_count: 0,
             valid_hexes,
             occupied_hexes,
+            mana_sources: HashSet::new(),
             damaged_piece_ids: HashSet::new(),
         }
     }
@@ -316,8 +363,10 @@ mod tests {
             side,
             position,
             attack: 1,
+            attack_range: 1,
             ap_remaining: 1,
             has_attacked: false,
+            is_hero: id.ends_with("hero"),
         }
     }
 
@@ -366,10 +415,11 @@ mod tests {
         assert_eq!(
             SoloAiPolicy::default().rule_order(),
             &[
-                SoloAiRuleId::AdjacentAttack,
+                SoloAiRuleId::InRangeAttack,
                 SoloAiRuleId::UsefulSpell,
+                SoloAiRuleId::BuildManaSource,
                 SoloAiRuleId::HighestCostUnitSummon,
-                SoloAiRuleId::MoveTowardPlayerWizard,
+                SoloAiRuleId::MoveTowardPlayerHero,
             ]
         );
     }
@@ -391,7 +441,7 @@ mod tests {
             policy_decision(view),
             SoloAiDecision::TakeAction(SoloAiActionIntent::Attack {
                 attacker_id: "opponent-unit".to_string(),
-                target_id: "player-wizard".to_string(),
+                target_id: "player-hero".to_string(),
             })
         );
     }
@@ -413,14 +463,14 @@ mod tests {
         assert_eq!(
             policy_decision(view),
             SoloAiDecision::TakeAction(SoloAiActionIntent::MovePiece {
-                piece_id: "opponent-wizard".to_string(),
+                piece_id: "opponent-hero".to_string(),
                 to: hex(0, -2),
             })
         );
     }
 
     #[test]
-    fn damage_spell_targets_player_wizard_when_legal() {
+    fn damage_spell_targets_player_hero_when_legal() {
         let mut view = base_view();
         let player_unit = piece("player-unit", Side::Player, hex(0, 2));
         view.player_pieces.push(player_unit.clone());
@@ -434,7 +484,7 @@ mod tests {
             SoloAiDecision::TakeAction(SoloAiActionIntent::PlayCard {
                 card_id: "damage".to_string(),
                 target: ActionTarget::Piece {
-                    piece_id: "player-wizard".to_string(),
+                    piece_id: "player-hero".to_string(),
                 },
             })
         );
@@ -449,19 +499,19 @@ mod tests {
         assert_eq!(
             policy_decision(view.clone()),
             SoloAiDecision::TakeAction(SoloAiActionIntent::MovePiece {
-                piece_id: "opponent-wizard".to_string(),
+                piece_id: "opponent-hero".to_string(),
                 to: hex(0, -2),
             })
         );
 
-        view.damaged_piece_ids.insert("opponent-wizard".to_string());
+        view.damaged_piece_ids.insert("opponent-hero".to_string());
 
         assert_eq!(
             policy_decision(view),
             SoloAiDecision::TakeAction(SoloAiActionIntent::PlayCard {
                 card_id: "heal".to_string(),
                 target: ActionTarget::Piece {
-                    piece_id: "opponent-wizard".to_string(),
+                    piece_id: "opponent-hero".to_string(),
                 },
             })
         );
@@ -523,8 +573,8 @@ mod tests {
         let legal_target_ids: HashSet<_> = card_interactions::legal_spell_targets(
             &damage_spell,
             Side::Opponent,
-            view.opponent_wizard.position,
-            &view.opponent_wizard.id,
+            view.opponent_hero.position,
+            &view.opponent_hero.id,
             view.player_pieces.iter(),
         )
         .into_iter()
@@ -550,13 +600,31 @@ mod tests {
     }
 
     #[test]
+    fn mana_source_card_builds_before_unit_summon() {
+        let mut view = base_view();
+        view.opponent_hand = vec![
+            unit_card("unit", 2),
+            card("mana-well", 2, CardKind::ManaSource),
+        ];
+        view.opponent_mana = 3;
+
+        assert_eq!(
+            policy_decision(view),
+            SoloAiDecision::TakeAction(SoloAiActionIntent::PlayCard {
+                card_id: "mana-well".to_string(),
+                target: ActionTarget::Hex { coord: hex(0, -2) },
+            })
+        );
+    }
+
+    #[test]
     fn move_picks_a_closer_empty_neighboring_hex() {
         let view = base_view();
 
         assert_eq!(
             policy_decision(view),
             SoloAiDecision::TakeAction(SoloAiActionIntent::MovePiece {
-                piece_id: "opponent-wizard".to_string(),
+                piece_id: "opponent-hero".to_string(),
                 to: hex(0, -2),
             })
         );
@@ -565,7 +633,7 @@ mod tests {
     #[test]
     fn no_legal_rule_returns_finish_turn() {
         let mut view = base_view();
-        view.opponent_wizard.ap_remaining = 0;
+        view.opponent_hero.ap_remaining = 0;
         view.opponent_pieces[0].ap_remaining = 0;
 
         assert_eq!(policy_decision(view), SoloAiDecision::FinishTurn);

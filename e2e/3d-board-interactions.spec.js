@@ -8,8 +8,8 @@ test("renders Solo matches as a full-screen board with persistent collapsible ch
   await page.setViewportSize({ width: 1280, height: 720 });
   await useStoredBoardVisualMode(page, "3d");
   const match = playableMatch({
-    playerWizard: { q: 0, r: 1 },
-    opponentWizard: { q: 1, r: 1 },
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
     hand: [sparkJolt()],
     prioritySide: "player",
     actionStack: [
@@ -20,7 +20,7 @@ test("renders Solo matches as a full-screen board with persistent collapsible ch
         action: {
           type: "castSpell",
           card: { id: "pending-card", templateId: "spark-jolt", name: "Spark Jolt" },
-          targetId: "player-wizard",
+          targetId: "player-hero",
         },
       },
     ],
@@ -37,7 +37,7 @@ test("renders Solo matches as a full-screen board with persistent collapsible ch
   await expect(page.getByText("You", { exact: true })).toBeVisible();
   await expect(page.getByText("Opponent", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Enemy hand, 0 cards")).toBeVisible();
-  await expect(page.getByRole("button", { name: /Spark Jolt/ })).toBeVisible();
+  await expect(page.getByLabel("Hand").getByRole("button", { name: /Spark Jolt/ })).toBeVisible();
 
   await expect(page.getByRole("button", { name: "Pass Priority" })).toBeVisible();
   await page.getByRole("button", { name: "Minimize match chrome" }).click();
@@ -68,8 +68,8 @@ test("renders replays as a full-screen board with persistent collapsible chrome 
   await useStoredBoardVisualMode(page, "3d");
   await page.addInitScript((key) => localStorage.removeItem(key), MATCH_CHROME_STORAGE_KEY);
   const match = playableMatch({
-    playerWizard: { q: 0, r: 1 },
-    opponentWizard: { q: 1, r: 1 },
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
   });
   await mockReplayApi(page, match);
 
@@ -107,8 +107,8 @@ test("renders replays as a full-screen board with persistent collapsible chrome 
 test("moves and attacks through the 3D board", async ({ page }) => {
   await useStoredBoardVisualMode(page, "3d");
   let match = playableMatch({
-    playerWizard: { q: 0, r: 1 },
-    opponentWizard: { q: 1, r: 1 },
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
   });
   const actions = [];
 
@@ -116,15 +116,15 @@ test("moves and attacks through the 3D board", async ({ page }) => {
     actions.push(action);
     if (action.type === "movePiece") {
       match = playableMatch({
-        playerWizard: action.to,
-        opponentWizard: { q: 1, r: 1 },
+        playerHero: action.to,
+        opponentHero: { q: 1, r: 1 },
       });
     }
 
     if (action.type === "attack") {
       match = playableMatch({
-        playerWizard: { q: 0, r: 1 },
-        opponentWizard: { q: 1, r: 1 },
+        playerHero: { q: 0, r: 1 },
+        opponentHero: { q: 1, r: 1 },
       });
     }
 
@@ -134,14 +134,14 @@ test("moves and attacks through the 3D board", async ({ page }) => {
   await page.goto(`/match/${MATCH_ID}`);
   await expect(page.locator('section[data-board-renderer="3d"]')).toBeVisible();
 
-  await tile(page, "q 0, r 1, occupied by your wizard").click();
+  await tile(page, "q 0, r 1, occupied by your hero").click();
   await expect(tile(page, "q 0, r 0, empty hex")).toHaveAttribute("data-legal", "true");
   await tile(page, "q 0, r 0, empty hex").click();
   await expect.poll(() => actions).toEqual(
     expect.arrayContaining([
       {
         type: "movePiece",
-        pieceId: "player-wizard",
+        pieceId: "player-hero",
         to: { q: 0, r: 0 },
       },
     ]),
@@ -149,23 +149,23 @@ test("moves and attacks through the 3D board", async ({ page }) => {
 
   actions.length = 0;
   match = playableMatch({
-    playerWizard: { q: 0, r: 1 },
-    opponentWizard: { q: 1, r: 1 },
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
   });
   await page.reload();
-  await tile(page, "q 0, r 1, occupied by your wizard").click();
-  await expect(tile(page, "q 1, r 1, occupied by the opponent's wizard")).toHaveAttribute(
+  await tile(page, "q 0, r 1, occupied by your hero").click();
+  await expect(tile(page, "q 1, r 1, occupied by the opponent's hero")).toHaveAttribute(
     "data-legal",
     "true",
   );
-  await tile(page, "q 1, r 1, occupied by the opponent's wizard").click();
+  await tile(page, "q 1, r 1, occupied by the opponent's hero").click();
 
   await expect.poll(() => actions).toEqual(
     expect.arrayContaining([
       {
         type: "attack",
-        attackerId: "player-wizard",
-        targetId: "opponent-wizard",
+        attackerId: "player-hero",
+        targetId: "opponent-hero",
       },
     ]),
   );
@@ -174,8 +174,8 @@ test("moves and attacks through the 3D board", async ({ page }) => {
 test("plays unit and spell card targets through the 3D board", async ({ page }) => {
   await useStoredBoardVisualMode(page, "3d");
   let match = playableMatch({
-    playerWizard: { q: 0, r: 1 },
-    opponentWizard: { q: 1, r: 1 },
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
     hand: [emberSquire(), sparkJolt()],
   });
   const actions = [];
@@ -184,8 +184,8 @@ test("plays unit and spell card targets through the 3D board", async ({ page }) 
     actions.push(action);
     if (action.type === "playCard" && action.cardId === "ember-squire-card") {
       match = playableMatch({
-        playerWizard: { q: 0, r: 1 },
-        opponentWizard: { q: 1, r: 1 },
+        playerHero: { q: 0, r: 1 },
+        opponentHero: { q: 1, r: 1 },
         hand: [sparkJolt()],
         units: [ashScout({ q: 0, r: 0 })],
       });
@@ -209,28 +209,111 @@ test("plays unit and spell card targets through the 3D board", async ({ page }) 
   );
 
   await page.getByRole("button", { name: /Spark Jolt/ }).click();
-  await expect(tile(page, "q 1, r 1, occupied by the opponent's wizard")).toHaveAttribute(
+  await expect(tile(page, "q 1, r 1, occupied by the opponent's hero")).toHaveAttribute(
     "data-legal",
     "true",
   );
-  await tile(page, "q 1, r 1, occupied by the opponent's wizard").click();
+  await tile(page, "q 1, r 1, occupied by the opponent's hero").click();
   await expect.poll(() => actions).toEqual(
     expect.arrayContaining([
       {
         type: "playCard",
         cardId: "spark-jolt-card",
-        target: { type: "piece", pieceId: "opponent-wizard" },
+        target: { type: "piece", pieceId: "opponent-hero" },
       },
     ]),
   );
+});
+
+test("shows queued stack targeting indicators and filters them from the board overlay", async ({ page }) => {
+  await useStoredBoardVisualMode(page, "3d");
+  const match = playableMatch({
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
+    prioritySide: "player",
+    actionStack: [
+      {
+        id: "pending-attack",
+        side: "opponent",
+        priority: 0,
+        action: {
+          type: "attack",
+          attackerId: "opponent-hero",
+          targetId: "player-hero",
+        },
+      },
+      {
+        id: "pending-spell",
+        side: "player",
+        priority: 1,
+        action: {
+          type: "castSpell",
+          card: {
+            templateId: "spark-jolt",
+            name: "Spark Jolt",
+            rarity: "basic",
+            cost: 1,
+            kind: { type: "spell", range: 2, priority: 1, effect: { type: "damage", amount: 1 } },
+          },
+          targetId: "opponent-hero",
+        },
+      },
+      {
+        id: "pending-move",
+        side: "player",
+        priority: 2,
+        action: {
+          type: "movePiece",
+          pieceId: "player-hero",
+          from: { q: 0, r: 1 },
+          to: { q: 0, r: 0 },
+        },
+      },
+    ],
+  });
+
+  await mockMatchApi(page, async () => matchResponse(match), () => match);
+
+  await page.goto(`/match/${MATCH_ID}`);
+  await expect(page.locator('section[data-board-renderer="3d"]')).toBeVisible();
+  await expect.poll(() => hasPainted3dCanvas(page)).toBe(true);
+  await expect(page.getByRole("region", { name: "Board stack targeting" })).toBeVisible();
+  await expect(page.locator("[data-targeting-stack-row='pending-attack']")).toBeVisible();
+  await expect(page.locator("[data-targeting-stack-row='pending-spell']")).toBeVisible();
+  await expect(page.locator("[data-targeting-stack-row='pending-move']")).toBeVisible();
+
+  await expect(page.locator("[data-targeting-indicator]")).toHaveCount(2);
+  await page.locator("[data-targeting-stack-row='pending-spell']").hover();
+  await expect(page.locator("[data-targeting-indicator]")).toHaveCount(1);
+  await expect(page.locator("[data-targeting-indicator]")).toHaveAttribute("data-stack-item-id", "pending-spell");
+
+  await tile(page, "q 0, r 1, occupied by your hero").click();
+  await expect(tile(page, "q 0, r 1, occupied by your hero")).toBeVisible();
+});
+
+test("shows selected spell targeting indicators in 2D mode", async ({ page }) => {
+  await useStoredBoardVisualMode(page, "2d");
+  const match = playableMatch({
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
+    hand: [sparkJolt()],
+  });
+
+  await mockMatchApi(page, async () => matchResponse(match), () => match);
+
+  await page.goto(`/match/${MATCH_ID}`);
+  await expect(page.locator('section[data-board-renderer="2d"]')).toBeVisible();
+  await page.getByRole("button", { name: /Spark Jolt/ }).click();
+  await expect(page.locator("[data-targeting-indicator]")).toHaveCount(1);
+  await expect(page.locator("[data-targeting-primary]")).toHaveCount(1);
 });
 
 test("keeps projected 3D hit targets usable after viewport resize", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await useStoredBoardVisualMode(page, "3d");
   let match = playableMatch({
-    playerWizard: { q: 0, r: 1 },
-    opponentWizard: { q: 1, r: 1 },
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
     hand: [emberSquire()],
   });
   const actions = [];
@@ -239,8 +322,8 @@ test("keeps projected 3D hit targets usable after viewport resize", async ({ pag
     actions.push(action);
     if (action.type === "playCard") {
       match = playableMatch({
-        playerWizard: { q: 0, r: 1 },
-        opponentWizard: { q: 1, r: 1 },
+        playerHero: { q: 0, r: 1 },
+        opponentHero: { q: 1, r: 1 },
         hand: [],
         units: [ashScout(action.target.coord)],
       });
@@ -275,14 +358,58 @@ test("keeps projected 3D hit targets usable after viewport resize", async ({ pag
   );
 });
 
+test("zooms and turns the 3D board camera with the mouse", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await useStoredBoardVisualMode(page, "3d");
+  const match = playableMatch({
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
+  });
+
+  await mockMatchApi(page, async () => matchResponse(match), () => match);
+
+  await page.goto(`/match/${MATCH_ID}`);
+  await expect(page.locator('section[data-board-renderer="3d"]')).toBeVisible();
+  await expect.poll(() => hasPainted3dCanvas(page)).toBe(true);
+
+  const canvasBox = await page.locator(".board-3d-shell canvas").boundingBox();
+  expect(canvasBox).not.toBeNull();
+  const center = {
+    x: Math.round(canvasBox.x + canvasBox.width / 2),
+    y: Math.round(canvasBox.y + canvasBox.height / 2),
+  };
+  await page.mouse.move(center.x, center.y);
+
+  const initialCamera = await cameraMetrics(page);
+  await page.mouse.wheel(0, -700);
+  await expect.poll(() => cameraMetrics(page)).toMatchObject({
+    distance: expect.any(Number),
+  });
+  await expect.poll(async () => (await cameraMetrics(page)).distance).toBeLessThan(
+    initialCamera.distance - 0.1,
+  );
+
+  const zoomedCamera = await cameraMetrics(page);
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 180, center.y, { steps: 8 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => Math.abs((await cameraMetrics(page)).x - zoomedCamera.x))
+    .toBeGreaterThan(0.1);
+
+  await tile(page, "q 0, r 1, occupied by your hero").click();
+  await expect(tile(page, "q 0, r 0, empty hex")).toHaveAttribute("data-legal", "true");
+});
+
 test("respects disabled state, context menus, visible counts, and replay read-only in 3D mode", async ({
   page,
 }) => {
   await useStoredBoardVisualMode(page, "3d");
   let match = playableMatch({
     phase: "matchOver",
-    playerWizard: { q: 0, r: 1 },
-    opponentWizard: { q: 1, r: 1 },
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
     units: [ashScout({ q: 0, r: 0 })],
   });
   const actions = [];
@@ -293,16 +420,16 @@ test("respects disabled state, context menus, visible counts, and replay read-on
   }, () => match);
 
   await page.goto(`/match/${MATCH_ID}`);
-  await expect(tile(page, "q 0, r 1, occupied by your wizard")).toBeDisabled();
-  await tile(page, "q 0, r 1, occupied by your wizard").click({ force: true });
+  await expect(tile(page, "q 0, r 1, occupied by your hero")).toBeDisabled();
+  await tile(page, "q 0, r 1, occupied by your hero").click({ force: true });
   expect(actions).toEqual([]);
 
   match = playableMatch({
-    playerWizard: { q: 0, r: 1 },
-    opponentWizard: { q: 1, r: 1 },
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
     units: [ashScout({ q: 0, r: 0 })],
   });
-  await page.reload();
+  await page.goto(`/match/${MATCH_ID}`);
   await expect(tile(page, "q 0, r 0, occupied by your unit")).toContainText("1/2 AP 2");
   await tile(page, "q 0, r 0, occupied by your unit").click({ button: "right" });
   await expect(page.getByRole("menu", { name: "Ash Scout actions" })).toBeVisible();
@@ -310,16 +437,16 @@ test("respects disabled state, context menus, visible counts, and replay read-on
   await mockReplayApi(page, match);
   await page.goto(`/matches/${MATCH_ID}/replay`);
   await expect(page.locator('section[data-board-renderer="3d"]')).toBeVisible();
-  await expect(tile(page, "q 0, r 1, occupied by your wizard")).toHaveAttribute("tabindex", "-1");
-  await tile(page, "q 0, r 1, occupied by your wizard").click({ force: true });
+  await expect(tile(page, "q 0, r 1, occupied by your hero")).toHaveAttribute("tabindex", "-1");
+  await tile(page, "q 0, r 1, occupied by your hero").click({ force: true });
   expect(actions).toEqual([]);
 });
 
 test("persists Board visual mode switches locally", async ({ page }) => {
   await useStoredBoardVisualMode(page, "3d");
   const match = playableMatch({
-    playerWizard: { q: 0, r: 1 },
-    opponentWizard: { q: 1, r: 1 },
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
   });
 
   await mockMatchApi(page, async () => matchResponse(match), () => match);
@@ -354,8 +481,8 @@ test("falls back to playable 2D when WebGL cannot start", async ({ page }) => {
   });
 
   let match = playableMatch({
-    playerWizard: { q: 0, r: 1 },
-    opponentWizard: { q: 1, r: 1 },
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
   });
   const actions = [];
 
@@ -363,8 +490,8 @@ test("falls back to playable 2D when WebGL cannot start", async ({ page }) => {
     actions.push(action);
     if (action.type === "movePiece") {
       match = playableMatch({
-        playerWizard: action.to,
-        opponentWizard: { q: 1, r: 1 },
+        playerHero: action.to,
+        opponentHero: { q: 1, r: 1 },
       });
     }
 
@@ -375,14 +502,14 @@ test("falls back to playable 2D when WebGL cannot start", async ({ page }) => {
   await expect(page.locator('section[data-board-renderer="2d"]')).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "3D board unavailable, using 2D." })).toBeVisible();
 
-  await tile(page, "q 0, r 1, occupied by your wizard").click();
+  await tile(page, "q 0, r 1, occupied by your hero").click();
   await expect(tile(page, "q 0, r 0, empty hex")).toHaveClass(/legal/);
   await tile(page, "q 0, r 0, empty hex").click();
   await expect.poll(() => actions).toEqual(
     expect.arrayContaining([
       {
         type: "movePiece",
-        pieceId: "player-wizard",
+        pieceId: "player-hero",
         to: { q: 0, r: 0 },
       },
     ]),
@@ -404,8 +531,8 @@ test("keeps reduced-motion first-time visitors on the 2D board", async ({ page }
     });
   }, { key: BOARD_VISUAL_MODE_STORAGE_KEY });
   const match = playableMatch({
-    playerWizard: { q: 0, r: 1 },
-    opponentWizard: { q: 1, r: 1 },
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
   });
 
   await mockMatchApi(page, async () => matchResponse(match), () => match);
@@ -415,19 +542,40 @@ test("keeps reduced-motion first-time visitors on the 2D board", async ({ page }
   await expect(page.locator(".piece-token[class*='piece-anim-']")).toHaveCount(0);
 });
 
-test("shows marker fallback notice when configured 3D models fail to load", async ({ page }) => {
+test("shows procedural fallback notice when configured 3D models fail to load", async ({ page }) => {
   await useStoredBoardVisualMode(page, "3d");
   const match = playableMatch({
-    playerWizard: { q: 0, r: 1 },
-    opponentWizard: { q: 1, r: 1 },
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
   });
 
   await mockMatchApi(page, async () => matchResponse(match), () => match);
 
   await page.goto(`/match/${MATCH_ID}`);
   await expect(page.locator('section[data-board-renderer="3d"]')).toBeVisible();
-  await expect(page.getByRole("status").filter({ hasText: "fallback markers are shown" })).toBeVisible();
-  await expect(tile(page, "q 0, r 1, occupied by your wizard")).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "procedural miniatures are shown" })).toBeVisible();
+  await expect(tile(page, "q 0, r 1, occupied by your hero")).toBeVisible();
+});
+
+test("uses procedural miniatures without an asset failure notice when no 3D model is configured", async ({
+  page,
+}) => {
+  await useStoredBoardVisualMode(page, "3d");
+  const match = playableMatch({
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
+    playerHeroType: "pyromancer",
+    opponentHeroType: "warden",
+    units: [ashScout({ q: 0, r: 0 })],
+  });
+
+  await mockMatchApi(page, async () => matchResponse(match), () => match);
+
+  await page.goto(`/match/${MATCH_ID}`);
+  await expect(page.locator('section[data-board-renderer="3d"]')).toBeVisible();
+  await expect.poll(() => hasPainted3dCanvas(page)).toBe(true);
+  await expect(page.getByRole("status").filter({ hasText: "procedural miniatures are shown" })).toHaveCount(0);
+  await expect(tile(page, "q 0, r 0, occupied by your unit")).toContainText("1/2 AP 2");
 });
 
 function tile(page, name) {
@@ -454,6 +602,15 @@ async function expectHitTargetInsideCanvas(page, locator) {
   expect(targetCenter.y).toBeLessThanOrEqual(Math.ceil(canvasBox.y + canvasBox.height));
 }
 
+async function cameraMetrics(page) {
+  return page.locator(".board-3d-shell canvas").evaluate((canvas) => ({
+    distance: Number(canvas.dataset.boardCameraDistance),
+    x: Number(canvas.dataset.boardCameraX),
+    y: Number(canvas.dataset.boardCameraY),
+    z: Number(canvas.dataset.boardCameraZ),
+  }));
+}
+
 async function useStoredBoardVisualMode(page, mode) {
   await page.addInitScript(
     ({ key, mode }) => {
@@ -466,9 +623,13 @@ async function useStoredBoardVisualMode(page, mode) {
 }
 
 async function mockMatchApi(page, handleAction, currentMatch) {
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/auth/me") {
       await route.fulfill({ status: 401, json: { message: "Signed out" } });
@@ -496,10 +657,14 @@ async function mockMatchApi(page, handleAction, currentMatch) {
 }
 
 async function mockReplayApi(page, match) {
-  await page.unroute("**/api/**");
-  await page.route("**/api/**", async (route) => {
+  await page.unroute("**://*/api/**");
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/auth/me") {
       await route.fulfill({ status: 401, json: { message: "Signed out" } });
@@ -541,8 +706,10 @@ function matchResponse(matchState) {
 function playableMatch({
   activeSide = "player",
   phase = "planning",
-  playerWizard,
-  opponentWizard,
+  playerHero,
+  opponentHero,
+  playerHeroType = "runekeeper",
+  opponentHeroType = "pyromancer",
   hand = [],
   units = [],
   prioritySide = null,
@@ -558,14 +725,15 @@ function playableMatch({
       side: "player",
       mana: 5,
       maxMana: 5,
-      wizard: {
-        id: "player-wizard",
+      hero: {
+        id: "player-hero",
         side: "player",
-        wizardType: "runekeeper",
+        heroType: playerHeroType,
         hp: 20,
         maxHp: 20,
         attack: 1,
-        position: playerWizard,
+        attackRange: 1,
+        position: playerHero,
         apRemaining: activeSide === "player" ? 3 : 0,
         maxAp: 3,
         hasAttacked: false,
@@ -580,14 +748,15 @@ function playableMatch({
       side: "opponent",
       mana: 5,
       maxMana: 5,
-      wizard: {
-        id: "opponent-wizard",
+      hero: {
+        id: "opponent-hero",
         side: "opponent",
-        wizardType: "pyromancer",
+        heroType: opponentHeroType,
         hp: 20,
         maxHp: 20,
         attack: 1,
-        position: opponentWizard,
+        attackRange: 1,
+        position: opponentHero,
         apRemaining: activeSide === "opponent" ? 3 : 0,
         maxAp: 3,
         hasAttacked: false,
@@ -640,6 +809,7 @@ function ashScout(position) {
     name: "Ash Scout",
     templateId: "ember-squire",
     attack: 1,
+    attackRange: 1,
     armor: 2,
     maxArmor: 2,
     position,

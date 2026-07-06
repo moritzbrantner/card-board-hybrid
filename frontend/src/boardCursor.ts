@@ -44,7 +44,7 @@ export function isBoardCursorDirectionCommand(
 }
 
 export function initialBoardCursorCoord(match: MatchState, viewerSide: Side): HexCoord {
-  return participantForSide(match, viewerSide).wizard.position;
+  return participantForSide(match, viewerSide).hero.position;
 }
 
 export function moveBoardCursorCoord(

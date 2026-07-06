@@ -1,11 +1,11 @@
-import { History, House, LogOut, Play, RotateCcw, Save, Sparkles } from "lucide-react";
+import { History, House, Play, RotateCcw, Save, Sparkles } from "lucide-react";
 import { useEffect, useState, type CSSProperties } from "react";
 import {
   loadProfileMatches,
   loadProgression,
-  respecWizardSkills,
-  saveWizardRuneLoadout,
-  unlockWizardSkill,
+  respecHeroSkills,
+  saveHeroRuneLoadout,
+  unlockHeroSkill,
   updateProfile,
 } from "./api";
 import type {
@@ -15,11 +15,12 @@ import type {
   ProgressionResponse,
   RuneDefinition,
   SkillNodeDefinition,
-  WizardProgression,
-  WizardSkillTree,
-  WizardType,
+  HeroProgression,
+  HeroSkillTree,
+  HeroType,
 } from "./types";
-import { WIZARD_OPTIONS } from "./wizards";
+import { AccountActions } from "./components/common";
+import { HERO_OPTIONS } from "./heroes";
 
 type ProfilePageProps = {
   currentUser: AccountProfile;
@@ -52,8 +53,8 @@ export function ProfilePage({
   const [displayName, setDisplayName] = useState(currentUser.displayName);
   const [handle, setHandle] = useState(currentUser.handle);
   const [avatar, setAvatar] = useState<GeneratedAvatar>(currentUser.avatar);
-  const [preferredWizardType, setPreferredWizardType] = useState<WizardType>(
-    currentUser.preferredWizardType,
+  const [preferredHeroType, setPreferredHeroType] = useState<HeroType>(
+    currentUser.preferredHeroType,
   );
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -61,8 +62,8 @@ export function ProfilePage({
   const [progressionState, setProgressionState] = useState<ProgressionState>({
     status: "loading",
   });
-  const [selectedProgressionWizard, setSelectedProgressionWizard] = useState<WizardType>(
-    currentUser.preferredWizardType,
+  const [selectedProgressionHero, setSelectedProgressionHero] = useState<HeroType>(
+    currentUser.preferredHeroType,
   );
 
   useEffect(() => {
@@ -115,13 +116,13 @@ export function ProfilePage({
         displayName,
         handle,
         avatar,
-        preferredWizardType,
+        preferredHeroType,
       );
       onProfileUpdated(updated);
       setDisplayName(updated.displayName);
       setHandle(updated.handle);
       setAvatar(updated.avatar);
-      setPreferredWizardType(updated.preferredWizardType);
+      setPreferredHeroType(updated.preferredHeroType);
       setNotice("Profile saved.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not save profile");
@@ -139,12 +140,15 @@ export function ProfilePage({
             <h1>Profile</h1>
           </div>
           <div className="actions">
-            <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Match picker">
+            <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Dashboard">
               <House size={18} />
             </button>
-            <button className="icon-button" type="button" onClick={onSignOut} title="Sign out">
-              <LogOut size={18} />
-            </button>
+            <AccountActions
+              currentUser={currentUser}
+              onNavigate={onNavigate}
+              onSignOut={onSignOut}
+              activeAccountRoute="profile"
+            />
           </div>
         </header>
 
@@ -200,16 +204,16 @@ export function ProfilePage({
               </div>
             </fieldset>
           </div>
-          <label className="preferred-wizard-control" htmlFor="profile-preferred-wizard">
-            <span>Preferred Wizard</span>
+          <label className="preferred-hero-control" htmlFor="profile-preferred-hero">
+            <span>Preferred Hero</span>
             <select
-              id="profile-preferred-wizard"
-              value={preferredWizardType}
-              onChange={(event) => setPreferredWizardType(event.target.value as WizardType)}
+              id="profile-preferred-hero"
+              value={preferredHeroType}
+              onChange={(event) => setPreferredHeroType(event.target.value as HeroType)}
             >
-              {WIZARD_OPTIONS.map((wizard) => (
-                <option key={wizard.id} value={wizard.id}>
-                  {wizard.name} · {wizard.role}
+              {HERO_OPTIONS.map((hero) => (
+                <option key={hero.id} value={hero.id}>
+                  {hero.name} · {hero.role}
                 </option>
               ))}
             </select>
@@ -231,8 +235,8 @@ export function ProfilePage({
           {progressionState.status === "ready" ? (
             <ProgressionPanel
               progression={progressionState.progression}
-              selectedWizard={selectedProgressionWizard}
-              onSelectWizard={setSelectedProgressionWizard}
+              selectedHero={selectedProgressionHero}
+              onSelectHero={setSelectedProgressionHero}
               onProgressionChanged={(progression) => setProgressionState({ status: "ready", progression })}
             />
           ) : null}
@@ -300,20 +304,20 @@ export function ProfilePage({
 
 function ProgressionPanel({
   progression,
-  selectedWizard,
-  onSelectWizard,
+  selectedHero,
+  onSelectHero,
   onProgressionChanged,
 }: {
   progression: ProgressionResponse;
-  selectedWizard: WizardType;
-  onSelectWizard: (wizardType: WizardType) => void;
+  selectedHero: HeroType;
+  onSelectHero: (heroType: HeroType) => void;
   onProgressionChanged: (progression: ProgressionResponse) => void;
 }) {
-  const wizard = progression.wizards.find((candidate) => candidate.wizardType === selectedWizard);
-  const tree = progression.skillTrees.find((candidate) => candidate.wizardType === selectedWizard);
+  const hero = progression.heroes.find((candidate) => candidate.heroType === selectedHero);
+  const tree = progression.skillTrees.find((candidate) => candidate.heroType === selectedHero);
   const loadout =
-    progression.loadouts.find((candidate) => candidate.wizardType === selectedWizard)?.runeIds ?? [];
-  const selectedWizardOption = WIZARD_OPTIONS.find((option) => option.id === selectedWizard);
+    progression.loadouts.find((candidate) => candidate.heroType === selectedHero)?.runeIds ?? [];
+  const selectedHeroOption = HERO_OPTIONS.find((option) => option.id === selectedHero);
 
   async function handleToggleRune(rune: RuneDefinition) {
     if (!rune.unlocked) {
@@ -322,17 +326,17 @@ function ProgressionPanel({
     const nextRuneIds = loadout.includes(rune.id)
       ? loadout.filter((runeId) => runeId !== rune.id)
       : [...loadout, rune.id].slice(0, progression.account.runeSlots);
-    const updated = await saveWizardRuneLoadout(selectedWizard, nextRuneIds);
+    const updated = await saveHeroRuneLoadout(selectedHero, nextRuneIds);
     onProgressionChanged(updated);
   }
 
   async function handleUnlock(node: SkillNodeDefinition) {
-    const updated = await unlockWizardSkill(selectedWizard, node.id);
+    const updated = await unlockHeroSkill(selectedHero, node.id);
     onProgressionChanged(updated);
   }
 
   async function handleRespec() {
-    const updated = await respecWizardSkills(selectedWizard);
+    const updated = await respecHeroSkills(selectedHero);
     onProgressionChanged(updated);
   }
 
@@ -358,25 +362,25 @@ function ProgressionPanel({
         max={progression.account.nextLevelXp - progression.account.currentLevelXp}
       />
 
-      <div className="wizard-progression-tabs" role="tablist" aria-label="Wizard mastery">
-        {WIZARD_OPTIONS.map((wizardOption) => (
+      <div className="hero-progression-tabs" role="tablist" aria-label="Hero mastery">
+        {HERO_OPTIONS.map((heroOption) => (
           <button
-            key={wizardOption.id}
+            key={heroOption.id}
             type="button"
-            className={wizardOption.id === selectedWizard ? "active" : ""}
-            onClick={() => onSelectWizard(wizardOption.id)}
+            className={heroOption.id === selectedHero ? "active" : ""}
+            onClick={() => onSelectHero(heroOption.id)}
           >
-            {wizardOption.name}
+            {heroOption.name}
           </button>
         ))}
       </div>
 
-      {wizard && tree ? (
-        <div className="wizard-progression-detail">
-          <div className="wizard-progression-heading">
+      {hero && tree ? (
+        <div className="hero-progression-detail">
+          <div className="hero-progression-heading">
             <div>
-              <span>{selectedWizardOption?.role ?? "Wizard"}</span>
-              <h3>{selectedWizardOption?.name ?? selectedWizard}</h3>
+              <span>{selectedHeroOption?.role ?? "Hero"}</span>
+              <h3>{selectedHeroOption?.name ?? selectedHero}</h3>
             </div>
             <button className="secondary-link" type="button" onClick={() => void handleRespec()}>
               <RotateCcw size={16} />
@@ -386,21 +390,21 @@ function ProgressionPanel({
           <div className="progression-summary compact">
             <div>
               <span>Mastery</span>
-              <strong>{wizard.level}</strong>
+              <strong>{hero.level}</strong>
             </div>
             <div>
               <span>Skill Points</span>
-              <strong>{wizard.availableSkillPoints}</strong>
+              <strong>{hero.availableSkillPoints}</strong>
             </div>
             <div>
-              <span>Wizard XP</span>
-              <strong>{wizard.xp}</strong>
+              <span>Hero XP</span>
+              <strong>{hero.xp}</strong>
             </div>
           </div>
           <ProgressBar
-            label={`Next mastery level in ${wizard.xpToNextLevel} XP`}
-            value={wizard.xpIntoLevel}
-            max={wizard.nextLevelXp - wizard.currentLevelXp}
+            label={`Next mastery level in ${hero.xpToNextLevel} XP`}
+            value={hero.xpIntoLevel}
+            max={hero.nextLevelXp - hero.currentLevelXp}
           />
           <div className="rune-loadout-editor" aria-label="Default rune loadout">
             <h3>Default Runes</h3>
@@ -425,7 +429,7 @@ function ProgressionPanel({
               })}
             </div>
           </div>
-          <SkillTreeGraph tree={tree} wizard={wizard} onUnlock={handleUnlock} />
+          <SkillTreeGraph tree={tree} hero={hero} onUnlock={handleUnlock} />
         </div>
       ) : null}
     </div>
@@ -434,11 +438,11 @@ function ProgressionPanel({
 
 function SkillTreeGraph({
   tree,
-  wizard,
+  hero,
   onUnlock,
 }: {
-  tree: WizardSkillTree;
-  wizard: WizardProgression;
+  tree: HeroSkillTree;
+  hero: HeroProgression;
   onUnlock: (node: SkillNodeDefinition) => Promise<void>;
 }) {
   const layout = skillGraphLayout(tree.nodes);
@@ -448,7 +452,7 @@ function SkillTreeGraph({
     <div className="skill-tree-viewport">
       <div
         className="skill-tree-graph"
-        aria-label="Wizard skill tree"
+        aria-label="Hero skill tree"
         style={
           {
             "--skill-graph-width": `${SKILL_GRAPH_WIDTH}px`,
@@ -465,9 +469,9 @@ function SkillTreeGraph({
               if (!from || !to) {
                 return null;
               }
-              const unlocked = wizard.unlockedSkillIds.includes(node.id);
+              const unlocked = hero.unlockedSkillIds.includes(node.id);
               const prerequisiteUnlocked =
-                node.prerequisiteId === rootId || wizard.unlockedSkillIds.includes(node.prerequisiteId ?? "");
+                node.prerequisiteId === rootId || hero.unlockedSkillIds.includes(node.prerequisiteId ?? "");
               return (
                 <line
                   key={`${node.prerequisiteId}-${node.id}`}
@@ -482,13 +486,13 @@ function SkillTreeGraph({
         </svg>
         {tree.nodes.map((node) => {
           const position = layout.get(node.id) ?? { x: SKILL_GRAPH_WIDTH / 2, y: SKILL_GRAPH_HEIGHT / 2 };
-          const unlocked = node.root || wizard.unlockedSkillIds.includes(node.id);
+          const unlocked = node.root || hero.unlockedSkillIds.includes(node.id);
           const prerequisiteMet =
             !node.prerequisiteId ||
             node.prerequisiteId === rootId ||
-            wizard.unlockedSkillIds.includes(node.prerequisiteId);
-          const disabled = unlocked || !prerequisiteMet || wizard.availableSkillPoints === 0;
-          const status = unlocked ? "Unlocked" : prerequisiteMet && wizard.availableSkillPoints > 0 ? "Available" : "Locked";
+            hero.unlockedSkillIds.includes(node.prerequisiteId);
+          const disabled = unlocked || !prerequisiteMet || hero.availableSkillPoints === 0;
+          const status = unlocked ? "Unlocked" : prerequisiteMet && hero.availableSkillPoints > 0 ? "Available" : "Locked";
           return (
             <button
               key={node.id}

@@ -4,9 +4,7 @@ const AUTH_TOKEN_STORAGE_KEY = "rune-lanes-auth-token";
 const MATCH_ID = "solo-account-deck";
 const SHARED_MATCH_ID = "shared-home-match";
 
-test("AI deck selection remains visible with system and legal account deck recipes", async ({
-  page,
-}) => {
+test("AI deck selection remains visible with system and legal account deck recipes", async ({ page }) => {
   const matchRequests = [];
   await page.addInitScript(
     ({ key }) => localStorage.setItem(key, "existing-token"),
@@ -14,7 +12,11 @@ test("AI deck selection remains visible with system and legal account deck recip
   );
   await mockHomeApi(page, matchRequests);
 
-  await page.goto("/");
+  await page.goto("/play");
+  await openAdvancedSetup(page);
+
+  await expect(page.getByLabel("Preconfigured loadouts")).toHaveCount(0);
+  await expect(page.getByLabel("Custom deck loadouts")).toHaveCount(0);
 
   const aiDeckSelector = page.getByLabel("AI Deck");
   await expect(aiDeckSelector).toBeVisible();
@@ -24,20 +26,20 @@ test("AI deck selection remains visible with system and legal account deck recip
   await expect(aiDeckSelector).not.toContainText("Needs More Basics");
 
   await aiDeckSelector.selectOption("account:101");
-  await page.getByLabel("AI Wizard").selectOption("chronomancer");
+  await page.getByLabel("AI Hero").selectOption("chronomancer");
   await page.getByRole("button", { name: "New Solo Match" }).click();
 
   await expect(page).toHaveURL(new RegExp(`/match/${MATCH_ID}$`));
   expect(matchRequests).toEqual([
     {
-      wizardType: "runekeeper",
+      heroType: "runekeeper",
       playerDeck: { source: "account", deckId: 102 },
-      aiOpponent: { source: "account", deckId: 101, wizardType: "chronomancer" },
+      aiOpponent: { source: "account", deckId: 101, heroType: "chronomancer" },
     },
   ]);
 });
 
-test("signed-in players choose account deck recipes for solo match creation", async ({
+test("signed-in players choose account deck recipes from the basic carousel for solo match creation", async ({
   page,
 }) => {
   const matchRequests = [];
@@ -47,30 +49,38 @@ test("signed-in players choose account deck recipes for solo match creation", as
   );
   await mockHomeApi(page, matchRequests);
 
-  await page.goto("/");
+  await page.goto("/play");
 
-  await expect(page.getByRole("button", { name: /Default Legal/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: /Tournament Legal/ })).toBeEnabled();
-  await expect(page.getByRole("button", { name: /Needs More Basics/ })).toBeDisabled();
-  await expect(page.getByRole("button", { name: /Needs More Basics/ })).toContainText(
-    "Draft deck cannot start a match",
+  const carousel = page.getByLabel("Configured deck recipes");
+  await expect(carousel).toBeVisible();
+  await expect(carousel.getByRole("button", { name: /Default Legal.*Custom deck recipe/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
   );
-  await expect(page.getByRole("button", { name: /Balanced Starter/ })).toBeVisible();
+  await expect(carousel.getByText("No runes equipped")).toBeVisible();
+  await expect(carousel.getByRole("button", { name: /Balanced Starter/ })).toHaveCount(0);
+  await expect(carousel.getByRole("button", { name: /Needs More Basics/ })).toHaveCount(0);
 
-  await page.getByRole("button", { name: /Tournament Legal/ }).click();
+  await page.getByRole("button", { name: "Next configured deck recipe" }).click();
+  await expect(carousel.getByRole("button", { name: /Tournament Legal.*Custom deck recipe/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(carousel.getByText("Spark Stone")).toBeVisible();
   await page.getByRole("button", { name: "New Solo Match" }).click();
 
   await expect(page).toHaveURL(new RegExp(`/match/${MATCH_ID}$`));
   expect(matchRequests).toEqual([
     {
-      wizardType: "pyromancer",
+      heroType: "pyromancer",
       playerDeck: { source: "account", deckId: 101 },
       aiOpponent: { source: "system", systemDeckId: "balanced-starter" },
+      runeIds: ["spark-stone"],
     },
   ]);
 });
 
-test("signed-in players without legal deck recipes create solo matches through the hidden starter fallback", async ({
+test("signed-in players without legal deck recipes are blocked and sent to Decks", async ({
   page,
 }) => {
   const matchRequests = [];
@@ -82,48 +92,34 @@ test("signed-in players without legal deck recipes create solo matches through t
     decks: [deckRecipe(103, "Needs More Basics", false, false)],
   });
 
-  await page.goto("/");
+  await page.goto("/play");
 
-  await expect(page.getByRole("button", { name: /Needs More Basics/ })).toBeDisabled();
-  await expect(page.getByRole("button", { name: /Needs More Basics/ })).toContainText(
-    "Draft deck cannot start a match",
-  );
-  await expect(page.getByRole("button", { name: /Balanced Starter/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("Configured deck recipes")).toHaveCount(0);
+  await expect(page.getByText("Create a legal configured deck recipe to play.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "New Solo Match" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "New Multiplayer Match" })).toBeDisabled();
 
-  await page.getByRole("button", { name: "New Solo Match" }).click();
+  await page.getByRole("button", { name: "Manage Decks" }).click();
 
-  await expect(page).toHaveURL(new RegExp(`/match/${MATCH_ID}$`));
-  expect(matchRequests).toEqual([
-    {
-      wizardType: "runekeeper",
-      playerDeck: { source: "system", systemDeckId: "balanced-starter" },
-      aiOpponent: { source: "system", systemDeckId: "balanced-starter" },
-    },
-  ]);
+  await expect(page).toHaveURL(/\/decks$/);
+  expect(matchRequests).toEqual([]);
 });
 
-test("anonymous players create solo matches without account deck controls or visible starter fallback", async ({
+test("anonymous players cannot use the account deck carousel or hidden starter fallback", async ({
   page,
 }) => {
   const matchRequests = [];
   await mockHomeApi(page, matchRequests, { signedIn: false });
 
-  await page.goto("/");
+  await page.goto("/play");
 
+  await expect(page.getByText("Sign in to play configured deck recipes.")).toBeVisible();
+  await expect(page.getByLabel("Configured deck recipes")).toHaveCount(0);
   await expect(page.getByLabel("Custom deck loadouts")).toHaveCount(0);
-  await expect(page.getByText("Sign in to use your deck recipes")).toHaveCount(0);
-  await expect(page.getByText("No account deck recipes")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "New Solo Match" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "New Multiplayer Match" })).toBeDisabled();
 
-  await page.getByRole("button", { name: "New Solo Match" }).click();
-
-  await expect(page).toHaveURL(new RegExp(`/match/${MATCH_ID}$`));
-  expect(matchRequests).toEqual([
-    {
-      wizardType: "runekeeper",
-      playerDeck: { source: "system", systemDeckId: "balanced-starter" },
-      aiOpponent: { source: "system", systemDeckId: "balanced-starter" },
-    },
-  ]);
+  expect(matchRequests).toEqual([]);
 });
 
 test("home screen creates a shared match from the multiplayer action", async ({ page }) => {
@@ -135,22 +131,23 @@ test("home screen creates a shared match from the multiplayer action", async ({ 
   );
   await mockHomeApi(page, matchRequests, { sharedMatchRequests });
 
-  await page.goto("/");
+  await page.goto("/play");
 
+  await page.getByRole("button", { name: "Next configured deck recipe" }).click();
   await page.getByRole("button", { name: "New Multiplayer Match" }).click();
 
   await expect(page).toHaveURL(new RegExp(`/match/${SHARED_MATCH_ID}/player-seat$`));
-  expect(sharedMatchRequests).toEqual([{ wizardType: "runekeeper" }]);
+  expect(sharedMatchRequests).toEqual([{ heroType: "pyromancer" }]);
   expect(matchRequests).toEqual([]);
   expect(
-    await page.evaluate((matchId) => sessionStorage.getItem(`rune-lanes-wizard:${matchId}`), SHARED_MATCH_ID),
-  ).toBe("runekeeper");
+    await page.evaluate((matchId) => sessionStorage.getItem(`rune-lanes-hero:${matchId}`), SHARED_MATCH_ID),
+  ).toBe("pyromancer");
   expect(
     await page.evaluate((matchId) => sessionStorage.getItem(`rune-lanes-runes:${matchId}`), SHARED_MATCH_ID),
-  ).toBe(JSON.stringify([]));
+  ).toBe(JSON.stringify(["spark-stone"]));
   expect(
     await page.evaluate((matchId) => sessionStorage.getItem(`rune-lanes-deck-choice:${matchId}`), SHARED_MATCH_ID),
-  ).toBe(JSON.stringify({ source: "account", deckId: 102 }));
+  ).toBe(JSON.stringify({ source: "account", deckId: 101 }));
 });
 
 async function mockHomeApi(page, matchRequests, options = {}) {
@@ -165,9 +162,13 @@ async function mockHomeApi(page, matchRequests, options = {}) {
           deckRecipe(103, "Needs More Basics", false, false),
         ];
 
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/auth/me") {
       if (signedIn) {
@@ -253,13 +254,17 @@ async function mockHomeApi(page, matchRequests, options = {}) {
   });
 }
 
+async function openAdvancedSetup(page) {
+  await page.getByRole("button", { name: "Advanced setup" }).click();
+}
+
 function authUser() {
   return {
     id: 1,
     email: "player@local.dev",
     displayName: "Rune Player",
     avatar: { symbol: "sparkles", color: "emerald" },
-    preferredWizardType: "runekeeper",
+    preferredHeroType: "runekeeper",
     boardVisualMode: "2d",
     progressionSummary: {
       totalXp: 0,
@@ -298,12 +303,13 @@ function deckRules() {
 }
 
 function deckRecipe(id, name, isDefault, legal) {
-  const wizardType = id === 101 ? "pyromancer" : "runekeeper";
+  const heroType = id === 101 ? "pyromancer" : "runekeeper";
+  const runeIds = id === 101 ? ["spark-stone"] : [];
   return {
     id,
     name,
-    wizardType,
-    runeIds: [],
+    heroType,
+    runeIds,
     isDefault,
     cards: [],
     legality: {
@@ -323,7 +329,7 @@ function systemDeck() {
   return {
     id: "balanced-starter",
     name: "Balanced Starter",
-    wizardType: "runekeeper",
+    heroType: "runekeeper",
     cards: [],
     legality: {
       legal: true,
@@ -356,11 +362,11 @@ function progression() {
         unlocked: true,
       },
     ],
-    wizards: [],
+    heroes: [],
     skillTrees: [],
     loadouts: [
-      { wizardType: "runekeeper", runeIds: [] },
-      { wizardType: "pyromancer", runeIds: [] },
+      { heroType: "runekeeper", runeIds: [] },
+      { heroType: "pyromancer", runeIds: [] },
     ],
   };
 }
@@ -390,13 +396,14 @@ function participant(side) {
     side,
     mana: 5,
     maxMana: 5,
-    wizard: {
-      id: `${side}-wizard`,
+    hero: {
+      id: `${side}-hero`,
       side,
-      wizardType: side === "player" ? "pyromancer" : "runekeeper",
+      heroType: side === "player" ? "pyromancer" : "runekeeper",
       hp: 20,
       maxHp: 20,
       attack: 1,
+      attackRange: 1,
       position: side === "player" ? { q: 0, r: 3 } : { q: 0, r: -3 },
       apRemaining: side === "player" ? 3 : 0,
       maxAp: 3,

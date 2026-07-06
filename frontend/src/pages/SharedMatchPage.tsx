@@ -1,4 +1,4 @@
-import { Archive, Copy, Eye, EyeOff, House, Layers, Play, Sword, Users, Wifi, Zap } from "lucide-react";
+import { Archive, Copy, Eye, EyeOff, House, Layers, Play, Sword, Trophy, Users, Wifi, Zap } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
 import {
@@ -44,17 +44,19 @@ import {
   UnitContextMenuView,
 } from "../components/board";
 import { AccountActions, ShellMessage } from "../components/common";
-import { LobbySeatStatus, RuneSelector, WizardPicker } from "../components/loadoutControls";
+import { LobbySeatStatus, RuneSelector, HeroPicker } from "../components/loadoutControls";
 import { deckChoiceFromValue, deckChoiceValue } from "../deckHelpers";
 import {
-  defaultRuneIdsForWizard,
-  isWizardType,
+  defaultRuneIdsForHero,
+  isHeroType,
   parseDeckChoice,
   parseRuneIds,
   sideLabel,
-  wizardOptionByType,
+  heroOptionByType,
 } from "../labels";
 import {
+  buildingEffectIsActivated,
+  buildingAt,
   cardFanStyle,
   cardTargetForTile,
   handCountForSide,
@@ -79,9 +81,9 @@ import type {
   SharedClientMessage,
   SharedServerMessage,
   Side,
-  WizardType,
+  HeroType,
 } from "../types";
-import { WIZARD_OPTIONS } from "../wizards";
+import { HERO_OPTIONS } from "../heroes";
 
 export function SharedMatchPage({
   matchId,
@@ -89,6 +91,8 @@ export function SharedMatchPage({
   onNavigate,
   currentUser,
   onSignOut,
+  allowSignOut,
+  loginNextPath,
   visualPreferences,
 }: {
   matchId: string;
@@ -108,9 +112,9 @@ export function SharedMatchPage({
     coord: null,
     visible: false,
   });
-  const [selectedWizardType, setSelectedWizardType] = useState<WizardType>(() => {
-    const stored = sessionStorage.getItem(`rune-lanes-wizard:${matchId}`);
-    return isWizardType(stored) ? stored : (currentUser?.preferredWizardType ?? "runekeeper");
+  const [selectedHeroType, setSelectedHeroType] = useState<HeroType>(() => {
+    const stored = sessionStorage.getItem(`rune-lanes-hero:${matchId}`);
+    return isHeroType(stored) ? stored : (currentUser?.preferredHeroType ?? "runekeeper");
   });
   const [deckLoadState, setDeckLoadState] = useState<DeckLoadState | null>(
     currentUser ? { status: "loading" } : null,
@@ -212,7 +216,7 @@ export function SharedMatchPage({
       .then((progression) => {
         setProgressionLoadState({ status: "ready", progression });
         setSelectedRuneIds((current) =>
-          current.length > 0 ? current : defaultRuneIdsForWizard(progression, selectedWizardType),
+          current.length > 0 ? current : defaultRuneIdsForHero(progression, selectedHeroType),
         );
       })
       .catch((error: unknown) =>
@@ -227,10 +231,10 @@ export function SharedMatchPage({
     if (progressionLoadState?.status === "ready") {
       const stored = sessionStorage.getItem(`rune-lanes-runes:${matchId}`);
       setSelectedRuneIds(
-        stored ? parseRuneIds(stored) : defaultRuneIdsForWizard(progressionLoadState.progression, selectedWizardType),
+        stored ? parseRuneIds(stored) : defaultRuneIdsForHero(progressionLoadState.progression, selectedHeroType),
       );
     }
-  }, [selectedWizardType, progressionLoadState?.status, matchId]);
+  }, [selectedHeroType, progressionLoadState?.status, matchId]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
@@ -309,10 +313,10 @@ export function SharedMatchPage({
   const canAct = Boolean(match && (hasPendingStack ? isPriorityViewer : isActiveViewer));
 
   useEffect(() => {
-    if (shared?.status === "setup" && shared.viewerWizardType) {
-      setSelectedWizardType(shared.viewerWizardType);
+    if (shared?.status === "setup" && shared.viewerHeroType) {
+      setSelectedHeroType(shared.viewerHeroType);
     }
-  }, [shared?.status, shared?.viewerWizardType]);
+  }, [shared?.status, shared?.viewerHeroType]);
 
   const selectedCard = useMemo(() => {
     if (!match || selection?.type !== "card") {
@@ -547,14 +551,14 @@ export function SharedMatchPage({
       const joined = await joinSharedMatch(
         matchId,
         seatToken,
-        selectedWizardType,
+        selectedHeroType,
         selectedDeckId === "starter" || selectedDeckId.startsWith("system:")
           ? undefined
           : Number(selectedDeckId),
         selectedRuneIds,
         deckChoiceFromValue(selectedDeckId),
       );
-      sessionStorage.setItem(`rune-lanes-wizard:${matchId}`, selectedWizardType);
+      sessionStorage.setItem(`rune-lanes-hero:${matchId}`, selectedHeroType);
       sessionStorage.setItem(`rune-lanes-runes:${matchId}`, JSON.stringify(selectedRuneIds));
       sessionStorage.setItem(
         `rune-lanes-deck-choice:${matchId}`,
@@ -568,9 +572,9 @@ export function SharedMatchPage({
     }
   }
 
-  function handleSelectLobbyWizard(wizardType: WizardType) {
-    setSelectedWizardType(wizardType);
-    sessionStorage.setItem(`rune-lanes-wizard:${matchId}`, wizardType);
+  function handleSelectLobbyHero(heroType: HeroType) {
+    setSelectedHeroType(heroType);
+    sessionStorage.setItem(`rune-lanes-hero:${matchId}`, heroType);
     sessionStorage.removeItem(`rune-lanes-runes:${matchId}`);
   }
 
@@ -603,6 +607,21 @@ export function SharedMatchPage({
         sendSharedAction({ type: "attack", attackerId: selectedPiece.id, targetId: piece.id });
         return;
       }
+    }
+
+    const building = buildingAt(match, tile.coord);
+    if (
+      !selectedPiece &&
+      piece?.side === viewerSide &&
+      building &&
+      buildingEffectIsActivated(building.effect) &&
+      !building.activatedThisTurn &&
+      piece.apRemaining > 0 &&
+      match.actionStack.length === 0 &&
+      match.activeSide === viewerSide
+    ) {
+      sendSharedAction({ type: "activateBuilding", buildingId: building.id });
+      return;
     }
 
     if (piece?.side === viewerSide) {
@@ -668,6 +687,11 @@ export function SharedMatchPage({
     sendSharedAction({ type: "activateItem", unitId: unit.id, itemId });
   }
 
+  function handleActivateUnitBuilding(buildingId: string) {
+    setUnitContextMenu(null);
+    sendSharedAction({ type: "activateBuilding", buildingId });
+  }
+
   if (loadState.status === "loading") {
     return <ShellMessage title={`Match ${matchId}`} message="Loading multiplayer match" />;
   }
@@ -678,8 +702,8 @@ export function SharedMatchPage({
         title={`Match ${matchId}`}
         message={loadState.message}
         actions={
-          <button className="primary-button" type="button" onClick={() => onNavigate("/")}>
-            Open match picker
+          <button className="primary-button" type="button" onClick={() => onNavigate("/play")}>
+            Open play
           </button>
         }
       />
@@ -694,10 +718,10 @@ export function SharedMatchPage({
     const inviteUrl =
       sessionStorage.getItem(`rune-lanes-invite:${matchId}`) ??
       "Invite link unavailable after reload.";
-    const hasUnsavedWizardChoice = shared.viewerWizardType !== selectedWizardType;
-    const savedWizard = shared.viewerWizardType ? wizardOptionByType(shared.viewerWizardType) : null;
-    const opponentWizard = shared.opponentWizardType
-      ? wizardOptionByType(shared.opponentWizardType)
+    const hasUnsavedHeroChoice = shared.viewerHeroType !== selectedHeroType;
+    const savedHero = shared.viewerHeroType ? heroOptionByType(shared.viewerHeroType) : null;
+    const opponentHero = shared.opponentHeroType
+      ? heroOptionByType(shared.opponentHeroType)
       : null;
     const legalDecks =
       deckLoadState?.status === "ready"
@@ -706,8 +730,8 @@ export function SharedMatchPage({
     const systemDecks =
       systemDeckLoadState.status === "ready" ? systemDeckLoadState.response.decks : [];
     const lobbyActionLabel = shared.viewerReady
-      ? hasUnsavedWizardChoice
-        ? "Update Wizard"
+      ? hasUnsavedHeroChoice
+        ? "Update Hero"
         : "Ready"
       : viewerSide === "player"
         ? "Ready"
@@ -721,7 +745,13 @@ export function SharedMatchPage({
               <h1>Lobby</h1>
               <p className="match-id">Match {matchId}</p>
             </div>
-            <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+            <AccountActions
+              currentUser={currentUser}
+              onNavigate={onNavigate}
+              onSignOut={onSignOut}
+              allowSignOut={allowSignOut}
+              loginNextPath={loginNextPath}
+            />
           </header>
           {viewerSide === "player" ? (
             <div className="share-panel">
@@ -737,10 +767,10 @@ export function SharedMatchPage({
               </button>
             </div>
           ) : null}
-          <WizardPicker
-            selectedWizardType={selectedWizardType}
+          <HeroPicker
+            selectedHeroType={selectedHeroType}
             busy={busy}
-            onSelect={handleSelectLobbyWizard}
+            onSelect={handleSelectLobbyHero}
           />
           <section className="setup-deck-selectors" aria-label="Shared deck selection">
             <label>
@@ -771,7 +801,7 @@ export function SharedMatchPage({
           {progressionLoadState?.status === "ready" ? (
             <RuneSelector
               progression={progressionLoadState.progression}
-              wizardType={selectedWizardType}
+              heroType={selectedHeroType}
               selectedRuneIds={selectedRuneIds}
               onChange={setSelectedRuneIds}
             />
@@ -783,12 +813,12 @@ export function SharedMatchPage({
             <LobbySeatStatus
               label="You"
               ready={shared.viewerReady}
-              wizardName={savedWizard?.name ?? null}
+              heroName={savedHero?.name ?? null}
             />
             <LobbySeatStatus
               label="Opponent"
               ready={shared.opponentReady}
-              wizardName={opponentWizard?.name ?? null}
+              heroName={opponentHero?.name ?? null}
             />
           </div>
           <button
@@ -803,7 +833,7 @@ export function SharedMatchPage({
           <p className="notice">
             {shared.viewerReady
               ? "Waiting for both players to be ready."
-              : "Choose a wizard to enter the lobby."}
+              : "Choose a hero to enter the lobby."}
           </p>
           {notice ? <p className="notice">{notice}</p> : null}
         </section>
@@ -836,12 +866,18 @@ export function SharedMatchPage({
             <p className="match-id">Match {matchId}</p>
           </div>
           <div className="actions">
-            <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+            <AccountActions
+              currentUser={currentUser}
+              onNavigate={onNavigate}
+              onSignOut={onSignOut}
+              allowSignOut={allowSignOut}
+              loginNextPath={loginNextPath}
+            />
             <button
               className="icon-button"
               type="button"
               onClick={() => onNavigate("/")}
-              title="Match picker"
+              title="Dashboard"
             >
               <House size={18} />
             </button>
@@ -1010,8 +1046,52 @@ export function SharedMatchPage({
             contextMenuUnit.side === viewerSide
           }
           onActivateItem={(itemId) => handleActivateUnitItem(contextMenuUnit, itemId)}
+          building={buildingAt(match, contextMenuUnit.position)}
+          canActivateBuilding={
+            canAct &&
+            match.actionStack.length === 0 &&
+            match.activeSide === viewerSide &&
+            contextMenuUnit.side === viewerSide
+          }
+          onActivateBuilding={handleActivateUnitBuilding}
+        />
+      ) : null}
+      {match.phase === "matchOver" ? (
+        <SharedMatchEndOverlay
+          winner={match.winner}
+          viewerSide={viewerSide}
+          onOpenSummary={() => onNavigate(`/match/${matchId}/${seatToken}/summary`)}
         />
       ) : null}
     </main>
+  );
+}
+
+function SharedMatchEndOverlay({
+  winner,
+  viewerSide,
+  onOpenSummary,
+}: {
+  winner: Side | null;
+  viewerSide: Side;
+  onOpenSummary: () => void;
+}) {
+  const result = winner === viewerSide ? "Victory" : "Defeat";
+  const winnerLabel = winner ? `${sideLabel(winner)} wins` : "Match complete";
+
+  return (
+    <section className="match-end-overlay" role="dialog" aria-label="Match complete">
+      <div className={`match-end-panel ${winner === viewerSide ? "victory" : "defeat"}`}>
+        <span className="match-end-icon">
+          <Trophy size={34} />
+        </span>
+        <p className="eyebrow">{winnerLabel}</p>
+        <h2>{result}</h2>
+        <button className="primary-button" type="button" onClick={onOpenSummary}>
+          <Play size={18} />
+          Match Summary
+        </button>
+      </div>
+    </section>
   );
 }

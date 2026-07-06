@@ -50,8 +50,8 @@ export function MatchArchivePage({
         title="Match Archive"
         message={loadState.message}
         actions={
-          <button className="primary-button" type="button" onClick={() => onNavigate("/")}>
-            Open match picker
+          <button className="primary-button" type="button" onClick={() => onNavigate("/play")}>
+            Open play
           </button>
         }
       />
@@ -68,7 +68,7 @@ export function MatchArchivePage({
           </div>
           <div className="actions">
             <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
-            <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Match picker">
+            <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Dashboard">
               <House size={18} />
             </button>
             <button
@@ -130,10 +130,10 @@ export function MatchArchivePage({
                   <button
                     className="primary-button"
                     type="button"
-                    onClick={() => onNavigate(`/matches/${match.matchId}/replay`)}
+                    onClick={() => onNavigate(`/matches/${match.matchId}/summary`)}
                   >
                     <History size={18} />
-                    Replay
+                    Summary
                   </button>
                 </div>
               </article>

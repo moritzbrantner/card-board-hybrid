@@ -17,29 +17,29 @@ export function routeFromPath(path: string) {
 
 export function safeAuthNextPath(value: string | null) {
   if (!value || !value.startsWith("/") || value.startsWith("//")) {
-    return "/profile";
+    return "/";
   }
 
   try {
     const nextUrl = new URL(value, window.location.origin);
     if (nextUrl.origin !== window.location.origin) {
-      return "/profile";
+      return "/";
     }
 
     const normalizedNextPath = nextUrl.pathname.replace(/\/+$/, "");
     if (normalizedNextPath === "/login" || normalizedNextPath === "/register") {
-      return "/profile";
+      return "/";
     }
 
     return `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
   } catch {
-    return "/profile";
+    return "/";
   }
 }
 
 export function authRouteLink(mode: "register" | "login", nextPath: string) {
   const path = mode === "register" ? "/register" : "/login";
-  return nextPath === "/profile" ? path : `${path}?next=${encodeURIComponent(nextPath)}`;
+  return nextPath === "/" ? path : `${path}?next=${encodeURIComponent(nextPath)}`;
 }
 
 export function protectedLoginRoute(nextPath: string) {
@@ -57,6 +57,34 @@ export function replayRouteFromPath(path: string) {
   const normalized = path.replace(/\/+$/, "");
   const match = normalized.match(/^\/matches\/([^/]+)\/replay$/);
   return match ? decodeURIComponent(match[1]) : null;
+}
+
+export function matchSummaryRouteFromPath(path: string) {
+  const normalized = path.replace(/\/+$/, "");
+  const match = normalized.match(/^\/matches\/([^/]+)\/summary$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+export function sharedMatchSummaryRouteFromPath(path: string) {
+  const normalized = path.replace(/\/+$/, "");
+  const match = normalized.match(/^\/match\/([^/]+)\/([^/]+)\/summary$/);
+  return match
+    ? {
+        matchId: decodeURIComponent(match[1]),
+        seatToken: decodeURIComponent(match[2]),
+      }
+    : null;
+}
+
+export function sharedReplayRouteFromPath(path: string) {
+  const normalized = path.replace(/\/+$/, "");
+  const match = normalized.match(/^\/match\/([^/]+)\/([^/]+)\/replay$/);
+  return match
+    ? {
+        matchId: decodeURIComponent(match[1]),
+        seatToken: decodeURIComponent(match[2]),
+      }
+    : null;
 }
 
 export function sharedMatchRouteFromPath(path: string) {
