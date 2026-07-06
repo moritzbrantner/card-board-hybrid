@@ -3,8 +3,9 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { loadDecks, loadProfileMatches, loadProgression } from "../api";
 import type { AccountProps, DeckLoadState, MatchArchiveLoadState, ProgressionLoadState } from "../appTypes";
 import { TopNav } from "../components/common";
+import { HeroPreview3D } from "../HeroPreview3D";
 import { formatMatchStatus, formatUnixTime, heroOptionByType } from "../labels";
-import type { MatchSummary, HeroType } from "../types";
+import type { DeckRecipeSummary, MatchSummary, HeroType, ProgressionResponse } from "../types";
 
 export function DashboardPage({
   currentUser,
@@ -96,26 +97,69 @@ export function DashboardPage({
     onNavigate(`/match/${encodeURIComponent(normalized)}`);
   }
 
+  const decks = deckState?.status === "ready" ? deckState.response.decks : [];
+  const legalDecks = decks.filter((deck) => deck.legality.legal);
+  const featuredDeck = legalDecks.find((deck) => deck.isDefault) ?? legalDecks[0] ?? null;
+  const progression = progressionState?.status === "ready" ? progressionState.progression : null;
+  const accountProgression = progression?.account ?? currentUser?.progressionSummary ?? null;
+
   return (
     <main className="app-shell dashboard-shell">
       <TopNav currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
       <section className="dashboard-layout" aria-label="Player dashboard">
         {currentUser ? (
           <>
-            <header className="dashboard-hero">
-              <div>
+            <header className="dashboard-featured">
+              <div className="dashboard-featured-copy">
                 <p className="eyebrow">Rune Lanes</p>
                 <h1>Player Dashboard</h1>
-                <p>Welcome back, {currentUser.displayName}.</p>
+                <p>Welcome back, {currentUser.displayName}. Your next match starts from a legal configured deck recipe.</p>
+                <div className="dashboard-hero-stat-strip" aria-label="Account summary">
+                  {accountProgression ? (
+                    <>
+                      <DashboardHeroStat label="Level" value={accountProgression.level} />
+                      <DashboardHeroStat label="Total XP" value={accountProgression.totalXp} />
+                      <DashboardHeroStat label="Rune Slots" value={accountProgression.runeSlots} />
+                    </>
+                  ) : progressionState?.status === "loading" ? (
+                    <p className="dashboard-featured-note">Loading account progression.</p>
+                  ) : (
+                    <p className="dashboard-featured-note">Account progression unavailable.</p>
+                  )}
+                </div>
+                <div className="dashboard-hero-actions">
+                  <button className="primary-button" type="button" onClick={() => onNavigate("/play")}>
+                    <Play size={18} />
+                    Play
+                  </button>
+                  <button className="secondary-link" type="button" onClick={() => onNavigate("/decks")}>
+                    <Layers size={18} />
+                    Decks
+                  </button>
+                  <button className="secondary-link" type="button" onClick={() => onNavigate("/profile")}>
+                    <UserRound size={18} />
+                    Profile
+                  </button>
+                </div>
               </div>
-              <button className="primary-button" type="button" onClick={() => onNavigate("/play")}>
-                <Play size={18} />
-                Play
-              </button>
-              <button className="secondary-link" type="button" onClick={() => onNavigate("/tutorial")}>
-                <BookOpen size={18} />
-                Tutorial
-              </button>
+              {deckState?.status === "loading" ? (
+                <div className="dashboard-featured-deck-status">
+                  <strong>Loading configured deck recipe.</strong>
+                  <span>Your featured Hero preview will appear here.</span>
+                </div>
+              ) : null}
+              {deckState?.status === "error" ? (
+                <div className="dashboard-featured-deck-status">
+                  <strong>Deck library unavailable.</strong>
+                  <span>{deckState.message}</span>
+                </div>
+              ) : null}
+              {deckState?.status === "ready" && featuredDeck ? (
+                <FeaturedDeckPanel deck={featuredDeck} progression={progression} onNavigate={onNavigate} />
+              ) : null}
+              {deckState?.status === "ready" && !featuredDeck ? (
+                <FeaturedDeckEmptyState onNavigate={onNavigate} />
+              ) : null}
             </header>
 
             <section className="dashboard-grid" aria-label="Account summary">
@@ -154,6 +198,70 @@ export function DashboardPage({
   );
 }
 
+function FeaturedDeckPanel({
+  deck,
+  progression,
+  onNavigate,
+}: {
+  deck: DeckRecipeSummary;
+  progression: ProgressionResponse | null;
+  onNavigate: (to: string) => void;
+}) {
+  const heroOption = heroOptionByType(deck.heroType);
+  const runeNames = deck.runeIds.map(
+    (runeId) => progression?.runes.find((rune) => rune.id === runeId)?.name ?? runeId,
+  );
+  const runeSummary =
+    runeNames.length === 0
+      ? "No runes equipped"
+      : `${runeNames.length} rune${runeNames.length === 1 ? "" : "s"} equipped`;
+
+  return (
+    <section className="dashboard-featured-deck" aria-label="Featured configured deck recipe">
+      <div className="dashboard-featured-model">
+        <HeroPreview3D heroType={deck.heroType} label={heroOption.name} />
+      </div>
+      <div className="dashboard-featured-deck-body">
+        <div className="dashboard-featured-deck-heading">
+          <span>Featured Deck</span>
+          <strong>{deck.name}</strong>
+        </div>
+        <div className="dashboard-featured-hero-line">
+          <span>{heroOption.role}</span>
+          <strong>{heroOption.name}</strong>
+        </div>
+        <div className="dashboard-featured-stats">
+          <DashboardHeroStat label="Cards" value={deck.legality.totalCards} />
+          <DashboardHeroStat label="Runes" value={runeNames.length} />
+          <DashboardHeroStat label="Status" value="Legal" />
+        </div>
+        <p className="dashboard-featured-note" title={runeNames.join(", ")}>
+          {runeSummary}
+        </p>
+        <button className="secondary-link" type="button" onClick={() => onNavigate("/decks")}>
+          <Layers size={18} />
+          Manage Deck Recipe
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function FeaturedDeckEmptyState({ onNavigate }: { onNavigate: (to: string) => void }) {
+  return (
+    <section className="dashboard-featured-deck dashboard-featured-deck-empty" aria-label="Featured configured deck recipe">
+      <div className="dashboard-featured-empty-copy">
+        <strong>No legal configured deck recipe</strong>
+        <span>Create or fix a deck recipe before using Basic Play.</span>
+      </div>
+      <button className="primary-button" type="button" onClick={() => onNavigate("/decks")}>
+        <Layers size={18} />
+        Open Decks
+      </button>
+    </section>
+  );
+}
+
 function SignedOutDashboard({ onNavigate }: { onNavigate: (to: string) => void }) {
   return (
     <header className="dashboard-hero signed-out-dashboard">
@@ -181,6 +289,15 @@ function SignedOutDashboard({ onNavigate }: { onNavigate: (to: string) => void }
         </button>
       </div>
     </header>
+  );
+}
+
+function DashboardHeroStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="dashboard-hero-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
