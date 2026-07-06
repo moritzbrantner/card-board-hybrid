@@ -185,6 +185,251 @@
   line-height: 1.45;
 }
 
+.wiki-scene {
+  display: grid;
+  gap: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.wiki-scene-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.wiki-scene-header > div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wiki-scene-header h2,
+.wiki-scene-header p,
+.wiki-scene-panel h3,
+.wiki-scene-panel p,
+.wiki-scene-callouts,
+.wiki-deck-messages {
+  margin: 0;
+}
+
+.wiki-scene-header h2 {
+  font-size: 1.08rem;
+}
+
+.wiki-scene-header p,
+.wiki-scene-panel p {
+  color: var(--muted);
+  font-weight: 760;
+  line-height: 1.45;
+}
+
+.wiki-scene-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(220px, 0.65fr);
+  gap: 12px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.wiki-scene-board {
+  min-width: 0;
+  --hex-width: clamp(42px, 4.6vw, 62px);
+  --hex-height: calc(var(--hex-width) * 0.91);
+  --hex-board-min-width: calc(var(--hex-width) * 5.6);
+  --hex-vertical-overlap: -2px;
+  --token-size: clamp(30px, 3.8vw, 44px);
+}
+
+.wiki-scene-board .board {
+  min-height: 0;
+  padding: 16px 12px;
+  box-shadow: none;
+}
+
+.wiki-scene-board .hex-board {
+  padding: 10px 0;
+}
+
+.wiki-scene-board .piece-token {
+  border-radius: 6px;
+  gap: 1px;
+  border-width: 1px;
+}
+
+.wiki-scene-board .piece-token.portrait {
+  padding: 2px;
+}
+
+.wiki-scene-board .piece-token strong,
+.wiki-scene-board .piece-token .piece-token-stat-row {
+  display: none;
+}
+
+.wiki-scene-board .piece-side-badge,
+.wiki-scene-board .hex-occupant-marker {
+  min-width: 20px;
+  min-height: 14px;
+  font-size: 0.48rem;
+}
+
+.wiki-scene-board .mana-source-marker,
+.wiki-scene-board .building-marker {
+  left: 6px;
+  top: 5px;
+  width: 16px;
+  height: 16px;
+  font-size: 0.62rem;
+}
+
+.wiki-scene-panel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(10, 13, 13, 0.22);
+}
+
+.wiki-scene-step-count {
+  color: var(--gold);
+  font-size: 0.75rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.wiki-scene-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.wiki-scene-controls .secondary-link,
+.wiki-scene-header > .secondary-link,
+.wiki-deck-stepper .secondary-link {
+  min-width: 0;
+  white-space: normal;
+}
+
+.wiki-scene-callouts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 8px;
+}
+
+.wiki-scene-callouts > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.wiki-scene-callouts dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.wiki-scene-callouts dd {
+  margin: 0;
+  color: #fffaf0;
+  font-weight: 950;
+  overflow-wrap: anywhere;
+}
+
+.wiki-deck-scene .wiki-scene-body {
+  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1fr);
+}
+
+.wiki-deck-stepper {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wiki-deck-stepper-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(10, 13, 13, 0.22);
+}
+
+.wiki-deck-stepper-row > span {
+  min-width: 0;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.wiki-deck-stepper-row > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.wiki-deck-stepper-row strong {
+  min-width: 3ch;
+  text-align: center;
+}
+
+.wiki-deck-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.wiki-deck-status.legal {
+  border-color: rgba(119, 179, 111, 0.58);
+  background: rgba(119, 179, 111, 0.12);
+}
+
+.wiki-deck-status.draft {
+  border-color: rgba(217, 184, 79, 0.58);
+  background: rgba(217, 184, 79, 0.1);
+}
+
+.wiki-deck-status span,
+.wiki-deck-status strong {
+  font-weight: 950;
+}
+
+.wiki-deck-messages {
+  display: grid;
+  gap: 7px;
+  padding-left: 18px;
+  color: var(--muted);
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.wiki-scene-missing {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--muted);
+  background: rgba(10, 13, 13, 0.22);
+  font-weight: 800;
+}
+
 .wiki-not-found {
   width: min(520px, 100%);
   margin: 10vh auto 0;
@@ -193,6 +438,16 @@
 :root[data-theme="light"] .wiki-hero,
 :root[data-theme="light"] .wiki-article {
   background: rgba(255, 251, 242, 0.82);
+}
+
+:root[data-theme="light"] .wiki-scene-panel,
+:root[data-theme="light"] .wiki-deck-stepper-row,
+:root[data-theme="light"] .wiki-scene-callouts > div {
+  background: rgba(255, 251, 242, 0.58);
+}
+
+:root[data-theme="light"] .wiki-scene-callouts dd {
+  color: #17201d;
 }
 
 @media (max-width: 760px) {
@@ -215,6 +470,25 @@
 
   .wiki-topic-nav > div {
     grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+  }
+
+  .wiki-scene-header,
+  .wiki-scene-body,
+  .wiki-deck-scene .wiki-scene-body {
+    grid-template-columns: 1fr;
+  }
+
+  .wiki-scene-header {
+    display: grid;
+  }
+
+  .wiki-scene-controls {
+    justify-content: flex-start;
+  }
+
+  .wiki-scene-board {
+    --hex-width: clamp(38px, 10vw, 52px);
+    --token-size: clamp(28px, 7.5vw, 38px);
   }
 }
 

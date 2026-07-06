@@ -1,3 +1,5 @@
+import type { WikiSceneId } from "./wikiScenes";
+
 export type WikiTopicId =
   | "turn-flow"
   | "mana"
@@ -15,6 +17,7 @@ export type WikiTopic = {
   example: string;
   commonMistakes: string[];
   relatedTopicIds: WikiTopicId[];
+  sceneId: WikiSceneId;
 };
 
 export const WIKI_TOPICS = [
@@ -40,6 +43,7 @@ export const WIKI_TOPICS = [
       "Confusing round number with the active side's turn.",
     ],
     relatedTopicIds: ["mana", "action-points", "cards-and-priority"],
+    sceneId: "turn-flow-refresh",
   },
   {
     id: "mana",
@@ -63,6 +67,7 @@ export const WIKI_TOPICS = [
       "Forgetting that a Mana source must be occupied.",
     ],
     relatedTopicIds: ["turn-flow", "buildings", "cards-and-priority"],
+    sceneId: "mana-source",
   },
   {
     id: "action-points",
@@ -87,6 +92,7 @@ export const WIKI_TOPICS = [
       "Forgetting Building activation spends the occupant's action point.",
     ],
     relatedTopicIds: ["turn-flow", "combat", "buildings", "cards-and-priority"],
+    sceneId: "action-points-budget",
   },
   {
     id: "cards-and-priority",
@@ -111,6 +117,7 @@ export const WIKI_TOPICS = [
       "Trying to target friendly pieces with damage Spells or enemies with healing or buff Spells.",
     ],
     relatedTopicIds: ["mana", "action-points", "combat", "buildings"],
+    sceneId: "cards-priority-stack",
   },
   {
     id: "combat",
@@ -137,6 +144,7 @@ export const WIKI_TOPICS = [
       "Calling Unit armor health.",
     ],
     relatedTopicIds: ["action-points", "turn-flow", "cards-and-priority"],
+    sceneId: "combat-range-counter",
   },
   {
     id: "buildings",
@@ -162,6 +170,7 @@ export const WIKI_TOPICS = [
       "Expecting a Building to block occupation like a piece.",
     ],
     relatedTopicIds: ["mana", "action-points", "cards-and-priority"],
+    sceneId: "building-occupation",
   },
   {
     id: "deck-rules",
@@ -189,6 +198,7 @@ export const WIKI_TOPICS = [
       "Using rarity names like common, uncommon, or legendary.",
     ],
     relatedTopicIds: ["cards-and-priority", "mana"],
+    sceneId: "deck-recipe-legality",
   },
 ] satisfies WikiTopic[];
 

@@ -267,3 +267,7 @@ _Avoid_: help center, docs site, internal rulebook
 **Wiki topic**:
 One rules wiki page focused on a single player-facing gameplay concept, such as Mana, Combat, or Buildings.
 _Avoid_: article, mechanic page, doc page
+
+**Wiki scene**:
+A public client-side interactive demonstration embedded in a Wiki topic to illustrate one player-facing rule concept with authored board or deck recipe states. A Wiki scene does not create a Match, replay, archive entry, or progression.
+_Avoid_: match scenario, dev scenario, sandbox match

@@ -40,10 +40,27 @@ describe("WikiPage", () => {
     expect(screen.getByRole("heading", { name: "Common Mistakes" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Related Topics" })).toBeInTheDocument();
     expect(screen.getByText(/current base value is 3 Mana/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Mana Source" })).toBeInTheDocument();
+    expect(screen.getAllByText("Base Mana").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: "Buildings" }).at(-1)!);
 
     expect(onNavigate).toHaveBeenCalledWith("/wiki/buildings");
+  });
+
+  it("renders the Deck Rules topic with the Deck recipe legality widget", () => {
+    renderWiki({ topicSlug: "deck-rules" });
+
+    expect(screen.getByRole("heading", { name: "Deck Rules" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Deck Recipe Legality" })).toBeInTheDocument();
+    expect(screen.getByText("Draft deck recipe")).toBeInTheDocument();
+  });
+
+  it("keeps the overview as an index without embedded scenes", () => {
+    renderWiki();
+
+    expect(screen.queryByText("Interactive Rule")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Hex board" })).not.toBeInTheDocument();
   });
 
   it("renders a not-found state for unknown wiki topics", () => {

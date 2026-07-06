@@ -1,7 +1,9 @@
 import { BookOpen, ChevronRight, House, LibraryBig, List } from "lucide-react";
 import type { AccountProps } from "../appTypes";
 import { TopNav } from "../components/common";
+import { WikiScenePanel } from "../wiki/WikiScenePanel";
 import { WIKI_TOPICS, wikiTopicById, type WikiTopic } from "../wiki/wikiContent";
+import { wikiSceneById } from "../wiki/wikiScenes";
 
 type WikiPageProps = {
   topicSlug: string | null;
@@ -86,6 +88,8 @@ function WikiOverview({ onNavigate }: { onNavigate: (to: string) => void }) {
 }
 
 function WikiTopicPage({ topic, onNavigate }: { topic: WikiTopic; onNavigate: (to: string) => void }) {
+  const scene = wikiSceneById(topic.sceneId);
+
   return (
     <section className="wiki-layout wiki-detail-layout" aria-label={`${topic.title} rules`}>
       <WikiTopicNav activeTopicId={topic.id} onNavigate={onNavigate} />
@@ -95,6 +99,14 @@ function WikiTopicPage({ topic, onNavigate }: { topic: WikiTopic; onNavigate: (t
           <h1>{topic.title}</h1>
           <p>{topic.summary}</p>
         </header>
+
+        {scene ? (
+          <WikiScenePanel scene={scene} />
+        ) : import.meta.env.DEV ? (
+          <p className="wiki-scene-missing" role="status">
+            Missing wiki scene for {topic.sceneId}.
+          </p>
+        ) : null}
 
         <section className="wiki-article-section">
           <h2>Key Rules</h2>
