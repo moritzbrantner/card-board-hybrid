@@ -3,9 +3,13 @@ import { expect, test } from "@playwright/test";
 const MATCH_ID = "dev-play-unit-card-e2e";
 
 test("loads a dev match scenario and navigates to the playable match route", async ({ page }) => {
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/dev/match-scenarios") {
       await route.fulfill({

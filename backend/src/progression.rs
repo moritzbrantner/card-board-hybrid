@@ -9,7 +9,9 @@ use crate::match_session::{
     HeroType, MatchProgressionEffects, MatchProgressionLoadout, MatchState, Side,
 };
 
+mod awards;
 mod catalog;
+mod loadouts;
 pub use catalog::summary_for_xp;
 use catalog::*;
 
@@ -471,7 +473,7 @@ impl<'a> ProgressionModule<'a> {
                 WHERE user_id = ?1 AND match_id = ?2
                 ",
                 params![user_id, match_id],
-                |row| match_award_from_row(row),
+                match_award_from_row,
             )
             .optional()
             .map_err(ProgressionError::from)

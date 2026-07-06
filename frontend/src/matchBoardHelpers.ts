@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import type {
   ActionTarget,
   Building,
+  BuildingEffect,
   Card,
   HexCoord,
   HexTile,
@@ -383,6 +384,14 @@ export function isLegalAttack(
     !attacker.hasAttacked &&
     distance(attacker.position, target.position) >= 1 &&
     distance(attacker.position, target.position) <= attacker.attackRange
+  );
+}
+
+export function buildingEffectIsActivated(effect: BuildingEffect) {
+  return (
+    effect.type === "activatedDamageLine" ||
+    effect.type === "activatedHeal" ||
+    effect.type === "activatedStatBonus"
   );
 }
 

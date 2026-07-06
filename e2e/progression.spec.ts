@@ -68,9 +68,13 @@ async function signInExperiencedAccount(page) {
 async function mockExperiencedAccountApi(page) {
   let progression = experiencedProgression();
 
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/auth/login" && request.method() === "POST") {
       const body = JSON.parse(request.postData() ?? "{}");

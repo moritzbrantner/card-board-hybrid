@@ -14,6 +14,9 @@ export default defineConfig({
   },
   webServer: {
     command: "bun run --cwd frontend dev --host 127.0.0.1",
+    env: {
+      VITE_DISABLE_BACKEND_PROXY: "1",
+    },
     url: "http://127.0.0.1:5173",
     reuseExistingServer: true,
     timeout: 30_000,

@@ -231,7 +231,7 @@ test("signed-in dashboard shows account, match, and deck summaries", async ({ pa
   await expect(page.getByRole("heading", { name: "Account Progression" })).toBeVisible();
   await expect(page.getByText("Next level in 60 XP")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Preferred Hero" })).toBeVisible();
-  await expect(page.getByText("Runekeeper")).toBeVisible();
+  await expect(page.getByText("Runekeeper")).toHaveCount(2);
   await expect(page.getByRole("heading", { name: "Deck Library" })).toBeVisible();
   await expect(page.getByText("Default: Default Legal")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Recent Matches" })).toBeVisible();
@@ -377,7 +377,7 @@ for (const { path, heading } of [
 for (const { path, message } of [
   { path: "/match/public-solo", message: "Missing test match" },
   { path: "/match/public-shared/seat-token", message: "Missing shared match" },
-  { path: "/matches/public-replay/replay", message: "Missing test replay" },
+  { path: "/matches/public-replay/replay", message: "Sign in to view this replay" },
 ]) {
   test(`signed-out players can open public route ${path} without auth redirect`, async ({
     page,
@@ -406,9 +406,13 @@ for (const { path, message } of [
 }
 
 async function mockAuthApi(page, authRequests = []) {
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/auth/login" && request.method() === "POST") {
       authRequests.push(url.pathname);

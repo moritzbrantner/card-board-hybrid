@@ -56,42 +56,42 @@ pub(super) fn prepare_connection(connection: &Connection) -> Result<(), MatchSto
         );
         ",
     )?;
-    identity::migrate(&connection)?;
-    deck_library::migrate(&connection)?;
-    progression::migrate(&connection)?;
+    identity::migrate(connection)?;
+    deck_library::migrate(connection)?;
+    progression::migrate(connection)?;
     #[cfg(debug_assertions)]
     {
-        let experienced_user_id = identity::seed_experienced_local_account(&connection)?;
-        progression::seed_experienced_local_mastery(&connection, experienced_user_id)?;
+        let experienced_user_id = identity::seed_experienced_local_account(connection)?;
+        progression::seed_experienced_local_mastery(connection, experienced_user_id)?;
     }
-    add_column_if_missing(&connection, "matches", "initial_snapshot_json", "TEXT")?;
-    add_column_if_missing(&connection, "matches", "completed_at", "INTEGER")?;
+    add_column_if_missing(connection, "matches", "initial_snapshot_json", "TEXT")?;
+    add_column_if_missing(connection, "matches", "completed_at", "INTEGER")?;
     add_column_if_missing(
-        &connection,
+        connection,
         "matches",
         "mode",
         "TEXT NOT NULL DEFAULT 'solo'",
     )?;
-    add_column_if_missing(&connection, "matches", "owner_user_id", "INTEGER")?;
-    add_column_if_missing(&connection, "shared_matches", "creator_user_id", "INTEGER")?;
-    let had_legacy_seat_hero = column_exists(&connection, "match_seats", "wizard_type")?;
-    add_column_if_missing(&connection, "match_seats", "hero_type", "TEXT")?;
-    add_column_if_missing(&connection, "match_seats", "participant_user_id", "INTEGER")?;
-    add_column_if_missing(&connection, "match_seats", "deck_recipe_name", "TEXT")?;
+    add_column_if_missing(connection, "matches", "owner_user_id", "INTEGER")?;
+    add_column_if_missing(connection, "shared_matches", "creator_user_id", "INTEGER")?;
+    let had_legacy_seat_hero = column_exists(connection, "match_seats", "wizard_type")?;
+    add_column_if_missing(connection, "match_seats", "hero_type", "TEXT")?;
+    add_column_if_missing(connection, "match_seats", "participant_user_id", "INTEGER")?;
+    add_column_if_missing(connection, "match_seats", "deck_recipe_name", "TEXT")?;
     add_column_if_missing(
-        &connection,
+        connection,
         "match_seats",
         "deck_recipe_snapshot_json",
         "TEXT",
     )?;
     add_column_if_missing(
-        &connection,
+        connection,
         "match_seats",
         "progression_loadout_json",
         "TEXT",
     )?;
-    discard_legacy_hero_matches(&connection, had_legacy_seat_hero)?;
-    drop_column_if_exists(&connection, "match_seats", "wizard_type")?;
+    discard_legacy_hero_matches(connection, had_legacy_seat_hero)?;
+    drop_column_if_exists(connection, "match_seats", "wizard_type")?;
 
     Ok(())
 }

@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 use crate::match_session::HeroType;
 use crate::preferences;
 
+mod handles;
+mod passwords;
+mod sessions;
+
 pub const EXPERIENCED_LOCAL_EMAIL: &str = "experienced@local.dev";
 pub const EXPERIENCED_LOCAL_PASSWORD: &str = "experienced";
 pub const EXPERIENCED_LOCAL_XP: i64 = 20_000;

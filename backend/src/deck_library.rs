@@ -8,6 +8,9 @@ use crate::card_catalog::card_template_by_id;
 use crate::deck_recipe_legality::{self, DeckRecipeLegalityError, normalize_requested_cards};
 use crate::match_session::{Card, HeroType, Side};
 
+mod recipes;
+mod system_decks;
+
 pub const DECK_LIMIT_PER_ACCOUNT: usize = 30;
 pub use crate::deck_recipe_legality::{
     DeckCardCount, DeckCardCountRequest, DeckLegality, DeckRules, validate_recipe,

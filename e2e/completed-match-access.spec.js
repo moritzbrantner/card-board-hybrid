@@ -43,9 +43,13 @@ async function mockCompletedMatchAccessApi(page) {
     { key: AUTH_TOKEN_STORAGE_KEY },
   );
 
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/auth/me") {
       await route.fulfill({ status: 401, json: { message: "Sign in to continue." } });

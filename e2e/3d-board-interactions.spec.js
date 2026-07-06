@@ -623,9 +623,13 @@ async function useStoredBoardVisualMode(page, mode) {
 }
 
 async function mockMatchApi(page, handleAction, currentMatch) {
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/auth/me") {
       await route.fulfill({ status: 401, json: { message: "Signed out" } });
@@ -653,10 +657,14 @@ async function mockMatchApi(page, handleAction, currentMatch) {
 }
 
 async function mockReplayApi(page, match) {
-  await page.unroute("**/api/**");
-  await page.route("**/api/**", async (route) => {
+  await page.unroute("**://*/api/**");
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/auth/me") {
       await route.fulfill({ status: 401, json: { message: "Signed out" } });

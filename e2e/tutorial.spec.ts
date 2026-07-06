@@ -70,8 +70,13 @@ async function continueIntro(page) {
 }
 
 async function mockApi(page) {
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const url = new URL(route.request().url());
+
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/system-decks") {
       await route.fulfill({

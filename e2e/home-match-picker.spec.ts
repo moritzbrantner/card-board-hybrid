@@ -162,9 +162,13 @@ async function mockHomeApi(page, matchRequests, options = {}) {
           deckRecipe(103, "Needs More Basics", false, false),
         ];
 
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/auth/me") {
       if (signedIn) {

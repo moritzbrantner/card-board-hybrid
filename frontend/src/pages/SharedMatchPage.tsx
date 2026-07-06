@@ -55,6 +55,7 @@ import {
   heroOptionByType,
 } from "../labels";
 import {
+  buildingEffectIsActivated,
   buildingAt,
   cardFanStyle,
   cardTargetForTile,
@@ -72,7 +73,6 @@ import {
 import { createMatchVisualCatalog } from "../matchVisualIdentity";
 import type { HotkeyHandlers } from "../hotkeyRuntime";
 import type {
-  BuildingEffect,
   Card,
   CatalogCard,
   HexTile,
@@ -1093,13 +1093,5 @@ function SharedMatchEndOverlay({
         </button>
       </div>
     </section>
-  );
-}
-
-function buildingEffectIsActivated(effect: BuildingEffect) {
-  return (
-    effect.type === "activatedDamageLine" ||
-    effect.type === "activatedHeal" ||
-    effect.type === "activatedStatBonus"
   );
 }

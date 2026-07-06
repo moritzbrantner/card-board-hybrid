@@ -1,5 +1,7 @@
+use crate::app_state::SharedState;
+use crate::http_errors::{identity_error_response, unauthorized_response};
 use crate::identity::AccountProfile;
-use crate::*;
+use crate::identity::IdentityModule;
 use axum::http::{HeaderMap, header};
 
 pub(crate) fn bearer_token_from_headers(headers: &HeaderMap) -> Option<String> {

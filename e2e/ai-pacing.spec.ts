@@ -137,9 +137,13 @@ async function mockMatchApi(
   handleAction,
   currentMatch,
 ) {
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/catalog/cards") {
       await route.fulfill({ json: { cards: [] } });

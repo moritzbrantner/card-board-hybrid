@@ -151,9 +151,13 @@ test("solo board cursor selects and confirms a legal move", async ({ page }) => 
 });
 
 async function mockHotkeyApi(page, handleAction = null, currentMatch = null) {
-  await page.route("**/api/**", async (route) => {
+  await page.route("**://*/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
 
     if (url.pathname === "/api/auth/me") {
       await route.fulfill({ json: authUser() });

@@ -39,6 +39,7 @@ import { AccountActions, ShellMessage } from "../components/common";
 import { sideLabel } from "../labels";
 import { liveAiPlaybackFrames } from "../livePlayback";
 import {
+  buildingEffectIsActivated,
   cardFanStyle,
   buildingAt,
   cardTargetForTile,
@@ -60,7 +61,6 @@ import { createMatchVisualCatalog } from "../matchVisualIdentity";
 import type { HotkeyHandlers } from "../hotkeyRuntime";
 import type {
   Card,
-  BuildingEffect,
   CatalogCard,
   HexCoord,
   HexTile,
@@ -823,13 +823,5 @@ function MatchEndOverlay({
         </button>
       </div>
     </section>
-  );
-}
-
-function buildingEffectIsActivated(effect: BuildingEffect) {
-  return (
-    effect.type === "activatedDamageLine" ||
-    effect.type === "activatedHeal" ||
-    effect.type === "activatedStatBonus"
   );
 }

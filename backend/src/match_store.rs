@@ -17,7 +17,11 @@ use crate::progression;
 
 mod db_values;
 mod ids;
+mod matches;
+mod replays;
+mod rows;
 mod schema;
+mod shared_matches;
 use db_values::*;
 use ids::*;
 
