@@ -1,12 +1,14 @@
-import { ChevronLeft, ChevronRight, Eye, EyeOff, History, Play } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, EyeOff, History, LogIn, Play } from "lucide-react";
 import { useEffect, useState } from "react";
-import { loadReplay, loadSharedReplay } from "../api";
+import { ApiRequestError, loadReplay, loadSharedReplay } from "../api";
 import type { AccountPreferenceProps, ReplayLoadState } from "../appTypes";
 import { createBoardAnimationCue } from "../boardAnimations";
 import { Board, PlayerBadge } from "../components/board";
 import { AccountActions, ShellMessage } from "../components/common";
 import { useMatchChromeMinimized } from "../appHooks";
 import { eventDetail, eventSideLabel, eventTitle, sideLabel } from "../labels";
+import { protectedLoginRoute } from "../routes";
+import { shouldOfferCompletedMatchLogin } from "./privateMatchAccess";
 
 export function ReplayPage({
   matchId,
@@ -38,6 +40,7 @@ export function ReplayPage({
         setLoadState({
           status: "error",
           message: error instanceof Error ? error.message : "Could not load replay",
+          httpStatus: error instanceof ApiRequestError ? error.status : undefined,
         }),
       );
   }, [matchId, seatToken]);
@@ -47,6 +50,30 @@ export function ReplayPage({
   }
 
   if (loadState.status === "error") {
+    if (shouldOfferCompletedMatchLogin({ currentUser, seatToken, httpStatus: loadState.httpStatus })) {
+      const loginPath = protectedLoginRoute(
+        loginNextPath ?? `/matches/${encodeURIComponent(matchId)}/replay`,
+      );
+
+      return (
+        <ShellMessage
+          title={`Replay ${matchId}`}
+          message="Sign in to view this replay"
+          actions={
+            <>
+              <button className="primary-button" type="button" onClick={() => onNavigate(loginPath)}>
+                <LogIn size={18} />
+                Sign In
+              </button>
+              <button className="secondary-link" type="button" onClick={() => onNavigate("/matches")}>
+                Match Archive
+              </button>
+            </>
+          }
+        />
+      );
+    }
+
     return (
       <ShellMessage
         title={`Replay ${matchId}`}

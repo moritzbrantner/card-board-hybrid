@@ -44,12 +44,12 @@ export type MatchArchiveLoadState =
 export type ReplayLoadState =
   | { status: "loading" }
   | { status: "ready"; replay: MatchReplayResponse }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; httpStatus?: number };
 
 export type MatchSummaryLoadState =
   | { status: "loading" }
   | { status: "ready"; response: MatchSummaryResponse }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; httpStatus?: number };
 
 export type SharedLoadState =
   | { status: "loading" }

@@ -1,10 +1,12 @@
-import { Gauge, History, House, Play, Sparkles, Trophy } from "lucide-react";
+import { Gauge, History, House, LogIn, Play, Sparkles, Trophy } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { loadMatchSummary, loadSharedMatchSummary } from "../api";
+import { ApiRequestError, loadMatchSummary, loadSharedMatchSummary } from "../api";
 import type { AccountProps, MatchSummaryLoadState } from "../appTypes";
 import { AccountActions, DetailStat, ShellMessage } from "../components/common";
 import { formatUnixTime, heroOptionByType, sideLabel } from "../labels";
+import { protectedLoginRoute } from "../routes";
 import type { MatchRewardSummary, MatchSummaryResponse, MatchUnlockCallout } from "../types";
+import { shouldOfferCompletedMatchLogin } from "./privateMatchAccess";
 
 export function MatchSummaryPage({
   matchId,
@@ -29,6 +31,7 @@ export function MatchSummaryPage({
         setLoadState({
           status: "error",
           message: error instanceof Error ? error.message : "Could not load match summary",
+          httpStatus: error instanceof ApiRequestError ? error.status : undefined,
         }),
       );
   }, [matchId, seatToken]);
@@ -38,6 +41,31 @@ export function MatchSummaryPage({
   }
 
   if (loadState.status === "error") {
+    if (shouldOfferCompletedMatchLogin({ currentUser, seatToken, httpStatus: loadState.httpStatus })) {
+      const loginPath = protectedLoginRoute(
+        loginNextPath ?? `/matches/${encodeURIComponent(matchId)}/summary`,
+      );
+
+      return (
+        <ShellMessage
+          title={`Match ${matchId}`}
+          message="Sign in to view this match summary"
+          actions={
+            <>
+              <button className="primary-button" type="button" onClick={() => onNavigate(loginPath)}>
+                <LogIn size={18} />
+                Sign In
+              </button>
+              <button className="secondary-link" type="button" onClick={() => onNavigate("/play")}>
+                <Play size={18} />
+                Play
+              </button>
+            </>
+          }
+        />
+      );
+    }
+
     return (
       <ShellMessage
         title={`Match ${matchId}`}

@@ -35,6 +35,16 @@ type ApiError = {
   message?: string;
 };
 
+export class ApiRequestError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getAuthToken();
   const response = await fetch(path, {
@@ -51,7 +61,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       clearAuthToken();
     }
     const body = (await response.json().catch(() => ({}))) as ApiError;
-    throw new Error(body.message ?? `Request failed with ${response.status}`);
+    throw new ApiRequestError(body.message ?? `Request failed with ${response.status}`, response.status);
   }
 
   return (await response.json()) as T;
