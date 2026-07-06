@@ -1,30 +1,47 @@
 use std::collections::HashSet;
+use std::fs;
+use std::path::Path;
 
 use super::{
     ActionTarget, BuildingEffect, Card, CardKind, HexCoord, PieceView, Side, SpellEffect,
     card_interactions,
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug)]
-pub(super) struct SoloAiPolicy {
+pub(crate) struct SoloAiPolicy {
     rules: Vec<SoloAiRuleId>,
 }
 
 impl Default for SoloAiPolicy {
     fn default() -> Self {
-        Self {
-            rules: vec![
-                SoloAiRuleId::InRangeAttack,
-                SoloAiRuleId::UsefulSpell,
-                SoloAiRuleId::BuildManaSource,
-                SoloAiRuleId::HighestCostUnitSummon,
-                SoloAiRuleId::MoveTowardPlayerHero,
-            ],
-        }
+        Self::from_checked_in_config().unwrap_or_else(|_| Self::baseline())
     }
 }
 
 impl SoloAiPolicy {
+    pub(crate) fn baseline() -> Self {
+        Self::new(baseline_rules())
+    }
+
+    pub(crate) fn new(rules: Vec<SoloAiRuleId>) -> Self {
+        Self { rules }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn rule_order(&self) -> &[SoloAiRuleId] {
+        &self.rules
+    }
+
+    pub(crate) fn from_definition(definition: &AiPolicyDefinition) -> Self {
+        Self::new(definition.rules.clone())
+    }
+
+    pub(crate) fn from_checked_in_config() -> Result<Self, AiPolicyConfigError> {
+        let config = AiPolicyConfig::load_from_default_path()?;
+        config.default_policy()
+    }
+
     pub(super) fn decide(&self, view: &SoloAiView) -> SoloAiDecision {
         for rule in &self.rules {
             if let Some(intent) = self.evaluate_rule(*rule, view) {
@@ -33,11 +50,6 @@ impl SoloAiPolicy {
         }
 
         SoloAiDecision::FinishTurn
-    }
-
-    #[cfg(test)]
-    fn rule_order(&self) -> &[SoloAiRuleId] {
-        &self.rules
     }
 
     fn evaluate_rule(&self, rule: SoloAiRuleId, view: &SoloAiView) -> Option<SoloAiActionIntent> {
@@ -256,7 +268,7 @@ fn legal_spell_targets_for_ai<'a>(
 ) -> Vec<&'a PieceView> {
     card_interactions::legal_spell_targets(
         card,
-        Side::Opponent,
+        view.controlled_side,
         view.opponent_hero.position,
         &view.opponent_hero.id,
         candidates.iter(),
@@ -265,6 +277,7 @@ fn legal_spell_targets_for_ai<'a>(
 
 #[derive(Clone, Debug)]
 pub(super) struct SoloAiView {
+    pub(super) controlled_side: Side,
     pub(super) opponent_hero: PieceView,
     pub(super) player_hero: PieceView,
     pub(super) opponent_pieces: Vec<PieceView>,
@@ -303,13 +316,139 @@ pub(super) enum SoloAiActionIntent {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum SoloAiRuleId {
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum SoloAiRuleId {
     InRangeAttack,
     UsefulSpell,
     BuildManaSource,
     HighestCostUnitSummon,
     MoveTowardPlayerHero,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiPolicyConfig {
+    pub(crate) default_policy_id: String,
+    pub(crate) policies: Vec<AiPolicyDefinition>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiPolicyDefinition {
+    pub(crate) id: String,
+    pub(crate) rules: Vec<SoloAiRuleId>,
+}
+
+#[derive(Debug)]
+pub(crate) enum AiPolicyConfigError {
+    Io(std::io::Error),
+    Json(serde_json::Error),
+    MissingDefault(String),
+    EmptyPolicy(String),
+    DuplicatePolicy(String),
+}
+
+impl std::fmt::Display for AiPolicyConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "could not read AI policy config: {error}"),
+            Self::Json(error) => write!(f, "could not parse AI policy config: {error}"),
+            Self::MissingDefault(id) => write!(f, "default AI policy was not found: {id}"),
+            Self::EmptyPolicy(id) => write!(f, "AI policy has no rules: {id}"),
+            Self::DuplicatePolicy(id) => write!(f, "duplicate AI policy id: {id}"),
+        }
+    }
+}
+
+impl std::error::Error for AiPolicyConfigError {}
+
+impl From<std::io::Error> for AiPolicyConfigError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<serde_json::Error> for AiPolicyConfigError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Json(error)
+    }
+}
+
+impl AiPolicyConfig {
+    pub(crate) fn load_from_default_path() -> Result<Self, AiPolicyConfigError> {
+        Self::load_from_path(default_policy_config_path())
+    }
+
+    pub(crate) fn load_from_path(path: impl AsRef<Path>) -> Result<Self, AiPolicyConfigError> {
+        let text = fs::read_to_string(path)?;
+        Self::from_json(&text)
+    }
+
+    pub(crate) fn from_json(text: &str) -> Result<Self, AiPolicyConfigError> {
+        let config: Self = serde_json::from_str(text)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), AiPolicyConfigError> {
+        let mut ids = HashSet::new();
+        for policy in &self.policies {
+            if !ids.insert(policy.id.clone()) {
+                return Err(AiPolicyConfigError::DuplicatePolicy(policy.id.clone()));
+            }
+            if policy.rules.is_empty() {
+                return Err(AiPolicyConfigError::EmptyPolicy(policy.id.clone()));
+            }
+        }
+        if !self
+            .policies
+            .iter()
+            .any(|policy| policy.id == self.default_policy_id)
+        {
+            return Err(AiPolicyConfigError::MissingDefault(
+                self.default_policy_id.clone(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn default_policy(&self) -> Result<SoloAiPolicy, AiPolicyConfigError> {
+        let policy = self
+            .policy(&self.default_policy_id)
+            .ok_or_else(|| AiPolicyConfigError::MissingDefault(self.default_policy_id.clone()))?;
+        Ok(SoloAiPolicy::from_definition(policy))
+    }
+
+    pub(crate) fn policy(&self, id: &str) -> Option<&AiPolicyDefinition> {
+        self.policies.iter().find(|policy| policy.id == id)
+    }
+
+    pub(crate) fn set_default_policy_id(&mut self, id: &str) -> Result<(), AiPolicyConfigError> {
+        if self.policy(id).is_none() {
+            return Err(AiPolicyConfigError::MissingDefault(id.to_string()));
+        }
+        self.default_policy_id = id.to_string();
+        Ok(())
+    }
+}
+
+pub(crate) fn default_policy_config_path() -> &'static str {
+    if Path::new("backend/config/ai-policies.json").exists() {
+        "backend/config/ai-policies.json"
+    } else {
+        "config/ai-policies.json"
+    }
+}
+
+fn baseline_rules() -> Vec<SoloAiRuleId> {
+    vec![
+        SoloAiRuleId::InRangeAttack,
+        SoloAiRuleId::UsefulSpell,
+        SoloAiRuleId::BuildManaSource,
+        SoloAiRuleId::HighestCostUnitSummon,
+        SoloAiRuleId::MoveTowardPlayerHero,
+    ]
 }
 
 fn piece_can_attack(attacker: &PieceView, target: &PieceView) -> bool {
@@ -340,6 +479,7 @@ mod tests {
             .collect();
 
         SoloAiView {
+            controlled_side: Side::Opponent,
             opponent_hero,
             player_hero,
             opponent_pieces,
@@ -413,7 +553,7 @@ mod tests {
     #[test]
     fn rule_order_is_stable() {
         assert_eq!(
-            SoloAiPolicy::default().rule_order(),
+            SoloAiPolicy::baseline().rule_order(),
             &[
                 SoloAiRuleId::InRangeAttack,
                 SoloAiRuleId::UsefulSpell,

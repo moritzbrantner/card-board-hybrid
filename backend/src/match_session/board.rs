@@ -1,7 +1,7 @@
 use super::{Building, BuildingEffect, HexBoard, HexCoord, HexTile, PieceView};
 
 impl HexBoard {
-    pub(super) fn new(radius: i32) -> Self {
+    pub(crate) fn new(radius: i32) -> Self {
         let mut tiles = Vec::new();
         for q in -radius..=radius {
             for r in -radius..=radius {

@@ -120,6 +120,34 @@ _Avoid_: offline match
 The backend-owned decision policy that chooses the Opponent's next intent during a Solo match.
 _Avoid_: bot logic, enemy AI, opponent automation
 
+**Self-play match**:
+An in-memory simulation where both sides are controlled by AI policies for balance evaluation.
+_Avoid_: persisted AI match, spectator match
+
+**AI policy**:
+A named ordered list of engine-owned heuristic rules that chooses legal match actions.
+_Avoid_: model, bot script
+
+**AI policy variant**:
+A candidate AI policy evaluated against the default policy.
+_Avoid_: experiment bot, AI build
+
+**Rule preset**:
+A typed experiment configuration that changes match setup or numeric Card-template values without adding new Card effect semantics.
+_Avoid_: rules patch, effect script
+
+**Simulation suite**:
+A deterministic set of loadouts, seeds, seat directions, rule presets, and policies to evaluate.
+_Avoid_: batch run, benchmark
+
+**Promotion gate**:
+The required metrics a candidate AI policy must pass before becoming the default Solo AI policy.
+_Avoid_: leaderboard, score cutoff
+
+**Simulation report**:
+The CLI output containing aggregate metrics, Promotion gate results, promoted policy status, and sampled replay files.
+_Avoid_: replay archive, match history
+
 **Shared match**:
 A human-vs-human match reached through two private seat links.
 _Avoid_: online match, lobby match

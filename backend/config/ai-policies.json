@@ -1,0 +1,25 @@
+{
+  "defaultPolicyId": "baseline-v1",
+  "policies": [
+    {
+      "id": "baseline-v1",
+      "rules": [
+        "inRangeAttack",
+        "usefulSpell",
+        "buildManaSource",
+        "highestCostUnitSummon",
+        "moveTowardPlayerHero"
+      ]
+    },
+    {
+      "id": "candidate-aggressive-v1",
+      "rules": [
+        "inRangeAttack",
+        "highestCostUnitSummon",
+        "usefulSpell",
+        "moveTowardPlayerHero",
+        "buildManaSource"
+      ]
+    }
+  ]
+}

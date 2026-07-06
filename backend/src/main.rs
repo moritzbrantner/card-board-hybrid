@@ -1,28 +1,8 @@
-mod app_state;
-mod auth_context;
-mod card_catalog;
-mod deck_library;
-mod deck_recipe_legality;
-mod http_errors;
-mod http_types;
-mod identity;
-mod loadout_resolution;
-mod match_access;
-mod match_commands;
-mod match_session;
-mod match_store;
-mod preferences;
-mod progression;
-mod routes;
-
 use std::net::SocketAddr;
 
 use axum::Router;
-pub(crate) use http_types::*;
-#[cfg(test)]
-use match_session::Side;
-use match_store::SqliteMatchStore;
-use routes::create_app;
+use backend::match_store::SqliteMatchStore;
+use backend::routes::create_app;
 
 #[tokio::main]
 async fn main() {
@@ -40,7 +20,3 @@ async fn serve(app: Router) {
     println!("backend listening on http://{addr}");
     axum::serve(listener, app).await.expect("server should run");
 }
-
-#[cfg(test)]
-#[path = "main_tests/mod.rs"]
-mod tests;

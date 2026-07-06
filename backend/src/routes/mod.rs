@@ -29,7 +29,7 @@ use tokio::time::{self, Duration, Instant};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
-pub(crate) fn create_app(store: SqliteMatchStore) -> Router {
+pub fn create_app(store: SqliteMatchStore) -> Router {
     let state = Arc::new(AppState::new(store));
     let cors = CorsLayer::new()
         .allow_origin(Any)

@@ -111,8 +111,8 @@ pub struct PlayerState {
     pub hand: Vec<Card>,
     pub deck_count: usize,
     pub discard_count: usize,
-    pub(super) deck: Vec<Card>,
-    pub(super) discard: Vec<Card>,
+    pub(crate) deck: Vec<Card>,
+    pub(crate) discard: Vec<Card>,
     pub(super) rng_seed: u64,
     pub(super) has_started_first_turn: bool,
     #[serde(default)]

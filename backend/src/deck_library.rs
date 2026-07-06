@@ -594,6 +594,10 @@ pub fn system_deck_response() -> SystemDeckListResponse {
     }
 }
 
+pub(crate) fn ai_lab_system_decks() -> Vec<SystemDeckRecipe> {
+    system_decks()
+}
+
 pub fn starter_deck_snapshot() -> DeckRecipeSnapshot {
     let starter = system_deck_by_id("balanced-starter").expect("starter system deck should exist");
     DeckRecipeSnapshot {

@@ -1,0 +1,19 @@
+{
+  "suites": [
+    {
+      "id": "default",
+      "baselinePolicyId": "baseline-v1",
+      "candidatePolicyIds": ["candidate-aggressive-v1"],
+      "systemDeckMatrix": true,
+      "seatDirections": ["candidateAsPlayer", "candidateAsOpponent"],
+      "minimumCompletedGames": 200,
+      "minimumCandidateWinRate": 0.6,
+      "maximumDrawRate": 0.1,
+      "minimumMedianActions": 8,
+      "maximumMedianActions": 240,
+      "seeds": [1, 2, 3],
+      "maxActions": 300
+    }
+  ],
+  "rulePresets": []
+}

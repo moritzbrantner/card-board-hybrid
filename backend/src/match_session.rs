@@ -25,7 +25,8 @@ pub(crate) use types::{DestroyedUnit, PieceView, StatBonus};
 
 use board::piece_can_attack;
 use serialization::MatchSnapshot;
-use solo_ai_policy::{SoloAiActionIntent, SoloAiDecision, SoloAiPolicy, SoloAiView};
+use solo_ai_policy::{SoloAiActionIntent, SoloAiDecision, SoloAiView};
+pub(crate) use solo_ai_policy::{AiPolicyConfig, SoloAiPolicy, default_policy_config_path};
 
 const BOARD_RADIUS: i32 = 3;
 const HERO_MANA: u8 = 3;
@@ -290,6 +291,25 @@ impl MatchState {
         game.start_turn(Side::Player, &mut ignored_frames, None);
 
         game
+    }
+
+    pub(crate) fn new_ai_lab_with_seed_and_decks(
+        seed: u64,
+        player_hero_type: HeroType,
+        opponent_hero_type: HeroType,
+        player_deck: Vec<Card>,
+        opponent_deck: Vec<Card>,
+    ) -> Self {
+        Self::new_with_seed_hero_types_mode_and_decks(
+            seed,
+            player_hero_type,
+            opponent_hero_type,
+            MatchMode::Solo,
+            player_deck,
+            opponent_deck,
+            MatchProgressionLoadout::default(),
+            MatchProgressionLoadout::default(),
+        )
     }
 
     #[allow(dead_code, reason = "kept as the non-recording rules-engine API")]
@@ -1788,36 +1808,47 @@ impl MatchState {
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) -> Result<(), MatchError> {
+        let policy = SoloAiPolicy::default();
+        self.advance_ai_for_side_with_policy(Side::Opponent, &policy, frames, action_index)
+    }
+
+    pub(crate) fn advance_ai_for_side_with_policy(
+        &mut self,
+        side: Side,
+        policy: &SoloAiPolicy,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) -> Result<(), MatchError> {
         if self.mode != MatchMode::Solo {
             return Err(MatchError::AiUnavailable);
         }
 
         if !self.action_stack.is_empty() {
-            if self.priority_side != Some(Side::Opponent) {
+            if self.priority_side != Some(side) {
                 return Err(MatchError::NotPrioritySide);
             }
-            self.pass_priority_for_side(Side::Opponent, frames, action_index)?;
+            self.pass_priority_for_side(side, frames, action_index)?;
             return Ok(());
         }
 
-        if self.active_side != Side::Opponent {
+        if self.active_side != side {
             return Err(MatchError::AiUnavailable);
         }
 
-        let policy = SoloAiPolicy::default();
-        let decision = policy.decide(&self.solo_ai_view());
-        if self.apply_solo_ai_decision(decision, frames, action_index) {
+        let decision = policy.decide(&self.solo_ai_view_for_side(side));
+        if self.apply_ai_decision_for_side(side, decision, frames, action_index) {
             self.check_winner(frames, action_index);
         } else {
-            self.finish_opponent_turn(frames, action_index);
+            self.finish_ai_turn(side, frames, action_index);
         }
 
         self.truncate_log();
         Ok(())
     }
 
-    fn apply_solo_ai_decision(
+    fn apply_ai_decision_for_side(
         &mut self,
+        side: Side,
         decision: SoloAiDecision,
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
@@ -1827,49 +1858,53 @@ impl MatchState {
                 attacker_id,
                 target_id,
             }) => self
-                .attack_for_side(
-                    Side::Opponent,
-                    &attacker_id,
-                    &target_id,
-                    frames,
-                    action_index,
-                )
+                .attack_for_side(side, &attacker_id, &target_id, frames, action_index)
                 .is_ok(),
             SoloAiDecision::TakeAction(SoloAiActionIntent::PlayCard { card_id, target }) => self
-                .play_card_for_side(Side::Opponent, card_id, target, frames, action_index)
+                .play_card_for_side(side, card_id, target, frames, action_index)
                 .is_ok(),
             SoloAiDecision::TakeAction(SoloAiActionIntent::MovePiece { piece_id, to }) => self
-                .move_piece_for_side(Side::Opponent, &piece_id, to, frames, action_index)
+                .move_piece_for_side(side, &piece_id, to, frames, action_index)
                 .is_ok(),
             SoloAiDecision::FinishTurn => false,
         }
     }
 
-    fn finish_opponent_turn(
+    fn finish_ai_turn(
         &mut self,
+        side: Side,
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) {
-        self.log.insert(0, "Opponent ended their turn.".to_string());
+        let message = if side == Side::Opponent {
+            "Opponent ended their turn.".to_string()
+        } else {
+            "Player ended their turn.".to_string()
+        };
+        self.log.insert(0, message);
         self.record_replay_frame(
             frames,
             action_index,
             ReplayEvent::TurnEnded {
-                side: Side::Opponent,
+                side,
                 round: self.round,
             },
         );
 
         if self.phase == Phase::Planning {
-            self.round += 1;
-            self.start_turn(Side::Player, frames, action_index);
-            self.log.insert(0, format!("Round {} begins.", self.round));
-            self.truncate_log();
-            self.record_replay_frame(
-                frames,
-                action_index,
-                ReplayEvent::RoundStarted { round: self.round },
-            );
+            if side == Side::Opponent {
+                self.round += 1;
+            }
+            self.start_turn(side.opponent(), frames, action_index);
+            if side == Side::Opponent {
+                self.log.insert(0, format!("Round {} begins.", self.round));
+                self.truncate_log();
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::RoundStarted { round: self.round },
+                );
+            }
         }
     }
 
@@ -1938,21 +1973,26 @@ impl MatchState {
         }
     }
 
-    fn solo_ai_view(&self) -> SoloAiView {
-        let opponent_hero = PieceView::from(&self.opponent.hero);
-        let player_hero = PieceView::from(&self.player.hero);
+    pub(crate) fn player_mut_for_ai_lab(&mut self, side: Side) -> &mut PlayerState {
+        self.player_mut(side)
+    }
+
+    fn solo_ai_view_for_side(&self, side: Side) -> SoloAiView {
+        let opposing_side = side.opponent();
+        let opponent_hero = PieceView::from(&self.player_ref(side).hero);
+        let player_hero = PieceView::from(&self.player_ref(opposing_side).hero);
         let opponent_units: Vec<_> = self
             .board
             .units
             .iter()
-            .filter(|unit| unit.side == Side::Opponent)
+            .filter(|unit| unit.side == side)
             .map(PieceView::from)
             .collect();
         let player_units: Vec<_> = self
             .board
             .units
             .iter()
-            .filter(|unit| unit.side == Side::Player)
+            .filter(|unit| unit.side == opposing_side)
             .map(PieceView::from)
             .collect();
         let mut opponent_pieces = vec![opponent_hero.clone()];
@@ -1980,16 +2020,17 @@ impl MatchState {
         }
 
         SoloAiView {
+            controlled_side: side,
             opponent_hero,
             player_hero,
             opponent_pieces,
             player_pieces,
             opponent_units,
             player_units,
-            opponent_hand: self.opponent.hand.clone(),
-            opponent_mana: self.opponent.mana,
-            opponent_deck_count: self.opponent.deck_count,
-            opponent_discard_count: self.opponent.discard_count,
+            opponent_hand: self.player_ref(side).hand.clone(),
+            opponent_mana: self.player_ref(side).mana,
+            opponent_deck_count: self.player_ref(side).deck_count,
+            opponent_discard_count: self.player_ref(side).discard_count,
             valid_hexes,
             occupied_hexes,
             mana_sources,
@@ -2606,7 +2647,7 @@ impl Side {
         }
     }
 
-    fn opponent(self) -> Self {
+    pub(crate) fn opponent(self) -> Self {
         match self {
             Self::Player => Self::Opponent,
             Self::Opponent => Self::Player,
