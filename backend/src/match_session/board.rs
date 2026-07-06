@@ -31,6 +31,18 @@ impl HexBoard {
         coord.distance(HexCoord { q: 0, r: 0 }) <= self.radius
     }
 
+    pub(crate) fn replace_mana_wells(&mut self, coords: impl IntoIterator<Item = HexCoord>) {
+        self.mana_sources.clear();
+        self.buildings
+            .retain(|building| !matches!(building.effect, BuildingEffect::TurnStartMana { .. }));
+        for (index, coord) in coords.into_iter().enumerate() {
+            self.buildings.push(mana_well_building(
+                format!("preset-mana-{}", index + 1),
+                coord,
+            ));
+        }
+    }
+
     pub(super) fn migrate_legacy_mana_sources(&mut self) {
         if self.mana_sources.is_empty() {
             return;

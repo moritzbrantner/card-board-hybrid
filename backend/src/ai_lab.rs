@@ -8,11 +8,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::card_catalog::card_template_by_id;
-use crate::deck_library::{ai_lab_system_decks, deck_from_counts};
+use crate::deck_library::ai_lab_system_decks;
 use crate::match_session::{
-    AiPolicyConfig, Card, CardKind, HeroType, HexBoard, HexCoord, MatchError, MatchState, Phase,
+    AiPolicyConfig, Card, CardKind, HeroType, HexBoard, HexCoord, MatchError, MatchState,
     RecordedReplayFrame, Side, Unit, default_policy_config_path,
 };
+
+mod self_play;
+use self_play::{GameOutcome, GameSpec, SimulationGameResult, run_game};
 
 const DEFAULT_SUITE_PATH: &str = "backend/config/ai-lab-suites.json";
 const FALLBACK_SUITE_PATH: &str = "config/ai-lab-suites.json";
@@ -29,8 +32,9 @@ pub fn run(args: Vec<String>) -> Result<(), AiLabError> {
     let options = CliOptions::parse(&args[1..])?;
     match command {
         "validate-config" => {
-            load_policy_config()?;
-            load_suite_config()?;
+            let policy_config = load_policy_config()?;
+            let suite_config = load_suite_config()?;
+            suite_config.validate_with_policies(&policy_config)?;
             println!("AI lab config is valid.");
             Ok(())
         }
@@ -321,7 +325,10 @@ impl SuiteConfigFile {
                 )));
             }
             if suite.seeds.is_empty() {
-                return Err(AiLabError::Config(format!("suite {} has no seeds", suite.id)));
+                return Err(AiLabError::Config(format!(
+                    "suite {} has no seeds",
+                    suite.id
+                )));
             }
         }
         let mut preset_ids = HashSet::new();
@@ -333,6 +340,30 @@ impl SuiteConfigFile {
                 )));
             }
             preset.validate()?;
+        }
+        Ok(())
+    }
+
+    fn validate_with_policies(&self, policy_config: &AiPolicyConfig) -> Result<(), AiLabError> {
+        self.validate()?;
+        for suite in &self.suites {
+            if policy_config.policy(&suite.baseline_policy_id).is_none() {
+                return Err(AiLabError::Config(format!(
+                    "suite {} references missing baseline policy {}",
+                    suite.id, suite.baseline_policy_id
+                )));
+            }
+            for candidate_id in &suite.candidate_policy_ids {
+                if policy_config.policy(candidate_id).is_none() {
+                    return Err(AiLabError::Config(format!(
+                        "suite {} references missing candidate policy {}",
+                        suite.id, candidate_id
+                    )));
+                }
+            }
+            for preset_id in &suite.rule_preset_ids {
+                self.rule_preset(preset_id)?;
+            }
         }
         Ok(())
     }
@@ -355,7 +386,10 @@ impl SuiteConfigFile {
 impl RulePreset {
     fn validate(&self) -> Result<(), AiLabError> {
         let mut occupied = HashSet::new();
-        for (side, setup) in [(Side::Player, &self.player), (Side::Opponent, &self.opponent)] {
+        for (side, setup) in [
+            (Side::Player, &self.player),
+            (Side::Opponent, &self.opponent),
+        ] {
             let hero_position = setup
                 .as_ref()
                 .and_then(|setup| setup.hero.as_ref())
@@ -418,8 +452,8 @@ impl RulePreset {
             }
         }
         if !self.mana_sources.is_empty() {
-            game.board.mana_sources = self.mana_sources.clone();
-            game.board.buildings.clear();
+            game.board
+                .replace_mana_wells(self.mana_sources.iter().copied());
         }
         if !self.card_overrides.is_empty() {
             let overrides: HashMap<_, _> = self
@@ -558,9 +592,8 @@ fn cards_from_template_ids(side: Side, template_ids: &[String]) -> Result<Vec<Ca
 
 impl UnitSetup {
     fn to_unit(&self) -> Result<Unit, AiLabError> {
-        let card = card_template_by_id(&self.template_id).ok_or_else(|| {
-            AiLabError::Config(format!("unknown unit card {}", self.template_id))
-        })?;
+        let card = card_template_by_id(&self.template_id)
+            .ok_or_else(|| AiLabError::Config(format!("unknown unit card {}", self.template_id)))?;
         let CardKind::Unit {
             attack,
             armor,
@@ -618,35 +651,6 @@ fn apply_card_overrides(cards: &mut [Card], overrides: &HashMap<&str, &CardOverr
             _ => {}
         }
     }
-}
-
-#[derive(Clone, Debug)]
-struct GameSpec {
-    candidate_policy_id: String,
-    player_policy_id: String,
-    opponent_policy_id: String,
-    player_deck_id: String,
-    opponent_deck_id: String,
-    candidate_side: Side,
-    seed: u64,
-    rule_preset_id: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-struct SimulationGameResult {
-    spec: GameSpec,
-    outcome: GameOutcome,
-    action_count: u32,
-    frames: Vec<RecordedReplayFrame>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum GameOutcome {
-    CandidateWin,
-    BaselineWin,
-    Draw,
-    Timeout,
-    IllegalAction(String),
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -711,6 +715,7 @@ fn run_suite(suite_id: &str, out_dir: &Path) -> Result<SimulationReport, AiLabEr
     fs::create_dir_all(out_dir)?;
     let policy_config = load_policy_config()?;
     let suite_config = load_suite_config()?;
+    suite_config.validate_with_policies(&policy_config)?;
     let suite = suite_config.suite(suite_id)?;
     let baseline = policy_config
         .policy(&suite.baseline_policy_id)
@@ -836,95 +841,6 @@ fn expand_specs(
     Ok(specs)
 }
 
-fn run_game(
-    spec: &GameSpec,
-    baseline_policy: &crate::match_session::SoloAiPolicy,
-    candidate_policy: &crate::match_session::SoloAiPolicy,
-    config: &SuiteConfigFile,
-    max_actions: u32,
-) -> Result<SimulationGameResult, AiLabError> {
-    let player_deck = ai_lab_system_decks()
-        .into_iter()
-        .find(|deck| deck.id == spec.player_deck_id)
-        .ok_or_else(|| AiLabError::Deck(format!("unknown deck {}", spec.player_deck_id)))?;
-    let opponent_deck = ai_lab_system_decks()
-        .into_iter()
-        .find(|deck| deck.id == spec.opponent_deck_id)
-        .ok_or_else(|| AiLabError::Deck(format!("unknown deck {}", spec.opponent_deck_id)))?;
-    let player_cards = deck_from_counts(Side::Player, &player_deck.cards)
-        .map_err(|error| AiLabError::Deck(error.to_string()))?;
-    let opponent_cards = deck_from_counts(Side::Opponent, &opponent_deck.cards)
-        .map_err(|error| AiLabError::Deck(error.to_string()))?;
-    let mut game = MatchState::new_ai_lab_with_seed_and_decks(
-        spec.seed,
-        player_deck.hero_type,
-        opponent_deck.hero_type,
-        player_cards,
-        opponent_cards,
-    );
-    if let Some(preset_id) = &spec.rule_preset_id {
-        config.rule_preset(preset_id)?.apply(&mut game)?;
-    }
-    let mut frames = vec![game.initial_replay_frame()];
-    let mut action_count = 0;
-    while game.phase != Phase::MatchOver && action_count < max_actions {
-        let side = if !game.action_stack.is_empty() {
-            game.priority_side
-                .ok_or_else(|| AiLabError::Config("stack is pending without priority".to_string()))?
-        } else {
-            game.active_side
-        };
-        let policy = if side == spec.candidate_side {
-            candidate_policy
-        } else {
-            baseline_policy
-        };
-        let mut action_frames = Vec::new();
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            game.advance_ai_for_side_with_policy(
-                side,
-                policy,
-                &mut action_frames,
-                Some(action_count),
-            )
-        }));
-        match result {
-            Ok(Ok(())) => {
-                frames.extend(action_frames);
-                action_count += 1;
-            }
-            Ok(Err(error)) => {
-                return Ok(SimulationGameResult {
-                    spec: spec.clone(),
-                    outcome: GameOutcome::IllegalAction(error.to_string()),
-                    action_count,
-                    frames,
-                });
-            }
-            Err(_) => {
-                return Ok(SimulationGameResult {
-                    spec: spec.clone(),
-                    outcome: GameOutcome::IllegalAction("AI action panicked".to_string()),
-                    action_count,
-                    frames,
-                });
-            }
-        }
-    }
-    let outcome = match game.winner {
-        Some(winner) if winner == spec.candidate_side => GameOutcome::CandidateWin,
-        Some(_) => GameOutcome::BaselineWin,
-        None if action_count >= max_actions => GameOutcome::Timeout,
-        None => GameOutcome::Draw,
-    };
-    Ok(SimulationGameResult {
-        spec: spec.clone(),
-        outcome,
-        action_count,
-        frames,
-    })
-}
-
 fn summarize_candidate(
     candidate_policy_id: &str,
     results: &[SimulationGameResult],
@@ -957,7 +873,10 @@ fn summarize_candidate(
         .map(|result| result.action_count)
         .collect::<Vec<_>>();
     actions.sort_unstable();
-    let median_actions = actions.get(actions.len().saturating_sub(1) / 2).copied().unwrap_or(0);
+    let median_actions = actions
+        .get(actions.len().saturating_sub(1) / 2)
+        .copied()
+        .unwrap_or(0);
     let candidate_win_rate = if completed_games == 0 {
         0.0
     } else {
@@ -1161,7 +1080,28 @@ fn promote_from_report(report: &SimulationReport) -> Result<Option<String>, AiLa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::match_session::AiPolicyConfig;
+    use crate::deck_library::deck_from_counts;
+    use crate::match_session::{
+        AiAdvanceOutcome, AiPolicyConfig, BuildingEffect, SoloAiPolicy, SoloAiRuleId,
+    };
+
+    fn test_game() -> MatchState {
+        let deck = ai_lab_system_decks()
+            .into_iter()
+            .next()
+            .expect("AI lab system deck should exist");
+        let player_cards =
+            deck_from_counts(Side::Player, &deck.cards).expect("player deck should build");
+        let opponent_cards =
+            deck_from_counts(Side::Opponent, &deck.cards).expect("opponent deck should build");
+        MatchState::new_ai_lab_with_seed_and_decks(
+            42,
+            deck.hero_type,
+            deck.hero_type,
+            player_cards,
+            opponent_cards,
+        )
+    }
 
     #[test]
     fn policy_config_rejects_unknown_rule_ids() {
@@ -1171,6 +1111,94 @@ mod tests {
         .expect_err("unknown rule should be rejected");
 
         assert!(error.to_string().contains("unknown variant"));
+    }
+
+    #[test]
+    fn suite_config_validates_policy_and_preset_references() {
+        let policy_config = AiPolicyConfig::from_json(
+            r#"{"defaultPolicyId":"baseline-v1","policies":[{"id":"baseline-v1","rules":["inRangeAttack"]},{"id":"candidate","rules":["inRangeAttack"]}]}"#,
+        )
+        .expect("policy config should parse");
+        let suite = SimulationSuite {
+            id: "default".to_string(),
+            baseline_policy_id: "missing-baseline".to_string(),
+            candidate_policy_ids: vec!["candidate".to_string()],
+            system_deck_matrix: false,
+            seat_directions: vec![SeatDirection::CandidateAsPlayer],
+            minimum_completed_games: 1,
+            minimum_candidate_win_rate: 0.5,
+            maximum_draw_rate: 1.0,
+            minimum_median_actions: 1,
+            maximum_median_actions: 20,
+            seeds: vec![1],
+            rule_preset_ids: Vec::new(),
+            max_actions: DEFAULT_MAX_ACTIONS,
+        };
+        let config = SuiteConfigFile {
+            suites: vec![suite],
+            rule_presets: Vec::new(),
+        };
+        assert!(
+            config
+                .validate_with_policies(&policy_config)
+                .expect_err("missing baseline should fail")
+                .to_string()
+                .contains("missing baseline policy")
+        );
+
+        let suite = SimulationSuite {
+            id: "default".to_string(),
+            baseline_policy_id: "baseline-v1".to_string(),
+            candidate_policy_ids: vec!["missing-candidate".to_string()],
+            system_deck_matrix: false,
+            seat_directions: vec![SeatDirection::CandidateAsPlayer],
+            minimum_completed_games: 1,
+            minimum_candidate_win_rate: 0.5,
+            maximum_draw_rate: 1.0,
+            minimum_median_actions: 1,
+            maximum_median_actions: 20,
+            seeds: vec![1],
+            rule_preset_ids: Vec::new(),
+            max_actions: DEFAULT_MAX_ACTIONS,
+        };
+        let config = SuiteConfigFile {
+            suites: vec![suite],
+            rule_presets: Vec::new(),
+        };
+        assert!(
+            config
+                .validate_with_policies(&policy_config)
+                .expect_err("missing candidate should fail")
+                .to_string()
+                .contains("missing candidate policy")
+        );
+
+        let suite = SimulationSuite {
+            id: "default".to_string(),
+            baseline_policy_id: "baseline-v1".to_string(),
+            candidate_policy_ids: vec!["candidate".to_string()],
+            system_deck_matrix: false,
+            seat_directions: vec![SeatDirection::CandidateAsPlayer],
+            minimum_completed_games: 1,
+            minimum_candidate_win_rate: 0.5,
+            maximum_draw_rate: 1.0,
+            minimum_median_actions: 1,
+            maximum_median_actions: 20,
+            seeds: vec![1],
+            rule_preset_ids: vec!["missing-preset".to_string()],
+            max_actions: DEFAULT_MAX_ACTIONS,
+        };
+        let config = SuiteConfigFile {
+            suites: vec![suite],
+            rule_presets: Vec::new(),
+        };
+        assert!(
+            config
+                .validate_with_policies(&policy_config)
+                .expect_err("missing preset should fail")
+                .to_string()
+                .contains("rule preset was not found")
+        );
     }
 
     #[test]
@@ -1236,13 +1264,103 @@ mod tests {
     }
 
     #[test]
+    fn rule_preset_mana_sources_apply_as_building_backed_mana_wells() {
+        let mut game = test_game();
+        game.board.mana_sources.push(HexCoord { q: 2, r: 0 });
+        let preset = RulePreset {
+            id: "mana".to_string(),
+            player: None,
+            opponent: None,
+            units: Vec::new(),
+            mana_sources: vec![HexCoord { q: 0, r: 2 }],
+            card_overrides: Vec::new(),
+        };
+
+        preset.apply(&mut game).expect("preset should apply");
+
+        assert!(game.board.mana_sources.is_empty());
+        assert!(game.board.buildings.iter().any(|building| {
+            building.id == "preset-mana-1"
+                && building.position == HexCoord { q: 0, r: 2 }
+                && matches!(building.effect, BuildingEffect::TurnStartMana { amount: 1 })
+        }));
+    }
+
+    #[test]
+    fn self_play_records_invalid_ai_intent_as_illegal_action() {
+        let invalid_policy = SoloAiPolicy::new(vec![SoloAiRuleId::InvalidAttack]);
+        let baseline_policy = SoloAiPolicy::baseline();
+        let config = SuiteConfigFile {
+            suites: Vec::new(),
+            rule_presets: Vec::new(),
+        };
+        let spec = GameSpec {
+            candidate_policy_id: "candidate".to_string(),
+            player_policy_id: "candidate".to_string(),
+            opponent_policy_id: "baseline-v1".to_string(),
+            player_deck_id: "balanced-starter".to_string(),
+            opponent_deck_id: "balanced-starter".to_string(),
+            candidate_side: Side::Player,
+            seed: 42,
+            rule_preset_id: None,
+        };
+
+        let result = run_game(&spec, &baseline_policy, &invalid_policy, &config, 10)
+            .expect("game should return a result");
+
+        assert!(matches!(
+            result.outcome,
+            GameOutcome::IllegalAction(ref reason) if reason.contains("piece not found")
+        ));
+        assert_eq!(result.action_count, 0);
+    }
+
+    #[test]
+    fn live_ai_advancement_still_finishes_turn_for_invalid_intent() {
+        let invalid_policy = SoloAiPolicy::new(vec![SoloAiRuleId::InvalidAttack]);
+        let mut forgiving_game = test_game();
+        let mut forgiving_frames = Vec::new();
+
+        forgiving_game
+            .advance_ai_for_side_with_policy(
+                Side::Player,
+                &invalid_policy,
+                &mut forgiving_frames,
+                Some(0),
+            )
+            .expect("forgiving live path should not error");
+
+        assert_eq!(forgiving_game.active_side, Side::Opponent);
+
+        let mut strict_game = test_game();
+        let mut strict_frames = Vec::new();
+        let strict_outcome = strict_game
+            .advance_ai_for_side_with_policy_strict(
+                Side::Player,
+                &invalid_policy,
+                &mut strict_frames,
+                Some(0),
+            )
+            .expect("strict path should return an outcome");
+
+        assert!(matches!(
+            strict_outcome,
+            AiAdvanceOutcome::IllegalIntent { reason } if reason.contains("piece not found")
+        ));
+        assert_eq!(strict_game.active_side, Side::Player);
+        assert!(strict_frames.is_empty());
+    }
+
+    #[test]
     fn self_play_result_is_deterministic_for_same_spec() {
         let policy_config = AiPolicyConfig::from_json(
             r#"{"defaultPolicyId":"baseline-v1","policies":[{"id":"baseline-v1","rules":["inRangeAttack","usefulSpell","buildManaSource","highestCostUnitSummon","moveTowardPlayerHero"]},{"id":"candidate","rules":["inRangeAttack","highestCostUnitSummon","usefulSpell","moveTowardPlayerHero","buildManaSource"]}]}"#,
         )
         .expect("policy config should parse");
         let baseline = crate::match_session::SoloAiPolicy::from_definition(
-            policy_config.policy("baseline-v1").expect("baseline exists"),
+            policy_config
+                .policy("baseline-v1")
+                .expect("baseline exists"),
         );
         let candidate = crate::match_session::SoloAiPolicy::from_definition(
             policy_config.policy("candidate").expect("candidate exists"),
@@ -1262,10 +1380,10 @@ mod tests {
             rule_preset_id: None,
         };
 
-        let first = run_game(&spec, &baseline, &candidate, &config, 40)
-            .expect("first game should run");
-        let second = run_game(&spec, &baseline, &candidate, &config, 40)
-            .expect("second game should run");
+        let first =
+            run_game(&spec, &baseline, &candidate, &config, 40).expect("first game should run");
+        let second =
+            run_game(&spec, &baseline, &candidate, &config, 40).expect("second game should run");
 
         assert_eq!(first.outcome, second.outcome);
         assert_eq!(first.action_count, second.action_count);

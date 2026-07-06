@@ -495,6 +495,14 @@ pub enum MatchActionRequest {
     AdvanceAi,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum AiAdvanceOutcome {
+    ActionApplied,
+    PriorityPassed,
+    FinishedTurn,
+    IllegalIntent { reason: String },
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(
     tag = "type",

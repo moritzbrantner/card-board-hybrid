@@ -54,6 +54,11 @@ impl SoloAiPolicy {
 
     fn evaluate_rule(&self, rule: SoloAiRuleId, view: &SoloAiView) -> Option<SoloAiActionIntent> {
         match rule {
+            #[cfg(test)]
+            SoloAiRuleId::InvalidAttack => Some(SoloAiActionIntent::Attack {
+                attacker_id: "missing-attacker".to_string(),
+                target_id: "missing-target".to_string(),
+            }),
             SoloAiRuleId::InRangeAttack => self.in_range_attack(view),
             SoloAiRuleId::UsefulSpell => self.useful_spell(view),
             SoloAiRuleId::BuildManaSource => self.build_mana_source(view),
@@ -319,6 +324,8 @@ pub(super) enum SoloAiActionIntent {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum SoloAiRuleId {
+    #[cfg(test)]
+    InvalidAttack,
     InRangeAttack,
     UsefulSpell,
     BuildManaSource,

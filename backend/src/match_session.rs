@@ -25,12 +25,20 @@ pub(crate) use types::{DestroyedUnit, PieceView, StatBonus};
 
 use board::piece_can_attack;
 use serialization::MatchSnapshot;
-use solo_ai_policy::{SoloAiActionIntent, SoloAiDecision, SoloAiView};
+#[cfg(test)]
+pub(crate) use solo_ai_policy::SoloAiRuleId;
 pub(crate) use solo_ai_policy::{AiPolicyConfig, SoloAiPolicy, default_policy_config_path};
+use solo_ai_policy::{SoloAiActionIntent, SoloAiDecision, SoloAiView};
 
 const BOARD_RADIUS: i32 = 3;
 const HERO_MANA: u8 = 3;
 const OPENING_HAND_SIZE: usize = 4;
+
+enum AiDecisionApplication {
+    Applied,
+    FinishTurn,
+    Illegal(MatchError),
+}
 
 impl MatchState {
     #[allow(dead_code, reason = "kept as the default rules-engine constructor")]
@@ -1819,6 +1827,28 @@ impl MatchState {
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) -> Result<(), MatchError> {
+        self.advance_ai_for_side_with_policy_mode(side, policy, frames, action_index, false)
+            .map(|_| ())
+    }
+
+    pub(crate) fn advance_ai_for_side_with_policy_strict(
+        &mut self,
+        side: Side,
+        policy: &SoloAiPolicy,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) -> Result<AiAdvanceOutcome, MatchError> {
+        self.advance_ai_for_side_with_policy_mode(side, policy, frames, action_index, true)
+    }
+
+    fn advance_ai_for_side_with_policy_mode(
+        &mut self,
+        side: Side,
+        policy: &SoloAiPolicy,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+        strict: bool,
+    ) -> Result<AiAdvanceOutcome, MatchError> {
         if self.mode != MatchMode::Solo {
             return Err(MatchError::AiUnavailable);
         }
@@ -1828,7 +1858,7 @@ impl MatchState {
                 return Err(MatchError::NotPrioritySide);
             }
             self.pass_priority_for_side(side, frames, action_index)?;
-            return Ok(());
+            return Ok(AiAdvanceOutcome::PriorityPassed);
         }
 
         if self.active_side != side {
@@ -1836,14 +1866,26 @@ impl MatchState {
         }
 
         let decision = policy.decide(&self.solo_ai_view_for_side(side));
-        if self.apply_ai_decision_for_side(side, decision, frames, action_index) {
-            self.check_winner(frames, action_index);
-        } else {
-            self.finish_ai_turn(side, frames, action_index);
-        }
+        let outcome = match self.apply_ai_decision_for_side(side, decision, frames, action_index) {
+            AiDecisionApplication::Applied => {
+                self.check_winner(frames, action_index);
+                AiAdvanceOutcome::ActionApplied
+            }
+            AiDecisionApplication::FinishTurn => {
+                self.finish_ai_turn(side, frames, action_index);
+                AiAdvanceOutcome::FinishedTurn
+            }
+            AiDecisionApplication::Illegal(error) if strict => AiAdvanceOutcome::IllegalIntent {
+                reason: error.to_string(),
+            },
+            AiDecisionApplication::Illegal(_) => {
+                self.finish_ai_turn(side, frames, action_index);
+                AiAdvanceOutcome::FinishedTurn
+            }
+        };
 
         self.truncate_log();
-        Ok(())
+        Ok(outcome)
     }
 
     fn apply_ai_decision_for_side(
@@ -1852,21 +1894,26 @@ impl MatchState {
         decision: SoloAiDecision,
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
-    ) -> bool {
+    ) -> AiDecisionApplication {
         match decision {
             SoloAiDecision::TakeAction(SoloAiActionIntent::Attack {
                 attacker_id,
                 target_id,
-            }) => self
-                .attack_for_side(side, &attacker_id, &target_id, frames, action_index)
-                .is_ok(),
+            }) => {
+                match self.attack_for_side(side, &attacker_id, &target_id, frames, action_index) {
+                    Ok(()) => AiDecisionApplication::Applied,
+                    Err(error) => AiDecisionApplication::Illegal(error),
+                }
+            }
             SoloAiDecision::TakeAction(SoloAiActionIntent::PlayCard { card_id, target }) => self
                 .play_card_for_side(side, card_id, target, frames, action_index)
-                .is_ok(),
+                .map(|()| AiDecisionApplication::Applied)
+                .unwrap_or_else(AiDecisionApplication::Illegal),
             SoloAiDecision::TakeAction(SoloAiActionIntent::MovePiece { piece_id, to }) => self
                 .move_piece_for_side(side, &piece_id, to, frames, action_index)
-                .is_ok(),
-            SoloAiDecision::FinishTurn => false,
+                .map(|()| AiDecisionApplication::Applied)
+                .unwrap_or_else(AiDecisionApplication::Illegal),
+            SoloAiDecision::FinishTurn => AiDecisionApplication::FinishTurn,
         }
     }
 
