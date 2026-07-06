@@ -120,13 +120,13 @@ function AnimatedPieceGroup({
 
   useEffect(() => {
     startedAtRef.current = performance.now();
-    groupRef.current?.position.copy(animation?.kind === "move" ? from : target);
-    groupRef.current?.scale.setScalar(animation?.kind === "summon" ? 0.35 : 1);
+    groupRef.current?.position?.copy(animation?.kind === "move" ? from : target);
+    groupRef.current?.scale?.setScalar(animation?.kind === "summon" ? 0.35 : 1);
   }, [animation, from, target]);
 
   useFrame(() => {
     const group = groupRef.current;
-    if (!group) {
+    if (!group || !group.position || !group.scale) {
       return;
     }
 
