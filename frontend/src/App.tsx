@@ -20,6 +20,7 @@ import {
   sharedMatchSummaryRouteFromPath,
   sharedMatchRouteFromPath,
   sharedReplayRouteFromPath,
+  wikiTopicSlugFromPath,
 } from "./routes";
 import { AuthPage } from "./pages/AuthPage";
 import { CatalogPage } from "./pages/CatalogPage";
@@ -35,6 +36,7 @@ import { ReplayPage } from "./pages/ReplayPage";
 import { RouteRedirect } from "./pages/RouteRedirect";
 import { SharedMatchPage } from "./pages/SharedMatchPage";
 import { TutorialPage } from "./pages/TutorialPage";
+import { WikiPage } from "./pages/WikiPage";
 
 export function App() {
   const [path, setPath] = useState(() => currentRoutePath());
@@ -225,6 +227,29 @@ export function App() {
         allowSignOut={false}
         loginNextPath={path}
         visualPreferences={visualPreferences}
+      />
+    );
+  }
+
+  if (normalizedPath === "/wiki") {
+    return (
+      <WikiPage
+        topicSlug={null}
+        currentUser={currentUser}
+        onNavigate={navigate}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
+
+  const wikiTopicSlug = wikiTopicSlugFromPath(path);
+  if (wikiTopicSlug) {
+    return (
+      <WikiPage
+        topicSlug={wikiTopicSlug}
+        currentUser={currentUser}
+        onNavigate={navigate}
+        onSignOut={handleSignOut}
       />
     );
   }

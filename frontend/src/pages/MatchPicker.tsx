@@ -249,6 +249,15 @@ export function PlayPage({
               <BookOpen size={18} />
               Tutorial
             </button>
+            <button
+              className="secondary-link"
+              type="button"
+              onClick={() => onNavigate("/wiki")}
+              disabled={busy}
+            >
+              <BookOpen size={18} />
+              Rules
+            </button>
           </div>
           <button
             className="secondary-link advanced-setup-toggle"

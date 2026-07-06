@@ -4,6 +4,7 @@ import {
   sharedMatchRouteFromPath,
   sharedMatchSummaryRouteFromPath,
   sharedReplayRouteFromPath,
+  wikiTopicSlugFromPath,
 } from "./routes";
 
 describe("route parsers", () => {
@@ -23,5 +24,16 @@ describe("route parsers", () => {
     });
     expect(sharedMatchRouteFromPath("/match/rl-123/player-token/summary")).toBeNull();
     expect(sharedMatchRouteFromPath("/match/rl-123/player-token/replay")).toBeNull();
+  });
+
+  it("parses wiki topic routes", () => {
+    expect(wikiTopicSlugFromPath("/wiki")).toBeNull();
+    expect(wikiTopicSlugFromPath("/wiki/")).toBeNull();
+    expect(wikiTopicSlugFromPath("/wiki/mana")).toBe("mana");
+    expect(wikiTopicSlugFromPath("/wiki/mana?from=play")).toBe("mana");
+    expect(wikiTopicSlugFromPath("/wiki/mana#top")).toBe("mana");
+    expect(wikiTopicSlugFromPath("/wiki/cards-and-priority")).toBe("cards-and-priority");
+    expect(wikiTopicSlugFromPath("/wiki/turn-flow/")).toBe("turn-flow");
+    expect(wikiTopicSlugFromPath("/wiki/mana/extra")).toBeNull();
   });
 });

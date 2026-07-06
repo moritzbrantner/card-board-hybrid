@@ -259,3 +259,11 @@ _Avoid_: fixture, dev scenario, sandbox match
 **Tutorial step**:
 One teaching beat inside a tutorial scene, consisting of a paused concept introduction, highlighted elements, and an expected interaction that can advance the tutorial.
 _Avoid_: tooltip, prompt
+
+**Rules wiki**:
+A public player-facing reference surface that explains Rune Lanes match rules and core mechanics through linked topic pages.
+_Avoid_: help center, docs site, internal rulebook
+
+**Wiki topic**:
+One rules wiki page focused on a single player-facing gameplay concept, such as Mana, Combat, or Buildings.
+_Avoid_: article, mechanic page, doc page

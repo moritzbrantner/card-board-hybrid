@@ -1,4 +1,4 @@
-import { Gauge, House, Layers, LibraryBig, LogIn, LogOut, History, Settings as SettingsIcon, User, WandSparkles } from "lucide-react";
+import { BookOpen, Gauge, House, Layers, LibraryBig, LogIn, LogOut, History, Settings as SettingsIcon, User, WandSparkles } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { AccountProps } from "../appTypes";
 import { avatarSymbolLabel } from "../labels";
@@ -147,6 +147,10 @@ export function TopNav({ currentUser, onNavigate, onSignOut, ...accountActionPro
         <button className="secondary-link" type="button" onClick={() => onNavigate("/catalog/")}>
           <LibraryBig size={18} />
           Catalog
+        </button>
+        <button className="secondary-link" type="button" onClick={() => onNavigate("/wiki")}>
+          <BookOpen size={18} />
+          Rules
         </button>
         {currentUser ? (
           <>

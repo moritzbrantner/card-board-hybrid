@@ -279,6 +279,10 @@ function SignedOutDashboard({ onNavigate }: { onNavigate: (to: string) => void }
           <BookOpen size={18} />
           Catalog
         </button>
+        <button className="secondary-link" type="button" onClick={() => onNavigate("/wiki")}>
+          <BookOpen size={18} />
+          Rules
+        </button>
         <button className="secondary-link" type="button" onClick={() => onNavigate("/tutorial")}>
           <BookOpen size={18} />
           Tutorial

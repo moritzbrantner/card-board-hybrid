@@ -110,3 +110,14 @@ export function publicDeckRouteFromPath(path: string) {
     deckId: Number(match[2]),
   };
 }
+
+export function wikiTopicSlugFromPath(path: string) {
+  const [pathname] = path.split(/[?#]/);
+  const normalized = pathname.replace(/\/+$/, "");
+  if (normalized === "/wiki") {
+    return null;
+  }
+
+  const match = normalized.match(/^\/wiki\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
