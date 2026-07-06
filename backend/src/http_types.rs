@@ -1,0 +1,482 @@
+use crate::deck_library;
+use crate::identity::{AccountProfile, BoardVisualMode, CreatedAuthSession, PublicAccountProfile};
+use crate::match_session::{
+    self, HeroType, MatchActionRequest, MatchMode, MatchState, RecordedReplayFrame, ReplayEvent,
+    ReplayVisibility, Side,
+};
+use crate::match_store::{
+    CreatedSharedMatch, SharedMatchStatus, StoredMatch, StoredMatchSummary, StoredReplayFrame,
+    StoredSharedMatch,
+};
+use crate::progression::{self, MatchRewardSummary, ProgressionSummary};
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize)]
+pub(crate) struct ApiError {
+    pub(crate) message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AuthRequest {
+    pub(crate) email: String,
+    pub(crate) password: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AuthUserResponse {
+    pub(crate) id: i64,
+    pub(crate) handle: String,
+    pub(crate) email: String,
+    pub(crate) display_name: String,
+    pub(crate) avatar: GeneratedAvatarResponse,
+    pub(crate) preferred_hero_type: HeroType,
+    pub(crate) board_visual_mode: BoardVisualMode,
+    pub(crate) progression_summary: ProgressionSummary,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AuthSessionResponse {
+    pub(crate) token: String,
+    pub(crate) user: AuthUserResponse,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AuthMessageResponse {
+    pub(crate) message: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GeneratedAvatarResponse {
+    pub(crate) symbol: String,
+    pub(crate) color: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PublicDeckOwnerResponse {
+    pub(crate) id: i64,
+    pub(crate) handle: String,
+    pub(crate) display_name: String,
+    pub(crate) avatar: GeneratedAvatarResponse,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PublicDeckRecipeResponse {
+    pub(crate) owner: PublicDeckOwnerResponse,
+    pub(crate) deck: deck_library::DeckRecipeSummary,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UpdateProfileRequest {
+    pub(crate) display_name: String,
+    pub(crate) handle: String,
+    pub(crate) avatar: GeneratedAvatarRequest,
+    #[serde(default, alias = "preferredWizardType")]
+    pub(crate) preferred_hero_type: Option<HeroType>,
+    #[serde(default)]
+    pub(crate) board_visual_mode: Option<BoardVisualMode>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GeneratedAvatarRequest {
+    pub(crate) symbol: String,
+    pub(crate) color: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CreateMatchRequest {
+    #[serde(default, alias = "wizardType")]
+    pub(crate) hero_type: Option<HeroType>,
+    #[serde(default)]
+    pub(crate) player_deck: Option<DeckChoiceRequest>,
+    #[serde(default)]
+    pub(crate) player_deck_id: Option<i64>,
+    #[serde(default)]
+    pub(crate) ai_opponent: Option<AiOpponentRequest>,
+    #[serde(default)]
+    pub(crate) rune_ids: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    tag = "source",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub(crate) enum AiOpponentRequest {
+    System {
+        system_deck_id: String,
+    },
+    Account {
+        deck_id: i64,
+        #[serde(alias = "wizardType")]
+        hero_type: HeroType,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(
+    tag = "source",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub(crate) enum DeckChoiceRequest {
+    Starter,
+    System { system_deck_id: String },
+    Account { deck_id: i64 },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct JoinSharedMatchRequest {
+    #[serde(alias = "wizardType")]
+    pub(crate) hero_type: HeroType,
+    #[serde(default)]
+    pub(crate) deck_choice: Option<DeckChoiceRequest>,
+    #[serde(default)]
+    pub(crate) deck_recipe_id: Option<i64>,
+    #[serde(default)]
+    pub(crate) rune_ids: Option<Vec<String>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchResponse {
+    pub(crate) match_id: String,
+    pub(crate) match_state: MatchState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) replay_frames: Vec<ReplayFrameResponse>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchArchiveResponse {
+    pub(crate) matches: Vec<MatchSummary>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchSummaryResponse {
+    pub(crate) match_id: String,
+    pub(crate) summary: MatchSummary,
+    pub(crate) viewer: MatchSummaryViewer,
+    pub(crate) reward: Option<MatchRewardSummary>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchSummaryViewer {
+    pub(crate) side: Option<Side>,
+    pub(crate) result: ViewerResult,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ViewerResult {
+    Victory,
+    Defeat,
+    Spectator,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchScenarioListResponse {
+    pub(crate) scenarios: Vec<MatchScenarioSummary>,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchScenarioSummary {
+    pub(crate) id: &'static str,
+    pub(crate) name: &'static str,
+    pub(crate) description: &'static str,
+    pub(crate) primary_actions: &'static [&'static str],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchSummary {
+    pub(crate) match_id: String,
+    pub(crate) mode: MatchMode,
+    pub(crate) created_at: i64,
+    pub(crate) updated_at: i64,
+    pub(crate) round: u32,
+    pub(crate) phase: match_session::Phase,
+    pub(crate) winner: Option<match_session::Side>,
+    pub(crate) frame_count: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchReplayResponse {
+    pub(crate) match_id: String,
+    pub(crate) visibility: ReplayVisibility,
+    pub(crate) summary: MatchSummary,
+    pub(crate) frames: Vec<ReplayFrameResponse>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReplayFrameResponse {
+    pub(crate) frame_index: u32,
+    pub(crate) action_index: Option<u32>,
+    pub(crate) event: ReplayEvent,
+    pub(crate) match_state: serde_json::Value,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CreateSharedMatchResponse {
+    pub(crate) match_id: String,
+    pub(crate) mode: &'static str,
+    pub(crate) status: &'static str,
+    pub(crate) viewer_side: Side,
+    pub(crate) player_seat_url: String,
+    pub(crate) invite_seat_url: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SharedMatchResponse {
+    pub(crate) match_id: String,
+    pub(crate) mode: &'static str,
+    pub(crate) status: &'static str,
+    pub(crate) viewer_side: Side,
+    pub(crate) viewer_hero_type: Option<HeroType>,
+    pub(crate) opponent_hero_type: Option<HeroType>,
+    pub(crate) viewer_ready: bool,
+    pub(crate) opponent_ready: bool,
+    pub(crate) active_side: Option<Side>,
+    pub(crate) opponent_connected: bool,
+    pub(crate) can_claim_forfeit_at: Option<i64>,
+    pub(crate) match_state: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub(crate) enum SharedClientMessage {
+    Action {
+        request_id: String,
+        action: MatchActionRequest,
+    },
+    ClaimForfeit {
+        request_id: String,
+    },
+    Heartbeat,
+}
+
+#[derive(Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub(crate) enum SharedServerMessage {
+    Snapshot {
+        payload: SharedMatchResponse,
+    },
+    ActionAccepted {
+        request_id: String,
+        payload: SharedMatchResponse,
+    },
+    ActionRejected {
+        request_id: String,
+        message: String,
+    },
+    PresenceChanged {
+        payload: SharedMatchResponse,
+    },
+    Error {
+        message: String,
+    },
+}
+
+#[allow(
+    clippy::result_large_err,
+    reason = "route helpers return Axum responses directly"
+)]
+impl From<AccountProfile> for AuthUserResponse {
+    fn from(profile: AccountProfile) -> Self {
+        Self {
+            id: profile.id,
+            handle: profile.public_handle,
+            email: profile.email,
+            display_name: profile.display_name,
+            avatar: GeneratedAvatarResponse {
+                symbol: profile.avatar.symbol,
+                color: profile.avatar.color,
+            },
+            preferred_hero_type: profile.preferred_hero_type,
+            board_visual_mode: profile.board_visual_mode,
+            progression_summary: progression::summary_for_xp(profile.total_xp),
+        }
+    }
+}
+
+impl From<PublicAccountProfile> for PublicDeckOwnerResponse {
+    fn from(profile: PublicAccountProfile) -> Self {
+        Self {
+            id: profile.id,
+            handle: profile.public_handle,
+            display_name: profile.display_name,
+            avatar: GeneratedAvatarResponse {
+                symbol: profile.avatar.symbol,
+                color: profile.avatar.color,
+            },
+        }
+    }
+}
+
+impl From<CreatedAuthSession> for AuthSessionResponse {
+    fn from(session: CreatedAuthSession) -> Self {
+        Self {
+            token: session.token,
+            user: AuthUserResponse::from(session.profile),
+        }
+    }
+}
+
+impl From<StoredMatch> for MatchResponse {
+    fn from(stored_match: StoredMatch) -> Self {
+        Self {
+            match_id: stored_match.id,
+            match_state: stored_match.state,
+            replay_frames: Vec::new(),
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+impl From<match_session::scenarios::MatchScenarioDefinition> for MatchScenarioSummary {
+    fn from(scenario: match_session::scenarios::MatchScenarioDefinition) -> Self {
+        Self {
+            id: scenario.id,
+            name: scenario.name,
+            description: scenario.description,
+            primary_actions: scenario.primary_actions,
+        }
+    }
+}
+
+impl MatchResponse {
+    pub(crate) fn from_stored_with_replay_frames(
+        stored_match: StoredMatch,
+        replay_frames: Vec<RecordedReplayFrame>,
+    ) -> Self {
+        Self {
+            match_id: stored_match.id,
+            match_state: stored_match.state,
+            replay_frames: replay_frames
+                .iter()
+                .enumerate()
+                .map(|(index, frame)| ReplayFrameResponse::from_recorded(index as u32, frame))
+                .collect(),
+        }
+    }
+}
+
+impl From<CreatedSharedMatch> for CreateSharedMatchResponse {
+    fn from(created: CreatedSharedMatch) -> Self {
+        Self {
+            player_seat_url: format!("/match/{}/{}", created.match_id, created.player_token),
+            invite_seat_url: format!("/match/{}/{}", created.match_id, created.opponent_token),
+            match_id: created.match_id,
+            mode: "shared",
+            status: "setup",
+            viewer_side: Side::Player,
+        }
+    }
+}
+
+impl From<StoredSharedMatch> for SharedMatchResponse {
+    fn from(shared: StoredSharedMatch) -> Self {
+        let active_side = shared.state.as_ref().and_then(|state| {
+            if state.phase == match_session::Phase::MatchOver {
+                None
+            } else {
+                Some(state.active_side)
+            }
+        });
+        let match_state = shared
+            .state
+            .as_ref()
+            .map(|state| state.public_value_for_side(shared.viewer_seat.side));
+        let opponent_connected = shared.opposing_seat.joined_at.is_some()
+            && shared.opposing_seat.disconnected_at.is_none();
+        let can_claim_forfeit_at = if shared.status == SharedMatchStatus::Active {
+            shared
+                .opposing_seat
+                .disconnected_at
+                .map(|disconnected_at| disconnected_at + 120)
+        } else {
+            None
+        };
+
+        Self {
+            match_id: shared.match_id,
+            mode: "shared",
+            status: shared.status.as_str(),
+            viewer_side: shared.viewer_seat.side,
+            viewer_hero_type: shared.viewer_seat.hero_type,
+            opponent_hero_type: shared.opposing_seat.hero_type,
+            viewer_ready: shared.viewer_seat.joined_at.is_some(),
+            opponent_ready: shared.opposing_seat.joined_at.is_some(),
+            active_side,
+            opponent_connected,
+            can_claim_forfeit_at,
+            match_state,
+        }
+    }
+}
+
+impl From<StoredMatchSummary> for MatchSummary {
+    fn from(summary: StoredMatchSummary) -> Self {
+        Self {
+            match_id: summary.id,
+            mode: summary.state.mode,
+            created_at: summary.created_at,
+            updated_at: summary.updated_at,
+            round: summary.state.round,
+            phase: summary.state.phase,
+            winner: summary.state.winner,
+            frame_count: summary.frame_count,
+        }
+    }
+}
+
+impl ReplayFrameResponse {
+    pub(crate) fn from_recorded(frame_index: u32, frame: &RecordedReplayFrame) -> Self {
+        Self {
+            frame_index,
+            action_index: frame.action_index,
+            event: frame.event.for_visibility(ReplayVisibility::Public),
+            match_state: MatchState::from_snapshot_json(&frame.snapshot_json)
+                .expect("recorded replay frame snapshot should deserialize")
+                .replay_value(ReplayVisibility::Public),
+        }
+    }
+
+    pub(crate) fn from_stored(frame: StoredReplayFrame, visibility: ReplayVisibility) -> Self {
+        Self {
+            frame_index: frame.frame_index,
+            action_index: frame.action_index,
+            event: frame.event.for_visibility(visibility),
+            match_state: frame.state.replay_value(visibility),
+        }
+    }
+}
