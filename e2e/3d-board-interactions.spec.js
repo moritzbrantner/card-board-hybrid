@@ -37,7 +37,7 @@ test("renders Solo matches as a full-screen board with persistent collapsible ch
   await expect(page.getByText("You", { exact: true })).toBeVisible();
   await expect(page.getByText("Opponent", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Enemy hand, 0 cards")).toBeVisible();
-  await expect(page.getByRole("button", { name: /Spark Jolt/ })).toBeVisible();
+  await expect(page.getByLabel("Hand").getByRole("button", { name: /Spark Jolt/ })).toBeVisible();
 
   await expect(page.getByRole("button", { name: "Pass Priority" })).toBeVisible();
   await page.getByRole("button", { name: "Minimize match chrome" }).click();
@@ -225,6 +225,89 @@ test("plays unit and spell card targets through the 3D board", async ({ page }) 
   );
 });
 
+test("shows queued stack targeting indicators and filters them from the board overlay", async ({ page }) => {
+  await useStoredBoardVisualMode(page, "3d");
+  const match = playableMatch({
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
+    prioritySide: "player",
+    actionStack: [
+      {
+        id: "pending-attack",
+        side: "opponent",
+        priority: 0,
+        action: {
+          type: "attack",
+          attackerId: "opponent-hero",
+          targetId: "player-hero",
+        },
+      },
+      {
+        id: "pending-spell",
+        side: "player",
+        priority: 1,
+        action: {
+          type: "castSpell",
+          card: {
+            templateId: "spark-jolt",
+            name: "Spark Jolt",
+            rarity: "basic",
+            cost: 1,
+            kind: { type: "spell", range: 2, priority: 1, effect: { type: "damage", amount: 1 } },
+          },
+          targetId: "opponent-hero",
+        },
+      },
+      {
+        id: "pending-move",
+        side: "player",
+        priority: 2,
+        action: {
+          type: "movePiece",
+          pieceId: "player-hero",
+          from: { q: 0, r: 1 },
+          to: { q: 0, r: 0 },
+        },
+      },
+    ],
+  });
+
+  await mockMatchApi(page, async () => matchResponse(match), () => match);
+
+  await page.goto(`/match/${MATCH_ID}`);
+  await expect(page.locator('section[data-board-renderer="3d"]')).toBeVisible();
+  await expect.poll(() => hasPainted3dCanvas(page)).toBe(true);
+  await expect(page.getByRole("region", { name: "Board stack targeting" })).toBeVisible();
+  await expect(page.locator("[data-targeting-stack-row='pending-attack']")).toBeVisible();
+  await expect(page.locator("[data-targeting-stack-row='pending-spell']")).toBeVisible();
+  await expect(page.locator("[data-targeting-stack-row='pending-move']")).toBeVisible();
+
+  await expect(page.locator("[data-targeting-indicator]")).toHaveCount(2);
+  await page.locator("[data-targeting-stack-row='pending-spell']").hover();
+  await expect(page.locator("[data-targeting-indicator]")).toHaveCount(1);
+  await expect(page.locator("[data-targeting-indicator]")).toHaveAttribute("data-stack-item-id", "pending-spell");
+
+  await tile(page, "q 0, r 1, occupied by your hero").click();
+  await expect(tile(page, "q 0, r 1, occupied by your hero")).toBeVisible();
+});
+
+test("shows selected spell targeting indicators in 2D mode", async ({ page }) => {
+  await useStoredBoardVisualMode(page, "2d");
+  const match = playableMatch({
+    playerHero: { q: 0, r: 1 },
+    opponentHero: { q: 1, r: 1 },
+    hand: [sparkJolt()],
+  });
+
+  await mockMatchApi(page, async () => matchResponse(match), () => match);
+
+  await page.goto(`/match/${MATCH_ID}`);
+  await expect(page.locator('section[data-board-renderer="2d"]')).toBeVisible();
+  await page.getByRole("button", { name: /Spark Jolt/ }).click();
+  await expect(page.locator("[data-targeting-indicator]")).toHaveCount(1);
+  await expect(page.locator("[data-targeting-primary]")).toHaveCount(1);
+});
+
 test("keeps projected 3D hit targets usable after viewport resize", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await useStoredBoardVisualMode(page, "3d");
@@ -346,7 +429,7 @@ test("respects disabled state, context menus, visible counts, and replay read-on
     opponentHero: { q: 1, r: 1 },
     units: [ashScout({ q: 0, r: 0 })],
   });
-  await page.reload();
+  await page.goto(`/match/${MATCH_ID}`);
   await expect(tile(page, "q 0, r 0, occupied by your unit")).toContainText("1/2 AP 2");
   await tile(page, "q 0, r 0, occupied by your unit").click({ button: "right" });
   await expect(page.getByRole("menu", { name: "Ash Scout actions" })).toBeVisible();

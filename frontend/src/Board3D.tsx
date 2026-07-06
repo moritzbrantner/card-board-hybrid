@@ -32,6 +32,7 @@ import type { MatchVisualCatalog, UnitVisualIdentity, HeroVisualIdentity } from 
 import type { HexCoord, HexTile, Side, Unit, HeroType } from "./types";
 import { BOARD_ANIMATION_DURATION_MS, type BoardAnimationCue, type PieceAnimation } from "./boardAnimations";
 import type { TutorialHighlightTone } from "./tutorial/tutorialHighlights";
+import type { TargetingIndicator } from "./targetingIndicators";
 
 const BOARD_CAMERA_MIN_DISTANCE = 5.8;
 const BOARD_CAMERA_MAX_DISTANCE = 14.5;
@@ -100,10 +101,12 @@ type Board3DProps = {
   readOnly: boolean;
   disabled: boolean;
   tileInteractions: Board3DTileInteraction[];
+  targetingIndicators: TargetingIndicator[];
   animation?: BoardAnimationCue | null;
   onTileClick?: (tile: HexTile) => void;
   onTileDrop?: (tile: HexTile, cardId: string) => void;
   onTileContextMenu?: (tile: HexTile, event: { clientX: number; clientY: number }) => void;
+  onTileHoverChange?: (coord: HexCoord | null) => void;
   onFatalRenderError: () => void;
   onAssetFailure?: (path: string) => void;
   manifest?: BoardPieceVisualManifest;
@@ -145,10 +148,12 @@ export function Board3DRenderer({
   readOnly,
   disabled,
   tileInteractions,
+  targetingIndicators,
   animation,
   onTileClick,
   onTileDrop,
   onTileContextMenu,
+  onTileHoverChange,
   onFatalRenderError,
   onAssetFailure,
   manifest = BOARD_PIECE_VISUAL_MANIFEST,
@@ -320,6 +325,10 @@ export function Board3DRenderer({
           />
         </Canvas>
         <div className="board-3d-hit-layer" aria-label="3D board controls">
+          <TargetingIndicatorLayer
+            indicators={targetingIndicators}
+            positionsByCoordKey={projectedHitTargets}
+          />
           {tileInteractions.map((interaction) => (
             <Board3DHitTarget
               key={coordKey(interaction.coord)}
@@ -330,12 +339,120 @@ export function Board3DRenderer({
               onClick={handleTileClick}
               onDrop={handleTileDrop}
               onContextMenu={handleTileContextMenu}
+              onHoverChange={onTileHoverChange}
             />
           ))}
         </div>
       </div>
     </Board3DErrorBoundary>
   );
+}
+
+export type BoardProjectedPosition = ProjectedBoardPosition;
+
+export type TargetingIndicatorLayerProps = {
+  indicators: TargetingIndicator[];
+  positionsByCoordKey: Map<string, BoardProjectedPosition>;
+};
+
+export function TargetingIndicatorLayer({
+  indicators,
+  positionsByCoordKey,
+}: TargetingIndicatorLayerProps) {
+  const visibleIndicators = indicators
+    .map((indicator) => ({
+      indicator,
+      sourcePosition: positionsByCoordKey.get(coordKey(indicator.sourceCoord)),
+      targetPosition: positionsByCoordKey.get(coordKey(indicator.primaryTargetCoord)),
+      footprintPositions: indicator.secondaryFootprintCoords
+        .map((coord) => positionsByCoordKey.get(coordKey(coord)))
+        .filter((position): position is BoardProjectedPosition => Boolean(position?.visible)),
+    }))
+    .filter(hasVisibleTargetingEndpoints);
+
+  if (visibleIndicators.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="targeting-indicator-layer" aria-hidden="true">
+      <svg className="targeting-indicator-svg">
+        <defs>
+          {visibleIndicators.map(({ indicator }, index) => (
+            <marker
+              id={`targeting-arrow-${index}`}
+              key={indicator.id}
+              markerWidth="12"
+              markerHeight="12"
+              refX="10"
+              refY="6"
+              orient="auto"
+              markerUnits="strokeWidth"
+            >
+              <path
+                className={`targeting-indicator-arrowhead targeting-indicator-${indicator.tone}`}
+                d="M 0 0 L 12 6 L 0 12 z"
+              />
+            </marker>
+          ))}
+        </defs>
+        {visibleIndicators.map(({ indicator, sourcePosition, targetPosition }, index) => (
+          <g
+            key={indicator.id}
+            className={`targeting-indicator targeting-indicator-${indicator.tone}`}
+            data-targeting-indicator={indicator.id}
+            data-targeting-action={indicator.actionType}
+            data-targeting-tone={indicator.tone}
+            data-stack-item-id={indicator.source.type === "stack" ? indicator.source.stackItemId : undefined}
+          >
+            <line
+              className="targeting-indicator-line"
+              x1={sourcePosition.x}
+              y1={sourcePosition.y}
+              x2={targetPosition.x}
+              y2={targetPosition.y}
+              markerEnd={`url(#targeting-arrow-${index})`}
+            />
+          </g>
+        ))}
+      </svg>
+      {visibleIndicators.map(({ indicator, sourcePosition, targetPosition, footprintPositions }) => (
+        <div key={`${indicator.id}-markers`}>
+          <span
+            className={`targeting-indicator-source targeting-indicator-marker targeting-indicator-${indicator.tone}`}
+            style={{ left: `${sourcePosition.x}px`, top: `${sourcePosition.y}px` }}
+          />
+          <span
+            className={`targeting-indicator-primary targeting-indicator-marker targeting-indicator-${indicator.tone}`}
+            style={{ left: `${targetPosition.x}px`, top: `${targetPosition.y}px` }}
+            data-targeting-primary={indicator.id}
+          />
+          {footprintPositions.map((position, index) => (
+            <span
+              key={`${indicator.id}-footprint-${index}`}
+              className={`targeting-indicator-footprint targeting-indicator-marker targeting-indicator-${indicator.tone}`}
+              style={{ left: `${position.x}px`, top: `${position.y}px` }}
+              data-targeting-footprint={indicator.id}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function hasVisibleTargetingEndpoints(entry: {
+  indicator: TargetingIndicator;
+  sourcePosition?: BoardProjectedPosition;
+  targetPosition?: BoardProjectedPosition;
+  footprintPositions: BoardProjectedPosition[];
+}): entry is {
+  indicator: TargetingIndicator;
+  sourcePosition: BoardProjectedPosition;
+  targetPosition: BoardProjectedPosition;
+  footprintPositions: BoardProjectedPosition[];
+} {
+  return Boolean(entry.sourcePosition?.visible && entry.targetPosition?.visible);
 }
 
 function ProjectedHitTargetSync({
@@ -1137,6 +1254,7 @@ function Board3DHitTarget({
   onClick,
   onDrop,
   onContextMenu,
+  onHoverChange,
 }: {
   interaction: Board3DTileInteraction;
   projectedPosition?: ProjectedBoardPosition;
@@ -1145,6 +1263,7 @@ function Board3DHitTarget({
   onClick: (coord: HexCoord) => void;
   onDrop: (coord: HexCoord, cardId: string) => void;
   onContextMenu: (coord: HexCoord, event: { clientX: number; clientY: number }) => void;
+  onHoverChange?: (coord: HexCoord | null) => void;
 }) {
   const className = [
     "board-3d-hit-target",
@@ -1177,6 +1296,10 @@ function Board3DHitTarget({
       data-board-3d-tile={coordKey(interaction.coord)}
       data-legal={interaction.isLegal ? "true" : "false"}
       onClick={() => onClick(interaction.coord)}
+      onPointerEnter={() => onHoverChange?.(interaction.coord)}
+      onPointerLeave={() => onHoverChange?.(null)}
+      onFocus={() => onHoverChange?.(interaction.coord)}
+      onBlur={() => onHoverChange?.(null)}
       onDragOver={(event: DragEvent<HTMLButtonElement>) => {
         if (readOnly || disabled || !interaction.isLegal) {
           return;

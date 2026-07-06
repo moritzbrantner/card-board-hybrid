@@ -1492,6 +1492,7 @@ h1 {
 }
 
 .board {
+  position: relative;
   display: grid;
   justify-items: center;
   max-width: 100%;
@@ -1584,6 +1585,103 @@ h1 {
   inset: 0;
   z-index: 2;
   pointer-events: none;
+}
+
+.targeting-indicator-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.targeting-indicator-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.targeting-indicator-line {
+  fill: none;
+  stroke-width: 4px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.88;
+  filter: drop-shadow(0 4px 9px rgba(0, 0, 0, 0.42));
+}
+
+.targeting-indicator-attack .targeting-indicator-line {
+  stroke: rgba(239, 127, 116, 0.94);
+}
+
+.targeting-indicator-damageSpell .targeting-indicator-line {
+  stroke: rgba(217, 184, 79, 0.94);
+}
+
+.targeting-indicator-supportSpell .targeting-indicator-line {
+  stroke: rgba(87, 196, 190, 0.94);
+}
+
+.targeting-indicator-arrowhead.targeting-indicator-attack {
+  fill: rgba(239, 127, 116, 0.94);
+}
+
+.targeting-indicator-arrowhead.targeting-indicator-damageSpell {
+  fill: rgba(217, 184, 79, 0.94);
+}
+
+.targeting-indicator-arrowhead.targeting-indicator-supportSpell {
+  fill: rgba(87, 196, 190, 0.94);
+}
+
+.targeting-indicator-marker {
+  position: absolute;
+  display: block;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.targeting-indicator-source {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #fffaf0;
+  box-shadow:
+    0 0 0 3px rgba(10, 13, 13, 0.68),
+    0 0 18px rgba(255, 250, 240, 0.28);
+}
+
+.targeting-indicator-primary {
+  width: 62px;
+  height: 62px;
+  border: 3px solid currentColor;
+  box-shadow:
+    inset 0 0 0 2px rgba(10, 13, 13, 0.68),
+    0 0 0 2px rgba(10, 13, 13, 0.58),
+    0 0 24px currentColor;
+}
+
+.targeting-indicator-footprint {
+  width: 54px;
+  height: 54px;
+  border: 2px dashed currentColor;
+  background: currentColor;
+  opacity: 0.24;
+  box-shadow: 0 0 18px currentColor;
+}
+
+.targeting-indicator-marker.targeting-indicator-attack {
+  color: rgba(239, 127, 116, 0.96);
+}
+
+.targeting-indicator-marker.targeting-indicator-damageSpell {
+  color: rgba(217, 184, 79, 0.96);
+}
+
+.targeting-indicator-marker.targeting-indicator-supportSpell {
+  color: rgba(87, 196, 190, 0.96);
 }
 
 .board-3d-hit-target {
@@ -1744,12 +1842,24 @@ h1 {
 }
 
 .hex-board {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   width: max-content;
   min-width: var(--hex-board-min-width);
   padding: 24px 0;
+}
+
+.hex-board-field {
+  position: relative;
+  width: max-content;
+  min-width: var(--hex-board-min-width);
+}
+
+.hex-board-field .targeting-indicator-layer {
+  z-index: 3;
 }
 
 .hex-column {
@@ -2250,6 +2360,88 @@ h1 {
 
 .stack-panel li span {
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.targeting-stack-overlay {
+  position: absolute;
+  top: 92px;
+  right: 30px;
+  z-index: 9;
+  display: grid;
+  gap: 8px;
+  width: min(360px, calc(100% - 60px));
+  max-height: 220px;
+  padding: 10px;
+  border: 1px solid rgba(88, 183, 161, 0.36);
+  border-radius: 8px;
+  background:
+    linear-gradient(150deg, rgba(88, 183, 161, 0.16), transparent 58%),
+    rgba(16, 19, 18, 0.9);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
+  pointer-events: auto;
+}
+
+.targeting-stack-overlay-header,
+.targeting-stack-overlay button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.targeting-stack-overlay-header span,
+.targeting-stack-overlay button strong {
+  color: var(--gold);
+  font-size: 0.72rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.targeting-stack-overlay-header strong,
+.targeting-stack-overlay button span {
+  min-width: 0;
+  color: #fffaf0;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.targeting-stack-overlay ol {
+  display: grid;
+  gap: 6px;
+  max-height: 158px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.targeting-stack-overlay li {
+  min-width: 0;
+}
+
+.targeting-stack-overlay button {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+}
+
+.targeting-stack-overlay button.active,
+.targeting-stack-overlay button:hover,
+.targeting-stack-overlay button:focus-visible {
+  border-color: var(--teal);
+  background: rgba(87, 196, 190, 0.16);
+  outline: none;
+}
+
+.targeting-stack-overlay button span {
+  overflow: hidden;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4692,6 +4884,19 @@ h1 {
     top: 88px;
   }
 
+  .targeting-stack-overlay {
+    top: 136px;
+    right: 18px;
+    left: 18px;
+    width: auto;
+    max-height: 132px;
+  }
+
+  .targeting-stack-overlay ol {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    max-height: 82px;
+  }
+
   .battlefield-hud-opponent .player-badge,
   .battlefield-hud-player .player-badge {
     flex-wrap: wrap;
@@ -4824,6 +5029,13 @@ h1 {
 
   .battlefield-hud-phase {
     top: 164px;
+  }
+
+  .targeting-stack-overlay {
+    top: 210px;
+    right: 12px;
+    left: 12px;
+    width: auto;
   }
 
   .battlefield-hud-player {

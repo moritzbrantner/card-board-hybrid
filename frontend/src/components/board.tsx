@@ -9,14 +9,20 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   DragEvent as ReactDragEvent,
   MouseEvent as ReactMouseEvent,
   ReactNode,
+  RefObject,
 } from "react";
-import { Board3DRenderer, type Board3DTileInteraction } from "../Board3D";
+import {
+  Board3DRenderer,
+  TargetingIndicatorLayer,
+  type Board3DTileInteraction,
+  type BoardProjectedPosition,
+} from "../Board3D";
 import type { BoardAnimationCue, PieceAnimation } from "../boardAnimations";
 import {
   boardRendererFallbackMessage,
@@ -68,8 +74,98 @@ import {
   viewerSideShortLabel,
   heroTypeLabel,
 } from "../labels";
+import {
+  selectedTargetingIndicators,
+  stackTargetingIndicators,
+} from "../targetingIndicators";
 
 const EMPTY_MATCH_VISUAL_CATALOG = createMatchVisualCatalog([]);
+
+function useMeasuredTilePositions(
+  boardFieldRef: RefObject<HTMLDivElement | null>,
+  tileElementByKeyRef: RefObject<Map<string, HTMLButtonElement>>,
+  tiles: HexTile[],
+) {
+  const [positions, setPositions] = useState<Map<string, BoardProjectedPosition>>(() => new Map());
+  const tileKeys = useMemo(() => tiles.map((tile) => coordKey(tile.coord)).join("|"), [tiles]);
+
+  useLayoutEffect(() => {
+    let frameId = 0;
+
+    function measure() {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        const boardField = boardFieldRef.current;
+        if (!boardField) {
+          setPositions(new Map());
+          return;
+        }
+
+        const fieldRect = boardField.getBoundingClientRect();
+        const nextPositions = new Map<string, BoardProjectedPosition>();
+        for (const key of tileKeys.split("|").filter(Boolean)) {
+          const element = tileElementByKeyRef.current.get(key);
+          if (!element) {
+            continue;
+          }
+
+          const rect = element.getBoundingClientRect();
+          nextPositions.set(key, {
+            x: rect.left - fieldRect.left + rect.width / 2,
+            y: rect.top - fieldRect.top + rect.height / 2,
+            visible: true,
+          });
+        }
+
+        setPositions((current) =>
+          projectedPositionMapsEqual(current, nextPositions) ? current : nextPositions,
+        );
+      });
+    }
+
+    measure();
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    if (boardFieldRef.current && resizeObserver) {
+      resizeObserver.observe(boardFieldRef.current);
+    }
+
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [boardFieldRef, tileElementByKeyRef, tileKeys]);
+
+  return positions;
+}
+
+function projectedPositionMapsEqual(
+  left: Map<string, BoardProjectedPosition>,
+  right: Map<string, BoardProjectedPosition>,
+) {
+  if (left.size !== right.size) {
+    return false;
+  }
+
+  for (const [key, rightPosition] of right) {
+    const leftPosition = left.get(key);
+    if (
+      !leftPosition ||
+      leftPosition.visible !== rightPosition.visible ||
+      Math.abs(leftPosition.x - rightPosition.x) > 0.25 ||
+      Math.abs(leftPosition.y - rightPosition.y) > 0.25
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 export function UnitContextMenuView({
   menu,
@@ -311,6 +407,55 @@ export function StackDisplay({
   );
 }
 
+function TargetingStackOverlay({
+  stack,
+  prioritySide,
+  activeStackItemId,
+  onActiveStackItemChange,
+}: {
+  stack: StackItem[];
+  prioritySide: Side | null;
+  activeStackItemId: string | null;
+  onActiveStackItemChange: (stackItemId: string | null) => void;
+}) {
+  if (stack.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="targeting-stack-overlay" aria-label="Board stack targeting">
+      <div className="targeting-stack-overlay-header">
+        <span>Stack</span>
+        <strong>{sideLabel(prioritySide)} priority</strong>
+      </div>
+      <ol>
+        {[...stack].reverse().map((item) => {
+          const active = activeStackItemId === item.id;
+
+          return (
+            <li key={item.id}>
+              <button
+                type="button"
+                className={active ? "active" : ""}
+                aria-label={`Show only ${stackItemTitle(item)} targeting`}
+                data-targeting-stack-row={item.id}
+                data-active={active ? "true" : "false"}
+                onPointerEnter={() => onActiveStackItemChange(item.id)}
+                onPointerLeave={() => onActiveStackItemChange(null)}
+                onFocus={() => onActiveStackItemChange(item.id)}
+                onBlur={() => onActiveStackItemChange(null)}
+              >
+                <span>{stackItemTitle(item)}</span>
+                <strong>Priority {item.priority}</strong>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 
 export function PlayerBadge({ player }: { player: MatchParticipantState }) {
   return (
@@ -399,6 +544,10 @@ export function Board({
       boardVisualMode === "3d" && !canCreateWebGLContext() ? "webgl-unavailable" : null,
     );
   const [assetFailureCount, setAssetFailureCount] = useState(0);
+  const [hoveredCoord, setHoveredCoord] = useState<HexCoord | null>(null);
+  const [activeStackItemId, setActiveStackItemId] = useState<string | null>(null);
+  const boardFieldRef = useRef<HTMLDivElement | null>(null);
+  const tileElementByKeyRef = useRef(new Map<string, HTMLButtonElement>());
   const renderer = selectBoardRenderer({
     requestedMode: boardVisualMode,
     webglFailed,
@@ -416,6 +565,30 @@ export function Board({
     () => new Map((visibleAnimation?.pieces ?? []).map((pieceAnimation) => [pieceAnimation.pieceId, pieceAnimation])),
     [visibleAnimation],
   );
+  const tilePositions = useMeasuredTilePositions(boardFieldRef, tileElementByKeyRef, match.board.tiles);
+  const selectedIndicators = useMemo(
+    () =>
+      selectedTargetingIndicators({
+        match,
+        viewerSide,
+        selectedCard,
+        selectedPiece,
+        focusedCoord: focusedCoord ?? null,
+        hoveredCoord,
+      }),
+    [focusedCoord, hoveredCoord, match, selectedCard, selectedPiece, viewerSide],
+  );
+  const stackIndicators = useMemo(() => stackTargetingIndicators(match), [match]);
+  const targetingIndicators = useMemo(() => {
+    if (activeStackItemId) {
+      return stackIndicators.filter(
+        (indicator) =>
+          indicator.source.type === "stack" && indicator.source.stackItemId === activeStackItemId,
+      );
+    }
+
+    return [...stackIndicators, ...selectedIndicators];
+  }, [activeStackItemId, selectedIndicators, stackIndicators]);
   const tileInteractions = match.board.tiles.map((tile): Board3DTileInteraction => {
     const piece = pieceAt(match, tile.coord);
     const hasManaSource = isManaSourceAt(match, tile.coord);
@@ -426,7 +599,7 @@ export function Board({
         (selectedPiece &&
           ((!piece && isLegalMove(match, viewerSide, selectedPiece, tile.coord)) ||
             (piece && isLegalAttack(match, viewerSide, selectedPiece, piece)))));
-    const isSelected = piece?.id === selectedPiece?.id;
+    const isSelected = Boolean(piece && selectedPiece && piece.id === selectedPiece.id);
     const isFocused = focusedCoord ? sameCoord(tile.coord, focusedCoord) : false;
     const tutorialHighlightTone = tutorialHighlightForTile(tile.coord, piece?.id ?? null, tutorialHighlights);
 
@@ -480,6 +653,18 @@ export function Board({
     return () => window.clearTimeout(timeoutId);
   }, [animation]);
 
+  useEffect(() => {
+    if (!activeStackItemId || match.actionStack.some((item) => item.id === activeStackItemId)) {
+      return;
+    }
+
+    setActiveStackItemId(null);
+  }, [activeStackItemId, match.actionStack]);
+
+  useEffect(() => {
+    setHoveredCoord(null);
+  }, [selectedCard?.id, selectedPiece?.id]);
+
   if (renderer === "3d") {
     return (
       <section
@@ -494,6 +679,12 @@ export function Board({
             Some 3D models are unavailable, so procedural miniatures are shown.
           </div>
         ) : null}
+        <TargetingStackOverlay
+          stack={match.actionStack}
+          prioritySide={match.prioritySide}
+          activeStackItemId={activeStackItemId}
+          onActiveStackItemChange={setActiveStackItemId}
+        />
         <Board3DRenderer
           tiles={match.board.tiles}
           pieces={pieces}
@@ -502,6 +693,7 @@ export function Board({
           readOnly={readOnly}
           disabled={disabled}
           tileInteractions={tileInteractions}
+          targetingIndicators={targetingIndicators}
           onTileClick={onTileClick}
           onTileDrop={onTileDrop}
           onTileContextMenu={(tile, event) => {
@@ -512,6 +704,7 @@ export function Board({
 
             onUnitContextMenu(piece, { x: event.clientX, y: event.clientY });
           }}
+          onTileHoverChange={setHoveredCoord}
           onFatalRenderError={() => {
             setWebglFailed(true);
             setRendererFallbackReason("render-failed");
@@ -534,104 +727,130 @@ export function Board({
           {boardRendererFallbackMessage(rendererFallbackReason)}
         </div>
       ) : null}
-      <div className="hex-board">
-        {columns.map((column) => (
-          <div className="hex-column" key={column.q}>
-            {column.tiles.map((tile) => {
-              const piece = pieceAt(match, tile.coord);
-              const displayPiece = displayPieceByCoord.get(coordKey(tile.coord)) ?? piece;
-              const droppedItems = droppedItemsAt(match, tile.coord);
-              const hasManaSource = isManaSourceAt(match, tile.coord);
-              const building = buildingAt(match, tile.coord);
-              const hasBuilding = !!building;
-              const interaction = tileInteractions.find(
-                (candidate) => coordKey(candidate.coord) === coordKey(tile.coord),
-              );
-              const isLegal = interaction?.isLegal ?? false;
-              const isSelected = piece?.id === selectedPiece?.id;
-              const isFocused = focusedCoord ? sameCoord(tile.coord, focusedCoord) : false;
-              const tutorialHighlightTone = tutorialHighlightForTile(tile.coord, piece?.id ?? null, tutorialHighlights);
-              const occupantClass = displayPiece ? `occupied occupied-${displayPiece.side}` : "";
-              const title = building
-                ? `${tileTitle(tile, piece, viewerSide, droppedItems.length, hasManaSource)}, building ${building.name}`
-                : tileTitle(tile, piece, viewerSide, droppedItems.length, hasManaSource);
+      <TargetingStackOverlay
+        stack={match.actionStack}
+        prioritySide={match.prioritySide}
+        activeStackItemId={activeStackItemId}
+        onActiveStackItemChange={setActiveStackItemId}
+      />
+      <div className="hex-board-field" ref={boardFieldRef}>
+        <TargetingIndicatorLayer
+          indicators={targetingIndicators}
+          positionsByCoordKey={tilePositions}
+        />
+        <div className="hex-board">
+          {columns.map((column) => (
+            <div className="hex-column" key={column.q}>
+              {column.tiles.map((tile) => {
+                const tileKey = coordKey(tile.coord);
+                const piece = pieceAt(match, tile.coord);
+                const displayPiece = displayPieceByCoord.get(tileKey) ?? piece;
+                const droppedItems = droppedItemsAt(match, tile.coord);
+                const hasManaSource = isManaSourceAt(match, tile.coord);
+                const building = buildingAt(match, tile.coord);
+                const hasBuilding = !!building;
+                const interaction = tileInteractions.find(
+                  (candidate) => coordKey(candidate.coord) === tileKey,
+                );
+                const isLegal = interaction?.isLegal ?? false;
+                const isSelected = Boolean(piece && selectedPiece && piece.id === selectedPiece.id);
+                const isFocused = focusedCoord ? sameCoord(tile.coord, focusedCoord) : false;
+                const tutorialHighlightTone = tutorialHighlightForTile(tile.coord, piece?.id ?? null, tutorialHighlights);
+                const occupantClass = displayPiece ? `occupied occupied-${displayPiece.side}` : "";
+                const title = building
+                  ? `${tileTitle(tile, piece, viewerSide, droppedItems.length, hasManaSource)}, building ${building.name}`
+                  : tileTitle(tile, piece, viewerSide, droppedItems.length, hasManaSource);
 
-              return (
-                <button
-                  key={coordKey(tile.coord)}
-                  className={`hex-tile ${hasManaSource ? "mana-source" : ""} ${hasBuilding ? "building" : ""} ${building ? `building-${building.effect.type}` : ""} ${occupantClass} ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""} ${isFocused ? "keyboard-focused" : ""} ${tutorialHighlightTone ? `tutorial-highlight tutorial-highlight-${tutorialHighlightTone}` : ""}`}
-                  type="button"
-                  disabled={disabled && !readOnly}
-                  tabIndex={readOnly ? -1 : undefined}
-                  onFocus={() => onFocusedUnitChange?.(piece?.pieceType === "unit" ? piece.id : null)}
-                  onClick={() => onTileClick?.(tile)}
-                  onDragOver={(event: ReactDragEvent<HTMLButtonElement>) => {
-                    if (readOnly || disabled || !selectedCard || !isLegal) {
-                      return;
-                    }
+                return (
+                  <button
+                    key={tileKey}
+                    ref={(element) => {
+                      if (element) {
+                        tileElementByKeyRef.current.set(tileKey, element);
+                      } else {
+                        tileElementByKeyRef.current.delete(tileKey);
+                      }
+                    }}
+                    className={`hex-tile ${hasManaSource ? "mana-source" : ""} ${hasBuilding ? "building" : ""} ${building ? `building-${building.effect.type}` : ""} ${occupantClass} ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""} ${isFocused ? "keyboard-focused" : ""} ${tutorialHighlightTone ? `tutorial-highlight tutorial-highlight-${tutorialHighlightTone}` : ""}`}
+                    type="button"
+                    disabled={disabled && !readOnly}
+                    tabIndex={readOnly ? -1 : undefined}
+                    onPointerEnter={() => setHoveredCoord(tile.coord)}
+                    onPointerLeave={() => setHoveredCoord(null)}
+                    onFocus={() => {
+                      setHoveredCoord(tile.coord);
+                      onFocusedUnitChange?.(piece?.pieceType === "unit" ? piece.id : null);
+                    }}
+                    onBlur={() => setHoveredCoord(null)}
+                    onClick={() => onTileClick?.(tile)}
+                    onDragOver={(event: ReactDragEvent<HTMLButtonElement>) => {
+                      if (readOnly || disabled || !selectedCard || !isLegal) {
+                        return;
+                      }
 
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                  }}
-                  onDrop={(event: ReactDragEvent<HTMLButtonElement>) => {
-                    if (readOnly || disabled || !onTileDrop) {
-                      return;
-                    }
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                    }}
+                    onDrop={(event: ReactDragEvent<HTMLButtonElement>) => {
+                      if (readOnly || disabled || !onTileDrop) {
+                        return;
+                      }
 
-                    event.preventDefault();
-                    const cardId = event.dataTransfer.getData("text/plain");
-                    if (cardId) {
-                      onTileDrop(tile, cardId);
-                    }
-                  }}
-                  onContextMenu={(event: ReactMouseEvent<HTMLButtonElement>) => {
-                    if (readOnly || piece?.pieceType !== "unit" || !onUnitContextMenu) {
-                      return;
-                    }
+                      event.preventDefault();
+                      const cardId = event.dataTransfer.getData("text/plain");
+                      if (cardId) {
+                        onTileDrop(tile, cardId);
+                      }
+                    }}
+                    onContextMenu={(event: ReactMouseEvent<HTMLButtonElement>) => {
+                      if (readOnly || piece?.pieceType !== "unit" || !onUnitContextMenu) {
+                        return;
+                      }
 
-                    event.preventDefault();
-                    onUnitContextMenu(piece, { x: event.clientX, y: event.clientY });
-                  }}
-                  title={title}
-                  aria-label={title}
-                >
-                  {hasManaSource ? (
-                    <span className="mana-source-marker" aria-hidden="true">
-                      M
-                    </span>
-                  ) : null}
-                  {building && !hasManaSource ? (
-                    <span className="building-marker" aria-hidden="true">
-                      B
-                    </span>
-                  ) : null}
-                  {displayPiece ? (
-                    <>
-                      <span
-                        className={`hex-occupant-marker ${displayPiece.side}`}
-                        aria-hidden="true"
-                      >
-                        {viewerSideShortLabel(displayPiece.side, viewerSide)}
+                      event.preventDefault();
+                      onUnitContextMenu(piece, { x: event.clientX, y: event.clientY });
+                    }}
+                    title={title}
+                    aria-label={title}
+                  >
+                    {hasManaSource ? (
+                      <span className="mana-source-marker" aria-hidden="true">
+                        M
                       </span>
-                      <PieceToken
-                        key={`${displayPiece.id}-${visibleAnimation?.sequence ?? 0}`}
-                        piece={displayPiece}
-                        animation={animationByPieceId.get(displayPiece.id)}
-                        viewerSide={viewerSide}
-                        visualCatalog={visualCatalog}
-                      />
-                    </>
-                  ) : null}
-                  {droppedItems.length > 0 ? (
-                    <span className="dropped-item-count" aria-hidden="true">
-                      {droppedItems.length}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        ))}
+                    ) : null}
+                    {building && !hasManaSource ? (
+                      <span className="building-marker" aria-hidden="true">
+                        B
+                      </span>
+                    ) : null}
+                    {displayPiece ? (
+                      <>
+                        <span
+                          className={`hex-occupant-marker ${displayPiece.side}`}
+                          aria-hidden="true"
+                        >
+                          {viewerSideShortLabel(displayPiece.side, viewerSide)}
+                        </span>
+                        <PieceToken
+                          key={`${displayPiece.id}-${visibleAnimation?.sequence ?? 0}`}
+                          piece={displayPiece}
+                          animation={animationByPieceId.get(displayPiece.id)}
+                          viewerSide={viewerSide}
+                          visualCatalog={visualCatalog}
+                        />
+                      </>
+                    ) : null}
+                    {droppedItems.length > 0 ? (
+                      <span className="dropped-item-count" aria-hidden="true">
+                        {droppedItems.length}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );

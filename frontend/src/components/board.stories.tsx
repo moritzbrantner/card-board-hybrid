@@ -3,9 +3,12 @@ import { Archive, Layers } from "lucide-react";
 import { Board, CardButton, PileDisplay, PlayerBadge, StackDisplay } from "./board";
 import {
   catalogCards,
+  cinderRingCard,
   emberFlaskCard,
   emberSquireCard,
   pendingAttackStack,
+  pendingMoveStack,
+  pendingSpellStack,
   sparkJoltCard,
   storyMatch,
   storyUnit,
@@ -111,11 +114,51 @@ export const SelectedUnitActions: Story = {
   },
 };
 
+export const SelectedAttackIndicators: Story = {
+  args: {
+    match: selectedUnitMatch,
+    selectedPiece: pieceById(selectedUnitMatch, "story-player-unit"),
+  },
+};
+
+export const SelectedSpellTargetIndicators: Story = {
+  args: {
+    match: storyMatch({ hand: [sparkJoltCard] }),
+    selectedCard: sparkJoltCard,
+  },
+};
+
+export const SelectedAreaSpellFocusedFootprint: Story = {
+  args: {
+    match: selectedUnitMatch,
+    selectedCard: cinderRingCard,
+    focusedCoord: { q: 1, r: 0 },
+  },
+};
+
 export const PendingPriority: Story = {
   args: {
     match: storyMatch({
       actionStack: [pendingAttackStack],
       prioritySide: "player",
+    }),
+  },
+};
+
+export const PendingStackTargetingIndicators: Story = {
+  args: {
+    match: storyMatch({
+      actionStack: [pendingAttackStack, pendingSpellStack, pendingMoveStack],
+      prioritySide: "opponent",
+    }),
+  },
+};
+
+export const PendingStackOverlayFiltered: Story = {
+  args: {
+    match: storyMatch({
+      actionStack: [pendingAttackStack, pendingSpellStack, pendingMoveStack],
+      prioritySide: "opponent",
     }),
   },
 };

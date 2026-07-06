@@ -45,6 +45,26 @@ export const sparkJoltCard: Card = {
   kind: { type: "spell", range: 2, priority: 3, effect: { type: "damage", amount: 1 } },
 };
 
+export const cinderRingCard: Card = {
+  id: "story-cinder-ring",
+  templateId: "cinder-ring",
+  name: "Cinder Ring",
+  rarity: "advanced",
+  cost: 2,
+  text: "Area damage around a Hex.",
+  kind: { type: "spell", range: 2, priority: 2, effect: { type: "areaDamage", amount: 1, radius: 1 } },
+};
+
+export const thunderRailCard: Card = {
+  id: "story-thunder-rail",
+  templateId: "thunder-rail",
+  name: "Thunder Rail",
+  rarity: "advanced",
+  cost: 2,
+  text: "Line damage from the caster.",
+  kind: { type: "spell", range: 3, priority: 2, effect: { type: "lineDamage", amount: 1 } },
+};
+
 export const emberFlaskCard: Card = {
   id: "story-ember-flask",
   templateId: "ember-flask",
@@ -63,6 +83,8 @@ export const emberFlaskCard: Card = {
 export const catalogCards: CatalogCard[] = [
   catalogCard(emberSquireCard, 12, "/card-art/ember-squire.svg"),
   catalogCard(sparkJoltCard, 12, "/card-art/spark-jolt.svg"),
+  catalogCard(cinderRingCard, 3, "/card-art/cinder-ring.svg"),
+  catalogCard(thunderRailCard, 3, "/card-art/thunder-rail.svg"),
   catalogCard(emberFlaskCard, 3, "/card-art/ember-flask.svg"),
 ];
 
@@ -142,6 +164,29 @@ export const pendingAttackStack: StackItem = {
     type: "attack",
     attackerId: "opponent-hero",
     targetId: "player-hero",
+  },
+};
+
+export const pendingSpellStack: StackItem = {
+  id: "story-stack-2",
+  side: "player",
+  priority: 1,
+  action: {
+    type: "castSpell",
+    card: sparkJoltCard,
+    targetId: "opponent-hero",
+  },
+};
+
+export const pendingMoveStack: StackItem = {
+  id: "story-stack-3",
+  side: "player",
+  priority: 2,
+  action: {
+    type: "movePiece",
+    pieceId: "player-hero",
+    from: { q: 0, r: 1 },
+    to: { q: 0, r: 0 },
   },
 };
 

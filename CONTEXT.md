@@ -176,6 +176,10 @@ _Avoid_: avatar upload
 The player-facing presentation that makes a Card, Unit, or Hero recognizable across match surfaces, including art, labels, colors, rarity treatment, token portrait, and unknown fallback.
 _Avoid_: skin, cosmetic data, asset lookup
 
+**Targeting indicator**:
+A presentation-only board visual that shows the source, primary target, and optional affected footprint of a selected or queued attack or Spell.
+_Avoid_: threat line, action marker, rules target
+
 **Board visual mode**:
 A player presentation preference that chooses between the complete 2D board and the enhanced 3D board. It is stored on the account profile or locally for anonymous and seat-link play, and never changes match state, replay data, legality, or shared-match protocol semantics.
 _Avoid_: board state, match mode, rules mode
