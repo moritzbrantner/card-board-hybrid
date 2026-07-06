@@ -17,29 +17,29 @@ export function routeFromPath(path: string) {
 
 export function safeAuthNextPath(value: string | null) {
   if (!value || !value.startsWith("/") || value.startsWith("//")) {
-    return "/profile";
+    return "/";
   }
 
   try {
     const nextUrl = new URL(value, window.location.origin);
     if (nextUrl.origin !== window.location.origin) {
-      return "/profile";
+      return "/";
     }
 
     const normalizedNextPath = nextUrl.pathname.replace(/\/+$/, "");
     if (normalizedNextPath === "/login" || normalizedNextPath === "/register") {
-      return "/profile";
+      return "/";
     }
 
     return `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
   } catch {
-    return "/profile";
+    return "/";
   }
 }
 
 export function authRouteLink(mode: "register" | "login", nextPath: string) {
   const path = mode === "register" ? "/register" : "/login";
-  return nextPath === "/profile" ? path : `${path}?next=${encodeURIComponent(nextPath)}`;
+  return nextPath === "/" ? path : `${path}?next=${encodeURIComponent(nextPath)}`;
 }
 
 export function protectedLoginRoute(nextPath: string) {

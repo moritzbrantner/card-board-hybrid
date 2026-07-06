@@ -61,7 +61,7 @@ for (const nextPath of ["/profile", "/settings", "/decks", "/matches"]) {
   });
 }
 
-test("successful login with no safe next lands on profile", async ({ page }) => {
+test("successful login with no safe next lands on the dashboard", async ({ page }) => {
   await mockAuthApi(page);
 
   await page.goto("/login");
@@ -69,7 +69,8 @@ test("successful login with no safe next lands on profile", async ({ page }) => 
   await page.getByLabel("Password").fill("pw");
   await page.getByRole("button", { name: "Sign In" }).click();
 
-  await expect(page).toHaveURL(/\/profile$/);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
 });
 
 test("/login/ behaves like the canonical login route", async ({
@@ -104,7 +105,7 @@ test("/register/ behaves like the canonical register route", async ({
   expect(authRequests).toEqual(["/api/auth/register"]);
 });
 
-test("register submits credentials to the existing registration API and opens profile by default", async ({ page }) => {
+test("register submits credentials to the existing registration API and opens the dashboard by default", async ({ page }) => {
   const authRequests = [];
   await mockAuthApi(page, authRequests);
 
@@ -116,7 +117,8 @@ test("register submits credentials to the existing registration API and opens pr
   await page.getByLabel("Password").fill("pw");
   await page.getByRole("button", { name: "Create Account" }).click();
 
-  await expect(page).toHaveURL(/\/profile$/);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
   expect(authRequests).toEqual(["/api/auth/register"]);
 });
 
@@ -150,7 +152,7 @@ test("login and register links preserve a safe next parameter", async ({ page })
   await expect(page.getByRole("heading", { name: "Sign In" })).toBeVisible();
 });
 
-test("absolute URL next values fall back to profile after login", async ({ page }) => {
+test("absolute URL next values fall back to the dashboard after login", async ({ page }) => {
   await mockAuthApi(page);
 
   await page.goto("/login?next=https%3A%2F%2Fevil.test%2Fsteal");
@@ -158,10 +160,11 @@ test("absolute URL next values fall back to profile after login", async ({ page 
   await page.getByLabel("Password").fill("pw");
   await page.getByRole("button", { name: "Sign In" }).click();
 
-  await expect(page).toHaveURL(/\/profile$/);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
 });
 
-test("protocol-relative next values fall back to profile after registration", async ({ page }) => {
+test("protocol-relative next values fall back to the dashboard after registration", async ({ page }) => {
   await mockAuthApi(page);
 
   await page.goto("/register?next=%2F%2Fevil.test%2Fsteal");
@@ -169,10 +172,11 @@ test("protocol-relative next values fall back to profile after registration", as
   await page.getByLabel("Password").fill("pw");
   await page.getByRole("button", { name: "Create Account" }).click();
 
-  await expect(page).toHaveURL(/\/profile$/);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
 });
 
-test("signed-in visits to auth routes redirect to profile or a safe next path", async ({
+test("signed-in visits to auth routes redirect to the dashboard or a safe next path", async ({
   page,
 }) => {
   await page.addInitScript(
@@ -185,7 +189,8 @@ test("signed-in visits to auth routes redirect to profile or a safe next path", 
   await expect(page).toHaveURL(/\/decks$/);
 
   await page.goto("/register?next=https%3A%2F%2Fevil.test%2Fsteal");
-  await expect(page).toHaveURL(/\/profile$/);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Player Dashboard" })).toBeVisible();
 });
 
 test("signing out clears the session and returns to the public dashboard", async ({ page }) => {
