@@ -744,9 +744,17 @@ impl SqliteMatchStore {
         frames: &[RecordedReplayFrame],
     ) -> Result<(), MatchStoreError> {
         let request_json = serde_json::to_string(action)?;
-        self.save_action_json_and_replay_frames(id, action_index, &request_json, state, frames)
+        self.save_action_json_and_replay_frames(
+            id,
+            action_index,
+            &request_json,
+            state,
+            frames,
+            None,
+        )
     }
 
+    #[allow(dead_code, reason = "kept for tests and non-command store callers")]
     pub fn save_custom_action_and_replay_frames(
         &mut self,
         id: &str,
@@ -755,7 +763,26 @@ impl SqliteMatchStore {
         state: &MatchState,
         frames: &[RecordedReplayFrame],
     ) -> Result<(), MatchStoreError> {
-        self.save_action_json_and_replay_frames(id, action_index, request_json, state, frames)
+        self.save_action_json_and_replay_frames(id, action_index, request_json, state, frames, None)
+    }
+
+    pub fn save_forfeit_action_and_replay_frames(
+        &mut self,
+        id: &str,
+        action_index: u32,
+        request_json: &str,
+        state: &MatchState,
+        frames: &[RecordedReplayFrame],
+        winner: Side,
+    ) -> Result<(), MatchStoreError> {
+        self.save_action_json_and_replay_frames(
+            id,
+            action_index,
+            request_json,
+            state,
+            frames,
+            Some(winner),
+        )
     }
 
     fn save_action_json_and_replay_frames(
@@ -765,6 +792,7 @@ impl SqliteMatchStore {
         request_json: &str,
         state: &MatchState,
         frames: &[RecordedReplayFrame],
+        forfeit_winner: Option<Side>,
     ) -> Result<(), MatchStoreError> {
         let snapshot = state.to_snapshot_json()?;
         let completed_at = if state.winner.is_some() {
@@ -805,25 +833,39 @@ impl SqliteMatchStore {
             ),
             params![id, snapshot],
         )?;
-        transaction.commit()?;
         if state.winner.is_some() {
-            self.connection.execute(
-                "
-                UPDATE shared_matches
-                SET status = CASE status
-                        WHEN 'forfeited' THEN 'forfeited'
-                        ELSE 'completed'
-                    END,
-                    updated_at = unixepoch()
-                WHERE match_id = ?1
-                ",
-                params![id],
-            )?;
-            progression::award_completed_match(&mut self.connection, id)?;
+            if let Some(winner) = forfeit_winner {
+                transaction.execute(
+                    "
+                    UPDATE shared_matches
+                    SET status = 'forfeited',
+                        forfeit_winner = ?2,
+                        updated_at = unixepoch()
+                    WHERE match_id = ?1
+                    ",
+                    params![id, winner.to_db()],
+                )?;
+            } else {
+                transaction.execute(
+                    "
+                    UPDATE shared_matches
+                    SET status = CASE status
+                            WHEN 'forfeited' THEN 'forfeited'
+                            ELSE 'completed'
+                        END,
+                        updated_at = unixepoch()
+                    WHERE match_id = ?1
+                    ",
+                    params![id],
+                )?;
+            }
+            progression::award_completed_match_in_transaction(&transaction, id)?;
         }
+        transaction.commit()?;
         Ok(())
     }
 
+    #[allow(dead_code, reason = "kept for tests and legacy direct store callers")]
     pub fn mark_shared_match_forfeited(
         &mut self,
         id: &str,

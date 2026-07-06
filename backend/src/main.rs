@@ -3,6 +3,7 @@ mod deck_library;
 mod deck_recipe_legality;
 mod identity;
 mod match_access;
+mod match_commands;
 mod match_session;
 mod match_store;
 mod preferences;
@@ -31,6 +32,7 @@ use identity::{
     IdentityModule, PublicAccountProfile,
 };
 use match_access::{Actor, MatchAccess};
+use match_commands::{MatchCommandError, MatchCommands};
 use match_session::{
     HeroType, MatchActionRequest, MatchMode, MatchState, RecordedReplayFrame, ReplayEvent,
     ReplayVisibility, Side,
@@ -1455,33 +1457,10 @@ fn apply_shared_socket_action(
         .store
         .lock()
         .expect("store lock should not be poisoned");
-    store
-        .mark_shared_seat_seen(match_id, seat_token)
-        .map_err(|error| error.to_string())?;
-    let shared = store
-        .load_shared_match_for_seat(match_id, seat_token)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "Shared match seat was not found".to_string())?;
-    if shared.status != SharedMatchStatus::Active {
-        return Err("Shared match is not active".to_string());
-    }
-    let mut match_state = shared
-        .state
-        .ok_or_else(|| "Shared match has not started".to_string())?;
-    let action_index = store
-        .next_action_index(match_id)
-        .map_err(|error| error.to_string())?;
-    let frames = match_state
-        .apply_action_recording_for_side(shared.viewer_seat.side, action.clone(), action_index)
-        .map_err(|error| error.to_string())?;
-    store
-        .save_action_and_replay_frames(match_id, action_index, &action, &match_state, &frames)
-        .map_err(|error| error.to_string())?;
-    store
-        .load_shared_match_for_seat(match_id, seat_token)
-        .map_err(|error| error.to_string())?
-        .map(SharedMatchResponse::from)
-        .ok_or_else(|| "Shared match seat was not found".to_string())
+    MatchCommands::new(&mut store)
+        .apply_shared_seat_action(match_id, seat_token, action)
+        .map(|applied| SharedMatchResponse::from(applied.shared_match))
+        .map_err(|error| error.to_string())
 }
 
 fn claim_shared_forfeit(
@@ -1493,44 +1472,10 @@ fn claim_shared_forfeit(
         .store
         .lock()
         .expect("store lock should not be poisoned");
-    let shared = store
-        .load_shared_match_for_seat(match_id, seat_token)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "Shared match seat was not found".to_string())?;
-    if shared.status != SharedMatchStatus::Active {
-        return Err("Shared match is not active".to_string());
-    }
-    let disconnected_at = shared
-        .opposing_seat
-        .disconnected_at
-        .ok_or_else(|| "Opponent is still connected".to_string())?;
-    if unix_timestamp() < disconnected_at + 120 {
-        return Err("Forfeit is not claimable yet".to_string());
-    }
-    let mut match_state = shared
-        .state
-        .ok_or_else(|| "Shared match has not started".to_string())?;
-    let action_index = store
-        .next_action_index(match_id)
-        .map_err(|error| error.to_string())?;
-    let frames = match_state.forfeit_recording(shared.viewer_seat.side, action_index);
-    store
-        .mark_shared_match_forfeited(match_id, shared.viewer_seat.side)
-        .map_err(|error| error.to_string())?;
-    store
-        .save_custom_action_and_replay_frames(
-            match_id,
-            action_index,
-            r#"{"type":"claimForfeit"}"#,
-            &match_state,
-            &frames,
-        )
-        .map_err(|error| error.to_string())?;
-    store
-        .load_shared_match_for_seat(match_id, seat_token)
-        .map_err(|error| error.to_string())?
-        .map(SharedMatchResponse::from)
-        .ok_or_else(|| "Shared match seat was not found".to_string())
+    MatchCommands::new(&mut store)
+        .claim_shared_forfeit(match_id, seat_token, unix_timestamp())
+        .map(|applied| SharedMatchResponse::from(applied.shared_match))
+        .map_err(|error| error.to_string())
 }
 
 fn shared_snapshot_message(
@@ -1835,66 +1780,21 @@ async fn apply_match_action(
         Ok(profile) => profile,
         Err(response) => return response,
     };
-    let (saved, replay_frames) = {
+    let applied = {
         let mut store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        let mut stored_match = match store.load_match(&match_id) {
-            Ok(Some(stored_match)) => stored_match,
-            Ok(None) => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(ApiError {
-                        message: format!("Match {match_id} was not found"),
-                    }),
-                )
-                    .into_response();
-            }
-            Err(error) => return store_error_response(error),
-        };
         let actor = Actor::from(profile.as_ref());
-        if !MatchAccess::new(&store).can_apply_solo_action(&actor, &match_id) {
-            return match_not_found_response(&match_id);
+        match MatchCommands::new(&mut store).apply_solo_action(actor, &match_id, request) {
+            Ok(applied) => applied,
+            Err(error) => return match_command_error_response(error, &match_id),
         }
-
-        let action_index = match store.next_action_index(&match_id) {
-            Ok(action_index) => action_index,
-            Err(error) => return store_error_response(error),
-        };
-
-        let frames = match stored_match
-            .state
-            .apply_action_recording(request.clone(), action_index)
-        {
-            Ok(frames) => frames,
-            Err(error) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(ApiError {
-                        message: error.to_string(),
-                    }),
-                )
-                    .into_response();
-            }
-        };
-
-        if let Err(error) = store.save_action_and_replay_frames(
-            &stored_match.id,
-            action_index,
-            &request,
-            &stored_match.state,
-            &frames,
-        ) {
-            return store_error_response(error);
-        }
-
-        (stored_match, frames)
     };
 
     Json(MatchResponse::from_stored_with_replay_frames(
-        saved,
-        replay_frames,
+        applied.stored_match,
+        applied.replay_frames,
     ))
     .into_response()
 }
@@ -1907,6 +1807,32 @@ fn store_error_response(error: MatchStoreError) -> axum::response::Response {
         }),
     )
         .into_response()
+}
+
+fn match_command_error_response(
+    error: MatchCommandError,
+    match_id: &str,
+) -> axum::response::Response {
+    match error {
+        MatchCommandError::NotFound | MatchCommandError::Forbidden => {
+            match_not_found_response(match_id)
+        }
+        MatchCommandError::Rule(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError {
+                message: error.to_string(),
+            }),
+        )
+            .into_response(),
+        MatchCommandError::Store(error) => store_error_response(error),
+        error => (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError {
+                message: error.to_string(),
+            }),
+        )
+            .into_response(),
+    }
 }
 
 fn deck_error_response(error: DeckLibraryError) -> axum::response::Response {

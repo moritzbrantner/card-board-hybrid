@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 
 use crate::match_session::{
@@ -734,8 +734,23 @@ pub fn seed_experienced_local_mastery(
     Ok(())
 }
 
+#[allow(dead_code, reason = "kept for tests and direct progression callers")]
 pub fn award_completed_match(
     connection: &mut Connection,
+    match_id: &str,
+) -> Result<(), ProgressionError> {
+    award_completed_match_on_connection(connection, match_id)
+}
+
+pub fn award_completed_match_in_transaction(
+    transaction: &Transaction<'_>,
+    match_id: &str,
+) -> Result<(), ProgressionError> {
+    award_completed_match_on_connection(transaction, match_id)
+}
+
+fn award_completed_match_on_connection(
+    connection: &Connection,
     match_id: &str,
 ) -> Result<(), ProgressionError> {
     let row: Option<(String, Option<i64>, String)> = connection
