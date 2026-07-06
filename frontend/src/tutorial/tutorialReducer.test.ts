@@ -37,7 +37,7 @@ describe("tutorialReducer", () => {
     expect(next.hint).toContain("Hero");
   });
 
-  it("walks the expected eight-step path to completion", () => {
+  it("walks the expected path to completion", () => {
     let state = practice(createInitialTutorialState());
 
     state = tutorialReducer(state, {
@@ -104,16 +104,10 @@ describe("tutorialReducer", () => {
       type: "interact",
       interaction: { type: "pieceClick", pieceId: TUTORIAL_OPPONENT_UNIT_ID },
     });
-    expect(currentTutorialStep(state).id).toBe("pass-priority");
-    expect(state.match.actionStack).toHaveLength(2);
-
-    state = practice(state);
-    state = tutorialReducer(state, {
-      type: "interact",
-      interaction: { type: "passPriority" },
-    });
     expect(state.phase).toBe("completed");
     expect(state.match.actionStack).toHaveLength(0);
+    expect(state.match.prioritySide).toBeNull();
+    expect(state.match.board.units.some((unit) => unit.id === TUTORIAL_OPPONENT_UNIT_ID)).toBe(false);
   });
 
   it("supports deterministic back and restart", () => {

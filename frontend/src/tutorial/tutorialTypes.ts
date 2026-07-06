@@ -9,8 +9,7 @@ export type TutorialStepId =
   | "move-unit"
   | "attack"
   | "end-turn"
-  | "priority-response"
-  | "pass-priority";
+  | "priority-response";
 
 export type TutorialTargetId =
   | "tutorial-board"

@@ -44,10 +44,8 @@ test("runs the tutorial happy path in 2d and stores completion", async ({ page }
   await page.getByRole("button", { name: /Spark Jolt/i }).click();
   await page.getByRole("button", { name: /q 1, r -1, occupied by the opponent's unit/i }).click();
 
-  await continueIntro(page);
-  await page.getByRole("button", { name: "Pass Priority" }).click();
-
   await expect(page.getByRole("button", { name: "Start Playing" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Pass Priority" })).toHaveCount(0);
   await page.waitForFunction(
     () => window.localStorage.getItem("rune-lanes-tutorial-completed") === "true",
   );

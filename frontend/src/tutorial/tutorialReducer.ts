@@ -99,16 +99,6 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
       { kind: "piece", pieceId: TUTORIAL_OPPONENT_UNIT_ID, tone: "danger" },
     ],
   },
-  {
-    id: "pass-priority",
-    title: "Pass Priority",
-    intro: "Passing priority tells the game you are done adding responses. When both sides pass, the stack resolves.",
-    objective: "Pass priority to resolve the stack.",
-    highlights: [
-      { kind: "ui", targetId: "tutorial-stack", tone: "secondary" },
-      { kind: "ui", targetId: "tutorial-pass-priority", tone: "primary" },
-    ],
-  },
 ];
 
 export function createInitialTutorialState(): TutorialState {
@@ -172,20 +162,6 @@ function applyInteraction(state: TutorialState, interaction: TutorialInteraction
         : withHint(state, "Use End Turn when you are finished acting.");
     case "priority-response":
       return priorityResponseInteraction(state, interaction);
-    case "pass-priority":
-      return interaction.type === "passPriority"
-        ? {
-            ...sceneForStep(7),
-            phase: "completed",
-            hint: "Tutorial complete.",
-            match: {
-              ...state.match,
-              prioritySide: null,
-              actionStack: [],
-              log: ["Spark Jolt resolves first.", "The stack is clear.", "Tutorial complete."],
-            },
-          }
-        : withHint(state, "Pass priority to let the stack resolve.");
   }
 }
 
@@ -256,10 +232,34 @@ function priorityResponseInteraction(state: TutorialState, interaction: Tutorial
     state.selection?.type === "card" &&
     state.selection.cardId === TUTORIAL_SPARK_JOLT_CARD_ID
   ) {
-    return sceneForStep(7);
+    return completeTutorialStack(state);
   }
 
   return withHint(state, "Select Spark Jolt, then target the highlighted enemy Unit.");
+}
+
+function completeTutorialStack(state: TutorialState): TutorialState {
+  return {
+    ...state,
+    phase: "completed",
+    selection: null,
+    hint: "Tutorial complete.",
+    match: {
+      ...state.match,
+      prioritySide: null,
+      actionStack: [],
+      log: [
+        "Spark Jolt resolves first.",
+        "Ash Hound is defeated.",
+        "The pending attack fizzles.",
+        "Tutorial complete.",
+      ],
+      board: {
+        ...state.match.board,
+        units: state.match.board.units.filter((unit) => unit.id !== TUTORIAL_OPPONENT_UNIT_ID),
+      },
+    },
+  };
 }
 
 function withHint(state: TutorialState, hint: string): TutorialState {

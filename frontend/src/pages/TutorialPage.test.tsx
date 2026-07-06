@@ -50,11 +50,9 @@ describe("TutorialPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /Spark Jolt/i }));
     fireEvent.click(screen.getByRole("button", { name: /q 1, r -1, occupied by the opponent's unit/i }));
 
-    continueIntro();
-    fireEvent.click(screen.getByRole("button", { name: "Pass Priority" }));
-
     expect(window.localStorage.getItem(TUTORIAL_COMPLETION_STORAGE_KEY)).toBe("true");
     expect(screen.getByRole("button", { name: "Start Playing" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pass Priority" })).not.toBeInTheDocument();
   });
 });
 
