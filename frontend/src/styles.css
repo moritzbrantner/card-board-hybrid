@@ -3870,6 +3870,12 @@ h1 {
   top: 14px;
 }
 
+.deck-catalog-sidebar {
+  align-self: start;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  max-height: calc(100svh - 28px);
+}
+
 .deck-panel-heading {
   display: flex;
   align-items: center;
@@ -4081,6 +4087,11 @@ h1 {
 .deck-catalog-list {
   display: grid;
   gap: 10px;
+  min-height: 0;
+  max-height: clamp(320px, 52svh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
 }
 
 .deck-catalog-row,
@@ -4840,6 +4851,10 @@ h1 {
   .deck-catalog-sidebar,
   .deck-details-panel {
     position: static;
+  }
+
+  .deck-catalog-list {
+    max-height: min(440px, 58svh);
   }
 
   .deck-filter-grid {
