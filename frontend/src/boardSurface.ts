@@ -1,5 +1,6 @@
 import type { BoardAnimationCue, PieceAnimation } from "./boardAnimations";
 import type { BoardPiece } from "./appTypes";
+import { buildingDecorForTile, type BoardSurfaceBuildingDecor } from "./buildingVisuals";
 import type { BoardTutorialHighlight, TutorialHighlightTone } from "./tutorial/tutorialHighlights";
 import { sameTutorialCoord } from "./tutorial/tutorialHighlights";
 import type {
@@ -43,6 +44,7 @@ export type BoardSurfaceTileInteraction = {
   tutorialHighlightTone?: TutorialHighlightTone;
   hasManaSource?: boolean;
   hasBuilding?: boolean;
+  buildingDecor?: BoardSurfaceBuildingDecor;
   hasPiece: boolean;
   pieceSide?: Side;
   pieceType?: BoardPiece["pieceType"];
@@ -136,6 +138,9 @@ export function buildBoardSurface({
     const hasManaSource = isManaSourceAt(match, tile.coord);
     const building = buildingAt(match, tile.coord);
     const hasBuilding = !!building;
+    const buildingDecor = building
+      ? buildingDecorForTile(building, displayPiece?.side ?? piece?.side)
+      : undefined;
     const isLegal =
       isInteractive &&
       ((selectedCard && isLegalCardTarget(match, viewerSide, selectedCard, tile.coord, piece)) ||
@@ -165,6 +170,7 @@ export function buildBoardSurface({
       tutorialHighlightTone,
       hasManaSource,
       hasBuilding,
+      buildingDecor,
       hasPiece: Boolean(displayPiece),
       pieceSide: displayPiece?.side,
       pieceType: displayPiece?.pieceType,

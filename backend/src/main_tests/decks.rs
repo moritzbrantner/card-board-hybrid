@@ -383,7 +383,7 @@ async fn catalog_cards_return_starter_recipe_order_and_copy_counts() {
 
     assert_eq!(status, StatusCode::OK);
     let cards = body["cards"].as_array().expect("cards should be an array");
-    assert_eq!(cards.len(), 55);
+    assert_eq!(cards.len(), 79);
     let card_by_id = |id: &str| {
         cards
             .iter()
@@ -391,7 +391,7 @@ async fn catalog_cards_return_starter_recipe_order_and_copy_counts() {
             .expect("card should exist")
     };
     assert_eq!(cards[0]["id"], "ember-squire");
-    assert_eq!(cards[54]["id"], "surge-protocol");
+    assert_eq!(cards[78]["id"], "surge-protocol");
     assert_eq!(card_by_id("ember-squire")["copyCount"], 4);
     assert_eq!(card_by_id("mana-well")["copyCount"], 5);
     assert_eq!(card_by_id("mana-well")["kind"]["type"], "building");

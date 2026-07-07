@@ -84,10 +84,16 @@ export function itemPassiveLabel(passive: { type: "statBonus"; attack: number; a
   return parts.length > 0 ? parts.join(", ") : "No passive";
 }
 
-export function itemActiveLabel(active: { type: "healCarrier"; amount: number }) {
+export function itemActiveLabel(active: import("./types").ItemActiveEffect) {
   switch (active.type) {
     case "healCarrier":
       return `heal carrier ${active.amount}`;
+    case "damageTarget":
+      return `damage ${active.amount} rng ${active.range}`;
+    case "draw":
+      return `draw ${active.amount}`;
+    case "statMarker":
+      return `marker +${active.attack}/+${active.armor}/+${active.maxAp} ap`;
   }
 }
 
@@ -243,11 +249,11 @@ export function eventDetail(event: ReplayEvent) {
           return `${event.source.heroId} gained ${event.amount} mana from destroying ${event.source.unitId}.`;
       }
     case "itemEquipped":
-      return `${sideLabel(event.side)} equipped ${event.name} to ${event.unitId}.`;
+      return `${sideLabel(event.side)} equipped ${event.name} to ${event.carrierId ?? event.unitId}.`;
     case "itemDropped":
       return `${event.name} dropped at q ${event.position.q}, r ${event.position.r}.`;
     case "itemActivated":
-      return `${sideLabel(event.side)} activated ${event.name} on ${event.unitId}.`;
+      return `${sideLabel(event.side)} activated ${event.name} on ${event.carrierId ?? event.unitId}.`;
     case "matchEnded":
       return `${sideLabel(event.winner)} won the match.`;
   }

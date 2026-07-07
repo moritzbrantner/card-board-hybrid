@@ -3,8 +3,8 @@ use std::fs;
 use std::path::Path;
 
 use super::{
-    ActionTarget, BuildingEffect, Card, CardKind, HexCoord, PieceView, Side, SpellEffect,
-    card_interactions,
+    ActionTarget, BuildingEffect, Card, CardKind, HexCoord, ItemActiveEffect, PieceView, Side,
+    SpellEffect, card_interactions,
 };
 use serde::{Deserialize, Serialize};
 
@@ -61,6 +61,8 @@ impl SoloAiPolicy {
             }),
             SoloAiRuleId::InRangeAttack => self.in_range_attack(view),
             SoloAiRuleId::UsefulSpell => self.useful_spell(view),
+            SoloAiRuleId::UsefulItemActivation => self.useful_item_activation(view),
+            SoloAiRuleId::UsefulItemEquip => self.useful_item_equip(view),
             SoloAiRuleId::BuildManaSource => self.build_mana_source(view),
             SoloAiRuleId::HighestCostUnitSummon => self.highest_cost_unit_summon(view),
             SoloAiRuleId::MoveTowardPlayerHero => self.move_toward_player_hero(view),
@@ -191,6 +193,85 @@ impl SoloAiPolicy {
         })
     }
 
+    fn useful_item_equip(&self, view: &SoloAiView) -> Option<SoloAiActionIntent> {
+        if view.opponent_hero.ap_remaining == 0 {
+            return None;
+        }
+        for card in view
+            .opponent_hand
+            .iter()
+            .filter(|card| card.cost <= view.opponent_mana)
+        {
+            let CardKind::Item { targets, range, .. } = card.kind else {
+                continue;
+            };
+            let target = view
+                .opponent_pieces
+                .iter()
+                .filter(|piece| piece.ap_remaining > 0 || piece.id == view.opponent_hero.id)
+                .filter(|piece| card_interactions::target_policy_allows(targets, piece.is_hero))
+                .filter(|piece| {
+                    view.opponent_hero.position.distance(piece.position) <= i32::from(range)
+                })
+                .max_by_key(|piece| piece.attack)?;
+
+            return Some(SoloAiActionIntent::PlayCard {
+                card_id: card.id.clone(),
+                target: ActionTarget::Piece {
+                    piece_id: target.id.clone(),
+                },
+            });
+        }
+        None
+    }
+
+    fn useful_item_activation(&self, view: &SoloAiView) -> Option<SoloAiActionIntent> {
+        for item in &view.opponent_carried_items {
+            if item.carrier.ap_remaining == 0 || item.active_used_this_turn {
+                continue;
+            }
+            let target = match &item.active {
+                ItemActiveEffect::HealCarrier { .. } => view
+                    .damaged_piece_ids
+                    .contains(&item.carrier.id)
+                    .then_some(None),
+                ItemActiveEffect::DamageTarget { range, .. } => view
+                    .player_pieces
+                    .iter()
+                    .filter(|piece| {
+                        item.carrier.position.distance(piece.position) <= i32::from(*range)
+                    })
+                    .max_by_key(|piece| {
+                        if piece.id == view.player_hero.id {
+                            99
+                        } else {
+                            piece.attack
+                        }
+                    })
+                    .map(|piece| {
+                        Some(ActionTarget::Piece {
+                            piece_id: piece.id.clone(),
+                        })
+                    }),
+                ItemActiveEffect::Draw { .. } => {
+                    (view.opponent_deck_count + view.opponent_discard_count > 0).then_some(None)
+                }
+                ItemActiveEffect::StatMarker { .. } => view
+                    .player_pieces
+                    .iter()
+                    .any(|piece| item.carrier.position.distance(piece.position) <= 2)
+                    .then_some(None),
+            }?;
+
+            return Some(SoloAiActionIntent::ActivateItem {
+                carrier_id: item.carrier.id.clone(),
+                item_id: item.item_id.clone(),
+                target,
+            });
+        }
+        None
+    }
+
     fn build_mana_source(&self, view: &SoloAiView) -> Option<SoloAiActionIntent> {
         if view.opponent_hero.ap_remaining == 0 {
             return None;
@@ -289,6 +370,7 @@ pub(super) struct SoloAiView {
     pub(super) player_pieces: Vec<PieceView>,
     pub(super) opponent_units: Vec<PieceView>,
     pub(super) player_units: Vec<PieceView>,
+    pub(super) opponent_carried_items: Vec<SoloAiCarriedItem>,
     pub(super) opponent_hand: Vec<Card>,
     pub(super) opponent_mana: u8,
     pub(super) opponent_deck_count: usize,
@@ -297,6 +379,14 @@ pub(super) struct SoloAiView {
     pub(super) occupied_hexes: HashSet<HexCoord>,
     pub(super) mana_sources: HashSet<HexCoord>,
     pub(super) damaged_piece_ids: HashSet<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct SoloAiCarriedItem {
+    pub(super) carrier: PieceView,
+    pub(super) item_id: String,
+    pub(super) active: ItemActiveEffect,
+    pub(super) active_used_this_turn: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -319,6 +409,11 @@ pub(super) enum SoloAiActionIntent {
         piece_id: String,
         to: HexCoord,
     },
+    ActivateItem {
+        carrier_id: String,
+        item_id: String,
+        target: Option<ActionTarget>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -328,6 +423,8 @@ pub(crate) enum SoloAiRuleId {
     InvalidAttack,
     InRangeAttack,
     UsefulSpell,
+    UsefulItemActivation,
+    UsefulItemEquip,
     BuildManaSource,
     HighestCostUnitSummon,
     MoveTowardPlayerHero,
@@ -452,6 +549,8 @@ fn baseline_rules() -> Vec<SoloAiRuleId> {
     vec![
         SoloAiRuleId::InRangeAttack,
         SoloAiRuleId::UsefulSpell,
+        SoloAiRuleId::UsefulItemActivation,
+        SoloAiRuleId::UsefulItemEquip,
         SoloAiRuleId::BuildManaSource,
         SoloAiRuleId::HighestCostUnitSummon,
         SoloAiRuleId::MoveTowardPlayerHero,
@@ -493,6 +592,7 @@ mod tests {
             player_pieces,
             opponent_units: Vec::new(),
             player_units: Vec::new(),
+            opponent_carried_items: Vec::new(),
             opponent_hand: Vec::new(),
             opponent_mana: 0,
             opponent_deck_count: 0,
@@ -564,6 +664,8 @@ mod tests {
             &[
                 SoloAiRuleId::InRangeAttack,
                 SoloAiRuleId::UsefulSpell,
+                SoloAiRuleId::UsefulItemActivation,
+                SoloAiRuleId::UsefulItemEquip,
                 SoloAiRuleId::BuildManaSource,
                 SoloAiRuleId::HighestCostUnitSummon,
                 SoloAiRuleId::MoveTowardPlayerHero,

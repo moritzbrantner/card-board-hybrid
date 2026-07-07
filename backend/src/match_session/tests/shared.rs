@@ -220,6 +220,7 @@ fn shared_spell_responses_require_higher_priority_and_resolve_lifo() {
         max_ap: 2,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     });
 
     let bolt = starter_card_templates()
@@ -322,6 +323,7 @@ fn lower_priority_spells_cannot_answer_pending_actions() {
         max_ap: 2,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     });
 
     let bolt = starter_card_templates()

@@ -64,6 +64,7 @@ impl From<MatchSnapshot> for MatchState {
     fn from(snapshot: MatchSnapshot) -> Self {
         let mut board = snapshot.board;
         board.migrate_legacy_mana_sources();
+        board.remove_legacy_outer_natural_mana_wells();
         Self {
             round: snapshot.round,
             mode: snapshot.mode,

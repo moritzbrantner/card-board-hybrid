@@ -38,6 +38,7 @@ fn adjacent_attacks_apply_counterdamage_once_per_piece() {
         max_ap: 2,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     });
     game.board.units.push(Unit {
         id: "opponent-unit".to_string(),
@@ -53,6 +54,7 @@ fn adjacent_attacks_apply_counterdamage_once_per_piece() {
         max_ap: 2,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     });
 
     game.apply_action(MatchActionRequest::Attack {
@@ -330,6 +332,7 @@ fn area_damage_hits_enemies_near_the_target_only() {
         max_ap: 2,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     });
     game.board.units.push(Unit {
         id: "enemy-neighbor".to_string(),
@@ -345,6 +348,7 @@ fn area_damage_hits_enemies_near_the_target_only() {
         max_ap: 2,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     });
     game.board.units.push(Unit {
         id: "ally-neighbor".to_string(),
@@ -360,6 +364,7 @@ fn area_damage_hits_enemies_near_the_target_only() {
         max_ap: 2,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     });
     let cinder = starter_card_templates()
         .into_iter()
@@ -407,6 +412,7 @@ fn line_damage_hits_enemies_in_a_straight_line() {
         max_ap: 2,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     });
     game.board.units.push(Unit {
         id: "enemy-back".to_string(),
@@ -422,6 +428,7 @@ fn line_damage_hits_enemies_in_a_straight_line() {
         max_ap: 2,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     });
     game.board.units.push(Unit {
         id: "enemy-offline".to_string(),
@@ -437,6 +444,7 @@ fn line_damage_hits_enemies_in_a_straight_line() {
         max_ap: 3,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     });
     let ray = starter_card_templates()
         .into_iter()
@@ -484,6 +492,7 @@ fn line_damage_rejects_non_straight_targets() {
         max_ap: 3,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     });
     let ray = starter_card_templates()
         .into_iter()
@@ -518,6 +527,7 @@ fn hero_death_ends_the_match() {
         max_ap: 1,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     });
 
     game.apply_action(MatchActionRequest::Attack {

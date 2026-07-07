@@ -28,6 +28,8 @@ pub struct MatchState {
     pub(super) next_building_id: u32,
 }
 
+pub const MAX_CARRIED_ITEMS: usize = 3;
+
 impl Serialize for MatchState {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -72,7 +74,10 @@ impl Serialize for MatchState {
                 },
             )?;
         }
-        state.serialize_field("participants", &self.public_participants_for_side(Side::Player))?;
+        state.serialize_field(
+            "participants",
+            &self.public_participants_for_side(Side::Player),
+        )?;
         state.serialize_field("board", &self.public_board())?;
         state.serialize_field("actionStack", &self.action_stack)?;
         state.serialize_field("log", &self.log)?;
@@ -207,6 +212,10 @@ pub struct Hero {
     pub ap_remaining: u8,
     pub max_ap: u8,
     pub has_attacked: bool,
+    #[serde(default)]
+    pub items: Vec<CarriedItem>,
+    #[serde(default)]
+    pub stat_markers: Vec<StatMarker>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -331,6 +340,8 @@ pub struct Unit {
     pub has_attacked: bool,
     #[serde(default)]
     pub items: Vec<CarriedItem>,
+    #[serde(default)]
+    pub stat_markers: Vec<StatMarker>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -344,6 +355,16 @@ pub struct CarriedItem {
     pub active: Option<ItemActiveEffect>,
     #[serde(default)]
     pub active_used_this_turn: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatMarker {
+    pub id: String,
+    pub source_item_id: String,
+    pub attack: i32,
+    pub armor: i32,
+    pub max_ap: i8,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -406,6 +427,8 @@ pub enum CardKind {
     },
     Item {
         range: u8,
+        #[serde(default = "default_item_targets")]
+        targets: BuffTargetPolicy,
         passive: ItemPassiveEffect,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         active: Option<ItemActiveEffect>,
@@ -422,6 +445,10 @@ pub enum BuffTargetPolicy {
     UnitsOnly,
     HeroesOnly,
     UnitsAndHeroes,
+}
+
+fn default_item_targets() -> BuffTargetPolicy {
+    BuffTargetPolicy::UnitsOnly
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -499,7 +526,29 @@ pub enum ItemPassiveEffect {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ItemActiveEffect {
-    HealCarrier { amount: i32 },
+    HealCarrier {
+        amount: i32,
+        #[serde(default)]
+        priority: u8,
+    },
+    DamageTarget {
+        amount: i32,
+        range: u8,
+        #[serde(default)]
+        priority: u8,
+    },
+    Draw {
+        amount: u8,
+        #[serde(default)]
+        priority: u8,
+    },
+    StatMarker {
+        attack: i32,
+        armor: i32,
+        max_ap: i8,
+        #[serde(default)]
+        priority: u8,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -522,8 +571,11 @@ pub enum MatchActionRequest {
         target_id: String,
     },
     ActivateItem {
-        unit_id: String,
+        #[serde(alias = "unitId")]
+        carrier_id: String,
         item_id: String,
+        #[serde(default)]
+        target: Option<ActionTarget>,
     },
     ActivateBuilding {
         building_id: String,
@@ -612,7 +664,8 @@ pub enum StackAction {
     },
     EquipItem {
         card: CardSummary,
-        unit_id: String,
+        #[serde(alias = "unitId")]
+        carrier_id: String,
     },
     BuildManaSource {
         card: CardSummary,
@@ -623,8 +676,11 @@ pub enum StackAction {
         coord: HexCoord,
     },
     ActivateItem {
-        unit_id: String,
+        #[serde(alias = "unitId")]
+        carrier_id: String,
         item_id: String,
+        #[serde(default)]
+        target: Option<ActionTarget>,
     },
     ActivateBuilding {
         building_id: String,

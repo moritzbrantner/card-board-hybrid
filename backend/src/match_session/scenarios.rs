@@ -207,7 +207,10 @@ fn item_equip_activate() -> MatchState {
             armor: 0,
             max_ap: 0,
         },
-        active: Some(super::ItemActiveEffect::HealCarrier { amount: 2 }),
+        active: Some(super::ItemActiveEffect::HealCarrier {
+            amount: 2,
+            priority: 0,
+        }),
         active_used_this_turn: false,
     });
     carrier.attack += 1;
@@ -247,6 +250,7 @@ fn unit(spec: UnitSpec) -> Unit {
         max_ap: spec.max_ap,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     }
 }
 
@@ -389,8 +393,9 @@ mod tests {
         let mut game = build_match_scenario("item-equip-activate").expect("scenario should build");
 
         game.apply_action(MatchActionRequest::ActivateItem {
-            unit_id: "player-unit".to_string(),
+            carrier_id: "player-unit".to_string(),
             item_id: "player-item-1".to_string(),
+            target: None,
         })
         .expect("item should activate");
 

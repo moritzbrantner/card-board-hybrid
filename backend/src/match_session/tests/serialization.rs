@@ -12,10 +12,69 @@ fn radius_three_board_has_thirty_seven_tiles() {
             .iter()
             .map(|building| building.position)
             .collect::<Vec<_>>(),
-        vec![hex(-2, 0), hex(0, 0), hex(2, 0)]
+        vec![hex(0, 0)]
     );
     assert!(game.board.is_valid(hex(0, 0)));
     assert!(!game.board.is_valid(hex(4, 0)));
+}
+
+#[test]
+fn old_snapshots_drop_outer_natural_mana_wells_but_keep_built_wells() {
+    let game = MatchState::new_with_seed(7);
+    let mut snapshot = serde_json::from_str::<serde_json::Value>(
+        &game.to_snapshot_json().expect("snapshot should serialize"),
+    )
+    .expect("snapshot should parse");
+    snapshot["board"]["buildings"] = json!([
+        {
+            "id": "natural-mana-1",
+            "templateId": "mana-well",
+            "name": "Mana Well",
+            "position": { "q": -2, "r": 0 },
+            "effect": { "type": "turnStartMana", "amount": 1 },
+            "activatedThisTurn": false
+        },
+        {
+            "id": "natural-mana-2",
+            "templateId": "mana-well",
+            "name": "Mana Well",
+            "position": { "q": 0, "r": 0 },
+            "effect": { "type": "turnStartMana", "amount": 1 },
+            "activatedThisTurn": false
+        },
+        {
+            "id": "natural-mana-3",
+            "templateId": "mana-well",
+            "name": "Mana Well",
+            "position": { "q": 2, "r": 0 },
+            "effect": { "type": "turnStartMana", "amount": 1 },
+            "activatedThisTurn": false
+        },
+        {
+            "id": "player-built-mana",
+            "templateId": "mana-well",
+            "name": "Mana Well",
+            "position": { "q": 2, "r": 0 },
+            "effect": { "type": "turnStartMana", "amount": 1 },
+            "activatedThisTurn": false
+        }
+    ]);
+
+    let restored = MatchState::from_snapshot_json(&snapshot.to_string())
+        .expect("old snapshot should deserialize");
+
+    assert_eq!(
+        restored
+            .board
+            .buildings
+            .iter()
+            .map(|building| (building.id.clone(), building.position))
+            .collect::<Vec<_>>(),
+        vec![
+            ("natural-mana-2".to_string(), hex(0, 0)),
+            ("player-built-mana".to_string(), hex(2, 0)),
+        ]
+    );
 }
 
 #[test]
@@ -146,6 +205,7 @@ fn public_match_state_serializes_player_discard_count_after_spell_play() {
         max_ap: 2,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     });
     let card = starter_card_templates()
         .into_iter()

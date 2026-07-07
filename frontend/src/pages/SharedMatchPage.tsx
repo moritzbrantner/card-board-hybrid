@@ -910,8 +910,8 @@ export function SharedMatchPage({
           }}
           canActivateItems={
             canAct &&
-            match.actionStack.length === 0 &&
-            match.activeSide === viewerSide &&
+            ((match.actionStack.length === 0 && match.activeSide === viewerSide) ||
+              (match.actionStack.length > 0 && match.prioritySide === viewerSide)) &&
             contextMenuUnit.side === viewerSide
           }
           onActivateItem={(itemId) => handleActivateUnitItem(contextMenuUnit, itemId)}

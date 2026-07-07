@@ -1,7 +1,7 @@
 use super::{
-    ActionTarget, BuffTargetPolicy, Card, CardKind, CardSummary, CarriedItem, HexBoard, HexCoord,
-    ItemActiveEffect, ItemPassiveEffect, MatchError, MatchProgressionLoadout, PieceView, Side,
-    SpellEffect, Unit,
+    ActionTarget, BuffTargetPolicy, Card, CardKind, CardSummary, CarriedItem, Hero, HexBoard,
+    HexCoord, ItemActiveEffect, ItemPassiveEffect, MatchError, MatchProgressionLoadout, PieceView,
+    Side, SpellEffect, StatMarker, Unit,
 };
 
 pub(crate) struct PlannedUnitPlay {
@@ -14,7 +14,7 @@ pub(crate) struct PlannedSpellPlay {
 }
 
 pub(crate) struct PlannedItemPlay {
-    pub(crate) unit_id: String,
+    pub(crate) carrier_id: String,
 }
 
 pub(crate) enum ResolvedSpellEffect {
@@ -53,7 +53,21 @@ pub(crate) struct ResolvedSpell {
 }
 
 pub(crate) enum ResolvedItemActiveEffect {
-    HealCarrier { unit_id: String, amount: i32 },
+    HealCarrier {
+        carrier_id: String,
+        amount: i32,
+    },
+    DamageTarget {
+        target_id: String,
+        amount: i32,
+    },
+    Draw {
+        amount: u8,
+    },
+    StatMarker {
+        carrier_id: String,
+        marker: StatMarker,
+    },
 }
 
 pub(crate) struct ResolvedItemActivation {
@@ -116,9 +130,9 @@ pub(crate) fn plan_item_play(
     target: ActionTarget,
     side: Side,
     caster_position: HexCoord,
-    target_unit: &Unit,
+    target_carrier: &PieceView,
 ) -> Result<PlannedItemPlay, MatchError> {
-    let CardKind::Item { range, .. } = &card.kind else {
+    let CardKind::Item { range, targets, .. } = &card.kind else {
         return Err(MatchError::InvalidTarget);
     };
 
@@ -126,14 +140,14 @@ pub(crate) fn plan_item_play(
         return Err(MatchError::InvalidTarget);
     };
 
-    if piece_id != target_unit.id {
+    if piece_id != target_carrier.id {
         return Err(MatchError::PieceNotFound);
     }
 
-    validate_item_target(side, caster_position, *range, target_unit)?;
+    validate_item_target(side, caster_position, *range, *targets, target_carrier)?;
 
     Ok(PlannedItemPlay {
-        unit_id: target_unit.id.clone(),
+        carrier_id: target_carrier.id.clone(),
     })
 }
 
@@ -207,9 +221,13 @@ pub(crate) fn validate_item_target(
     side: Side,
     caster_position: HexCoord,
     range: u8,
-    target: &Unit,
+    targets: BuffTargetPolicy,
+    target: &PieceView,
 ) -> Result<(), MatchError> {
-    if target.side.team() != side.team() || caster_position.distance(target.position) > i32::from(range) {
+    if target.side.team() != side.team()
+        || caster_position.distance(target.position) > i32::from(range)
+        || !target_policy_allows(targets, target.is_hero)
+    {
         return Err(MatchError::InvalidTarget);
     }
 
@@ -330,8 +348,7 @@ pub(crate) fn target_policy_allows(targets: BuffTargetPolicy, is_hero: bool) -> 
 pub(crate) fn equip_item_from_card(
     card: CardSummary,
     item_id: String,
-    unit: &mut Unit,
-) -> Result<(), MatchError> {
+) -> Result<CarriedItem, MatchError> {
     let CardKind::Item {
         passive, active, ..
     } = card.kind
@@ -339,34 +356,59 @@ pub(crate) fn equip_item_from_card(
         return Err(MatchError::InvalidTarget);
     };
 
-    apply_item_passive(unit, &passive);
-    unit.items.push(CarriedItem {
+    Ok(CarriedItem {
         id: item_id,
         template_id: card.template_id,
         name: card.name,
         passive,
         active,
         active_used_this_turn: false,
-    });
-
-    Ok(())
+    })
 }
 
 pub(crate) fn resolve_item_activation(
-    unit: &Unit,
+    carrier: &PieceView,
+    item: &CarriedItem,
     item_id: &str,
+    target: Option<&PieceView>,
 ) -> Result<ResolvedItemActivation, MatchError> {
-    let item = unit
-        .items
-        .iter()
-        .find(|item| item.id == item_id)
-        .ok_or(MatchError::ItemNotFound)?;
+    if item.id != item_id {
+        return Err(MatchError::ItemNotFound);
+    }
     let active = item.active.clone().ok_or(MatchError::InvalidTarget)?;
 
     let effect = match active {
-        ItemActiveEffect::HealCarrier { amount } => ResolvedItemActiveEffect::HealCarrier {
-            unit_id: unit.id.clone(),
+        ItemActiveEffect::HealCarrier { amount, .. } => ResolvedItemActiveEffect::HealCarrier {
+            carrier_id: carrier.id.clone(),
             amount,
+        },
+        ItemActiveEffect::DamageTarget { amount, range, .. } => {
+            let target = target.ok_or(MatchError::InvalidTarget)?;
+            if target.side.team() == carrier.side.team()
+                || carrier.position.distance(target.position) > i32::from(range)
+            {
+                return Err(MatchError::InvalidTarget);
+            }
+            ResolvedItemActiveEffect::DamageTarget {
+                target_id: target.id.clone(),
+                amount,
+            }
+        }
+        ItemActiveEffect::Draw { amount, .. } => ResolvedItemActiveEffect::Draw { amount },
+        ItemActiveEffect::StatMarker {
+            attack,
+            armor,
+            max_ap,
+            ..
+        } => ResolvedItemActiveEffect::StatMarker {
+            carrier_id: carrier.id.clone(),
+            marker: StatMarker {
+                id: String::new(),
+                source_item_id: item.id.clone(),
+                attack,
+                armor,
+                max_ap,
+            },
         },
     };
 
@@ -421,6 +463,7 @@ pub(crate) fn summon_unit_from_card(
         max_ap: *max_ap,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     })
 }
 
@@ -444,6 +487,39 @@ pub(crate) fn apply_item_passive(unit: &mut Unit, passive: &ItemPassiveEffect) {
                 unit.max_ap = unit.max_ap.saturating_sub(amount);
             }
         }
+    }
+}
+
+pub(crate) fn apply_item_passive_to_hero(hero: &mut Hero, passive: &ItemPassiveEffect) {
+    match passive {
+        ItemPassiveEffect::StatBonus {
+            attack,
+            armor,
+            max_ap,
+        } => {
+            hero.attack += *attack;
+            if *armor > 0 {
+                hero.shield = hero.shield.saturating_add(*armor);
+            }
+            if *max_ap >= 0 {
+                let amount = *max_ap as u8;
+                hero.ap_remaining = hero.ap_remaining.saturating_add(amount);
+                hero.max_ap = hero.max_ap.saturating_add(amount);
+            } else {
+                let amount = max_ap.unsigned_abs();
+                hero.ap_remaining = hero.ap_remaining.saturating_sub(amount);
+                hero.max_ap = hero.max_ap.saturating_sub(amount);
+            }
+        }
+    }
+}
+
+pub(crate) fn item_active_priority(active: &ItemActiveEffect) -> u8 {
+    match active {
+        ItemActiveEffect::HealCarrier { priority, .. }
+        | ItemActiveEffect::DamageTarget { priority, .. }
+        | ItemActiveEffect::Draw { priority, .. }
+        | ItemActiveEffect::StatMarker { priority, .. } => *priority,
     }
 }
 

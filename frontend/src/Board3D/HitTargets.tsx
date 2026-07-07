@@ -59,6 +59,9 @@ export function Board3DHitTarget({
     "board-3d-hit-target",
     interaction.hasManaSource ? "mana-source" : "",
     interaction.hasBuilding ? "building" : "",
+    interaction.buildingDecor?.className ?? "",
+    interaction.buildingDecor ? `building-accent-${interaction.buildingDecor.accent}` : "",
+    interaction.buildingDecor?.activatedThisTurn ? "building-exhausted" : "",
     interaction.hasPiece ? "occupied" : "",
     interaction.pieceSide ? `occupied-${interaction.pieceSide}` : "",
     interaction.isLegal ? "legal" : "",
@@ -121,8 +124,9 @@ export function Board3DHitTarget({
         });
       }}
     >
-      {interaction.hasManaSource ? <span aria-hidden="true">M</span> : null}
-      {interaction.hasBuilding && !interaction.hasManaSource ? <span aria-hidden="true">B</span> : null}
+      {interaction.buildingDecor ? (
+        <span aria-hidden="true">{interaction.buildingDecor.glyph}</span>
+      ) : null}
       {interaction.pieceLabel ? <span>{interaction.pieceLabel}</span> : null}
       {interaction.pieceStatLabel ? <strong>{interaction.pieceStatLabel}</strong> : null}
       {interaction.droppedItemCount ? (

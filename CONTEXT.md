@@ -20,6 +20,26 @@ _Avoid_: health, hero armor, shield
 A card that creates an immediate effect from the caster hero instead of creating a unit.
 _Avoid_: tactic
 
+**Item card**:
+A Card that equips a Carried Item to an eligible allied Carrier.
+_Avoid_: equipment spell
+
+**Carried Item**:
+An Item attached to a Unit or Hero, contributing passive effects and optional activations.
+_Avoid_: inventory card
+
+**Carrier**:
+A Unit or Hero that can carry Items.
+_Avoid_: holder, bearer
+
+**Item activation**:
+Spending Carrier action points to use a carried Item's active effect.
+_Avoid_: item trigger, equipment action
+
+**Stat marker**:
+A visible persistent counter on a Carrier that modifies combat stats.
+_Avoid_: hidden buff, invisible stat mutation
+
 **Card interaction**:
 Playing a Card and resolving its card-created effect through the match rules, including target legality, stack entry, and Unit, Spell, or Item effect logic.
 _Avoid_: card handler, play-card plumbing
@@ -35,6 +55,10 @@ _Avoid_: mana tile, controlled hex
 **Building**:
 A neutral, permanent board feature on a hex. A Building may grant an effect to the occupying side, project an aura, or be activated by its occupying Hero or Unit.
 _Avoid_: structure, owned building
+
+**Building visual identity**:
+The player-facing presentation that makes a Building recognizable across 2D and 3D Board visual modes, including icon, silhouette, colors, tile base, and fallback treatment. Building visual identity is presentation-only and never changes match rules, replay data, card legality, or shared-match protocol semantics.
+_Avoid_: building rules, building state, cosmetic data
 
 **Building card**:
 A Card that creates a Building on an adjacent empty hex.

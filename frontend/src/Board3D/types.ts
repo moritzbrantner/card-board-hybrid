@@ -2,7 +2,7 @@ import type { ProjectedBoardPosition } from "../boardRenderer";
 import type { BoardSurfaceTileInteraction } from "../boardSurface";
 import type { MatchVisualCatalog } from "../matchVisualIdentity";
 import type { TargetingIndicator } from "../targetingIndicators";
-import type { HexCoord, HexTile, HeroAppearanceAssignment, HeroType, Side, Unit } from "../types";
+import type { HexCoord, HexTile, HeroAppearanceAssignment, HeroType, Side, Unit, Hero } from "../types";
 import type { BoardAnimationCue } from "../boardAnimations";
 import type { BoardPieceVisualManifest } from "../board3dModelManifest";
 
@@ -20,6 +20,8 @@ export type Board3DHero = {
   apRemaining: number;
   maxAp: number;
   hasAttacked: boolean;
+  items?: Hero["items"];
+  statMarkers?: Hero["statMarkers"];
 };
 
 export type Board3DUnit = {
@@ -36,7 +38,8 @@ export type Board3DUnit = {
   apRemaining: number;
   maxAp: number;
   hasAttacked: boolean;
-  items: Unit["items"];
+  items?: Unit["items"];
+  statMarkers?: Unit["statMarkers"];
 };
 
 export type Board3DPiece = Board3DHero | Board3DUnit;

@@ -131,20 +131,23 @@ pub enum ReplayEvent {
     },
     ItemEquipped {
         side: Side,
-        unit_id: String,
+        #[serde(alias = "unitId")]
+        carrier_id: String,
         item_id: String,
         name: String,
     },
     ItemDropped {
         side: Side,
-        unit_id: String,
+        #[serde(alias = "unitId")]
+        carrier_id: String,
         item_id: String,
         name: String,
         position: HexCoord,
     },
     ItemActivated {
         side: Side,
-        unit_id: String,
+        #[serde(alias = "unitId")]
+        carrier_id: String,
         item_id: String,
         name: String,
     },

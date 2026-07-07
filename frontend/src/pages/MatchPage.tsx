@@ -588,8 +588,8 @@ export function MatchPage({
             setUnitContextMenu(null);
           }}
           canActivateItems={
-            match.actionStack.length === 0 &&
-            match.activeSide === viewerSide &&
+            ((match.actionStack.length === 0 && match.activeSide === viewerSide) ||
+              (match.actionStack.length > 0 && match.prioritySide === viewerSide)) &&
             contextMenuUnit.side === viewerSide
           }
           onActivateItem={(itemId) => handleActivateUnitItem(contextMenuUnit, itemId)}
@@ -622,7 +622,7 @@ function soloActionRequest(matchId: string, action: MatchActionRequest) {
     case "attack":
       return attack(matchId, action.attackerId, action.targetId);
     case "activateItem":
-      return activateItem(matchId, action.unitId, action.itemId);
+      return activateItem(matchId, action.carrierId ?? action.unitId, action.itemId, action.target ?? null);
     case "activateBuilding":
       return activateBuilding(matchId, action.buildingId);
     case "endTurn":

@@ -75,6 +75,7 @@ fn board_unit(
         max_ap: 2,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     }
 }
 
@@ -99,6 +100,7 @@ fn damaged_board_unit(
         max_ap: 2,
         has_attacked: false,
         items: Vec::new(),
+        stat_markers: Vec::new(),
     }
 }
 

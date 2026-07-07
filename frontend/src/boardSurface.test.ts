@@ -125,9 +125,45 @@ describe("board surface", () => {
 
     expect(tile?.hasManaSource).toBe(true);
     expect(tile?.hasBuilding).toBe(true);
+    expect(tile?.buildingDecor).toMatchObject({
+      visualKind: "watchtower",
+      glyph: "W",
+      effectType: "activatedDamageLine",
+      activatedThisTurn: false,
+    });
     expect(tile?.droppedItemCount).toBe(1);
     expect(tile?.title).toContain("1 dropped item");
     expect(tile?.title).toContain("building Watchtower");
+  });
+
+  it("includes occupied side and unknown fallback in Building decor", () => {
+    const match = storyMatch({
+      playerHero: { q: 0, r: 0 },
+    });
+    match.board.buildings = [
+      {
+        ...buildingAt({ q: 0, r: 0 }),
+        templateId: "future-building",
+        activatedThisTurn: true,
+      },
+    ];
+
+    const surface = buildBoardSurface({
+      match,
+      viewerSide: "player",
+      selectedCard: null,
+      selectedPiece: null,
+      focusedCoord: null,
+      hoveredCoord: null,
+      isInteractive: true,
+    });
+
+    expect(surface.tileByKey.get("0:0")?.buildingDecor).toMatchObject({
+      visualKind: "unknownBuilding",
+      glyph: "B",
+      occupiedSide: "player",
+      activatedThisTurn: true,
+    });
   });
 });
 
@@ -151,7 +187,7 @@ function buildingAt(position: { q: number; r: number }): Building {
     templateId: "watchtower",
     name: "Watchtower",
     position,
-    effect: { type: "turnStartMana", amount: 1 },
+    effect: { type: "activatedDamageLine", range: 2, amount: 2 },
     activatedThisTurn: false,
   };
 }

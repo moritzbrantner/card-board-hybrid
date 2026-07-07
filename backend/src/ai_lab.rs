@@ -622,6 +622,7 @@ impl UnitSetup {
             max_ap: self.max_ap.unwrap_or(max_ap),
             has_attacked: false,
             items: Vec::new(),
+            stat_markers: Vec::new(),
         })
     }
 }

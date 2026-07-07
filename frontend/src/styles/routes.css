@@ -2128,10 +2128,13 @@ h1 {
   border: 1px solid rgba(247, 243, 234, 0.18);
   color: inherit;
   background:
+    radial-gradient(circle at 50% 54%, rgba(217, 184, 79, 0.07), transparent 34%),
     linear-gradient(140deg, rgba(255, 255, 255, 0.08), transparent 48%),
+    linear-gradient(320deg, rgba(88, 183, 161, 0.08), transparent 52%),
     rgba(10, 13, 13, 0.42);
   clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%);
   cursor: pointer;
+  overflow: hidden;
 }
 
 .hex-tile::before {
@@ -2142,6 +2145,44 @@ h1 {
   border-radius: 999px;
   opacity: 0;
   pointer-events: none;
+}
+
+.hex-tile::after {
+  content: "";
+  position: absolute;
+  inset: 14px 18px;
+  z-index: 0;
+  border: 1px solid rgba(217, 184, 79, 0.1);
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, transparent 18%, rgba(247, 243, 234, 0.1) 19%, transparent 22%),
+    linear-gradient(150deg, transparent 54%, rgba(0, 0, 0, 0.16) 55%, transparent 59%);
+  opacity: 0.62;
+  pointer-events: none;
+}
+
+.hex-tile.hex-sigil-axis::after {
+  border-color: rgba(217, 184, 79, 0.18);
+  background:
+    linear-gradient(90deg, transparent 15%, rgba(217, 184, 79, 0.18) 16%, transparent 20%),
+    linear-gradient(0deg, transparent 47%, rgba(217, 184, 79, 0.16) 48%, transparent 52%),
+    radial-gradient(circle at 50% 50%, rgba(217, 184, 79, 0.12), transparent 46%);
+}
+
+.hex-tile.hex-sigil-center::after {
+  inset: 18px 24px;
+  border-color: rgba(217, 184, 79, 0.3);
+  box-shadow:
+    inset 0 0 0 8px rgba(217, 184, 79, 0.04),
+    0 0 26px rgba(217, 184, 79, 0.12);
+}
+
+.hex-tile.hex-sigil-edge {
+  background:
+    linear-gradient(0deg, rgba(247, 243, 234, 0.06), transparent 24%),
+    radial-gradient(circle at 50% 54%, rgba(217, 184, 79, 0.07), transparent 34%),
+    linear-gradient(140deg, rgba(255, 255, 255, 0.08), transparent 48%),
+    rgba(10, 13, 13, 0.48);
 }
 
 .hex-tile.occupied::before {
@@ -2162,6 +2203,32 @@ h1 {
 
 .hex-tile.mana-source {
   border-color: rgba(217, 184, 79, 0.44);
+}
+
+.hex-tile.building {
+  box-shadow: inset 0 0 0 1px rgba(247, 243, 234, 0.08);
+}
+
+.hex-tile.building-ready:not(.building-exhausted) .building-marker {
+  animation: building-ready-breathe 3.8s ease-in-out infinite;
+}
+
+.hex-tile.building-exhausted .building-marker {
+  filter: saturate(0.62) brightness(0.78);
+}
+
+.hex-tile.building-aura .building-marker {
+  box-shadow:
+    0 0 0 2px rgba(88, 183, 161, 0.14),
+    0 0 20px rgba(88, 183, 161, 0.16);
+}
+
+.hex-tile.building-occupied-player .building-marker {
+  border-color: rgba(119, 179, 111, 0.82);
+}
+
+.hex-tile.building-occupied-opponent .building-marker {
+  border-color: rgba(209, 102, 90, 0.82);
 }
 
 .hex-tile > * {
@@ -2210,7 +2277,8 @@ h1 {
   border-color: var(--teal);
 }
 
-.mana-source-marker {
+.mana-source-marker,
+.building-marker {
   position: absolute;
   left: 10px;
   top: 8px;
@@ -2230,22 +2298,88 @@ h1 {
 }
 
 .building-marker {
+  width: 32px;
+  height: 28px;
+  border-radius: 9px;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(255, 250, 240, 0.28), transparent 32%),
+    rgba(27, 31, 29, 0.86);
+  color: #fffaf0;
+  box-shadow:
+    inset 0 -5px 0 rgba(0, 0, 0, 0.22),
+    0 8px 20px rgba(0, 0, 0, 0.28);
+}
+
+.building-marker-base {
   position: absolute;
-  left: 10px;
-  top: 8px;
-  z-index: 2;
-  display: inline-flex;
-  width: 20px;
-  height: 20px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 250, 240, 0.58);
-  background: var(--teal);
-  color: #101312;
-  font-size: 0.68rem;
-  font-weight: 950;
-  line-height: 1;
+  left: 5px;
+  right: 5px;
+  bottom: 4px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.34;
+}
+
+.building-marker-glyph {
+  position: relative;
+  z-index: 1;
+  color: inherit;
+  font-size: 0.72rem;
+}
+
+.building-accent-mana .building-marker,
+.building-marker.building-accent-mana,
+.board-3d-hit-target.building-accent-mana span:first-child {
+  color: #d9b84f;
+}
+
+.building-accent-armorAura .building-marker,
+.building-marker.building-accent-armorAura,
+.board-3d-hit-target.building-accent-armorAura span:first-child {
+  color: #7aa7d9;
+}
+
+.building-accent-attackAura .building-marker,
+.building-marker.building-accent-attackAura,
+.board-3d-hit-target.building-accent-attackAura span:first-child {
+  color: #d1665a;
+}
+
+.building-accent-damage .building-marker,
+.building-marker.building-accent-damage,
+.board-3d-hit-target.building-accent-damage span:first-child {
+  color: #ffcf7a;
+}
+
+.building-accent-healing .building-marker,
+.building-marker.building-accent-healing,
+.board-3d-hit-target.building-accent-healing span:first-child {
+  color: #58b7a1;
+}
+
+.building-visual-mana-well .building-marker-base,
+.building-marker.building-visual-mana-well .building-marker-base {
+  height: 12px;
+  border-radius: 999px;
+}
+
+.building-marker.building-visual-stone-bastion {
+  border-radius: 5px 5px 9px 9px;
+}
+
+.building-marker.building-visual-watchtower {
+  width: 26px;
+  height: 34px;
+  border-radius: 7px 7px 4px 4px;
+}
+
+.building-marker.building-visual-war-foundry {
+  transform: skewX(-8deg);
+}
+
+.building-marker.building-visual-healing-font {
+  border-radius: 999px 999px 10px 10px;
 }
 
 .hex-occupant-marker {
@@ -2529,6 +2663,22 @@ h1 {
 .piece-token svg {
   width: 13px;
   height: 13px;
+}
+
+@keyframes building-ready-breathe {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 -5px 0 rgba(0, 0, 0, 0.22),
+      0 8px 20px rgba(0, 0, 0, 0.28);
+  }
+
+  50% {
+    box-shadow:
+      inset 0 -5px 0 rgba(0, 0, 0, 0.2),
+      0 8px 20px rgba(0, 0, 0, 0.28),
+      0 0 22px currentColor;
+  }
 }
 
 .hand-and-log {
@@ -5568,7 +5718,8 @@ h1 {
 
 @media (prefers-reduced-motion: reduce) {
   .card-button,
-  .piece-token {
+  .piece-token,
+  .hex-tile.building-ready .building-marker {
     transition: none;
     animation: none;
   }
@@ -5587,7 +5738,8 @@ h1 {
 }
 
 :root[data-motion="reduced"] .card-button,
-:root[data-motion="reduced"] .piece-token {
+:root[data-motion="reduced"] .piece-token,
+:root[data-motion="reduced"] .hex-tile.building-ready .building-marker {
   transition: none;
   animation: none;
 }

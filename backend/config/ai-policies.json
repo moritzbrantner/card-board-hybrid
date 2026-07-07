@@ -6,6 +6,8 @@
       "rules": [
         "inRangeAttack",
         "usefulSpell",
+        "usefulItemActivation",
+        "usefulItemEquip",
         "buildManaSource",
         "highestCostUnitSummon",
         "moveTowardPlayerHero"
@@ -17,6 +19,8 @@
         "inRangeAttack",
         "highestCostUnitSummon",
         "usefulSpell",
+        "usefulItemActivation",
+        "usefulItemEquip",
         "moveTowardPlayerHero",
         "buildManaSource"
       ]

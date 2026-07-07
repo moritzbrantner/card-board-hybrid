@@ -66,7 +66,7 @@ export function UnitContextMenuView({
   onActivateBuilding,
 }: {
   menu: Exclude<UnitContextMenu, null>;
-  unit: BoardUnit;
+  unit: BoardPiece;
   onClose: () => void;
   onOpenCardInfo: () => void;
   canActivateItems: boolean;
@@ -75,6 +75,7 @@ export function UnitContextMenuView({
   canActivateBuilding?: boolean;
   onActivateBuilding?: (buildingId: string) => void;
 }) {
+  const carriedItems = unit.items ?? [];
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -102,11 +103,11 @@ export function UnitContextMenuView({
       style={{ left: menu.x, top: menu.y }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <button type="button" role="menuitem" onClick={onOpenCardInfo}>
+      <button type="button" role="menuitem" disabled={unit.pieceType !== "unit"} onClick={onOpenCardInfo}>
         <LibraryBig size={15} />
         Card info
       </button>
-      {unit.items
+      {carriedItems
         .filter((item) => item.active)
         .map((item) => (
           <button
@@ -152,6 +153,8 @@ export function UnitCardModal({
   unitVisualIdentity: UnitVisualIdentity;
   onClose: () => void;
 }) {
+  const carriedItems = unit.items ?? [];
+  const statMarkers = unit.statMarkers ?? [];
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -217,12 +220,13 @@ export function UnitCardModal({
             <DetailStat label="Armor" value={`${unit.armor}/${unit.maxArmor}`} />
             <DetailStat label="AP" value={`${unit.apRemaining}/${unit.maxAp}`} />
             <DetailStat label="Attacked" value={unit.hasAttacked ? "Yes" : "No"} />
-            <DetailStat label="Items" value={unit.items.length} />
+            <DetailStat label="Items" value={carriedItems.length} />
+            <DetailStat label="Markers" value={statMarkers.length} />
           </div>
 
-          {unit.items.length > 0 ? (
+          {carriedItems.length > 0 ? (
             <div className="unit-item-list" aria-label="Carried items">
-              {unit.items.map((item) => (
+              {carriedItems.map((item) => (
                 <p key={item.id}>
                   <strong>{item.name}</strong>
                   <span>{itemPassiveLabel(item.passive)}</span>
@@ -294,7 +298,7 @@ export function StackDisplay({
   );
 }
 
-function TargetingStackOverlay({
+export function TargetingStackOverlay({
   stack,
   prioritySide,
   activeStackItemId,
@@ -421,7 +425,7 @@ export function Board({
   readOnly?: boolean;
   onTileClick?: (tile: HexTile) => void;
   onTileDrop?: (tile: HexTile, cardId: string) => void;
-  onUnitContextMenu?: (unit: BoardUnit, position: { x: number; y: number }) => void;
+  onUnitContextMenu?: (unit: BoardPiece, position: { x: number; y: number }) => void;
   onFocusedUnitChange?: (pieceId: string | null) => void;
   tutorialHighlights?: BoardTutorialHighlight[];
 }) {
@@ -525,7 +529,7 @@ export function Board({
           onTileDrop={onTileDrop}
           onTileContextMenu={(tile, event) => {
             const piece = boardSurface.tileByKey.get(coordKey(tile.coord))?.piece ?? null;
-            if (piece?.pieceType !== "unit" || !onUnitContextMenu) {
+            if (!piece || !onUnitContextMenu) {
               return;
             }
 
@@ -566,13 +570,28 @@ export function Board({
           {boardSurface.columns.map((column) => (
             <div className="hex-column" key={column.q}>
               {column.tiles.map((surfaceTile) => {
+                const buildingDecor = surfaceTile.buildingDecor;
+                const buildingClasses = buildingDecor
+                  ? [
+                      buildingDecor.className,
+                      `building-accent-${buildingDecor.accent}`,
+                      buildingDecor.occupiedSide
+                        ? `building-occupied-${buildingDecor.occupiedSide}`
+                        : "",
+                      buildingDecor.activatedThisTurn ? "building-exhausted" : "building-ready",
+                      buildingDecor.effectType === "auraStatBonus" ? "building-aura" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")
+                  : "";
+
                 return (
                   <button
                     key={surfaceTile.key}
                     ref={(element) => {
                       registerTargetElement(surfaceTile.coord, element);
                     }}
-                    className={`hex-tile ${surfaceTile.hasManaSource ? "mana-source" : ""} ${surfaceTile.hasBuilding ? "building" : ""} ${surfaceTile.building ? `building-${surfaceTile.building.effect.type}` : ""} ${surfaceTile.occupantClass} ${surfaceTile.isLegal ? "legal" : ""} ${surfaceTile.isSelected ? "selected-piece" : ""} ${surfaceTile.isFocused ? "keyboard-focused" : ""} ${surfaceTile.tutorialHighlightTone ? `tutorial-highlight tutorial-highlight-${surfaceTile.tutorialHighlightTone}` : ""}`}
+                    className={`hex-tile ${hexDecorClass(surfaceTile.coord)} ${surfaceTile.hasManaSource ? "mana-source" : ""} ${surfaceTile.hasBuilding ? "building" : ""} ${surfaceTile.building ? `building-${surfaceTile.building.effect.type}` : ""} ${buildingClasses} ${surfaceTile.occupantClass} ${surfaceTile.isLegal ? "legal" : ""} ${surfaceTile.isSelected ? "selected-piece" : ""} ${surfaceTile.isFocused ? "keyboard-focused" : ""} ${surfaceTile.tutorialHighlightTone ? `tutorial-highlight tutorial-highlight-${surfaceTile.tutorialHighlightTone}` : ""}`}
                     type="button"
                     disabled={disabled && !readOnly}
                     tabIndex={readOnly ? -1 : undefined}
@@ -606,7 +625,7 @@ export function Board({
                       }
                     }}
                     onContextMenu={(event: ReactMouseEvent<HTMLButtonElement>) => {
-                      if (readOnly || surfaceTile.piece?.pieceType !== "unit" || !onUnitContextMenu) {
+                      if (readOnly || !surfaceTile.piece || !onUnitContextMenu) {
                         return;
                       }
 
@@ -616,14 +635,14 @@ export function Board({
                     title={surfaceTile.title}
                     aria-label={surfaceTile.title}
                   >
-                    {surfaceTile.hasManaSource ? (
-                      <span className="mana-source-marker" aria-hidden="true">
-                        M
-                      </span>
-                    ) : null}
-                    {surfaceTile.building && !surfaceTile.hasManaSource ? (
-                      <span className="building-marker" aria-hidden="true">
-                        B
+                    {buildingDecor ? (
+                      <span
+                        className={`building-marker ${buildingDecor.className} building-accent-${buildingDecor.accent}`}
+                        aria-hidden="true"
+                        data-building-kind={buildingDecor.visualKind}
+                      >
+                        <span className="building-marker-base" />
+                        <span className="building-marker-glyph">{buildingDecor.glyph}</span>
                       </span>
                     ) : null}
                     {surfaceTile.displayPiece ? (
@@ -657,6 +676,15 @@ export function Board({
       </div>
     </section>
   );
+}
+
+function hexDecorClass(coord: HexCoord) {
+  const ring = Math.max(Math.abs(coord.q), Math.abs(coord.r), Math.abs(-coord.q - coord.r));
+  const axisClass = coord.q === 0 || coord.r === 0 || coord.q + coord.r === 0 ? "hex-sigil-axis" : "";
+  const centerClass = ring === 0 ? "hex-sigil-center" : "";
+  const edgeClass = ring === 3 ? "hex-sigil-edge" : "";
+
+  return [`hex-ring-${ring}`, axisClass, centerClass, edgeClass].filter(Boolean).join(" ");
 }
 
 export function PieceToken({
@@ -722,10 +750,10 @@ export function PieceToken({
         <Footprints size={11} />
         {piece.apRemaining}
       </span>
-      {piece.pieceType === "unit" && piece.items.length > 0 ? (
+      {(piece.items ?? []).length > 0 ? (
         <span>
           <Sparkles size={11} />
-          {piece.items.length}
+          {(piece.items ?? []).length}
         </span>
       ) : null}
       </span>

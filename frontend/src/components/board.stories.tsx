@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Archive, Layers } from "lucide-react";
 import { Board, CardButton, PileDisplay, PlayerBadge, StackDisplay } from "./board";
+import { OpponentHandDisplay, PieceToken, TargetingStackOverlay, UnitCardModal, UnitContextMenuView } from "./board";
 import {
   catalogCards,
   cinderRingCard,
@@ -15,6 +16,7 @@ import {
 } from "./board.fixtures";
 import { pieceById } from "../matchBoardHelpers";
 import { createMatchVisualCatalog } from "../matchVisualIdentity";
+import type { BoardUnit } from "../appTypes";
 
 const visualCatalog = createMatchVisualCatalog(catalogCards);
 const selectedUnitMatch = storyMatch({
@@ -217,4 +219,121 @@ export const StackAndPiles: StoryObj = {
       </main>
     );
   },
+};
+
+const storyBoardUnit: BoardUnit = {
+  ...storyUnit({ q: 0, r: 0 }, {
+    items: [
+      {
+        id: "story-item-1",
+        templateId: "ember-flask",
+        name: "Ember Flask",
+        passive: {
+          type: "statBonus",
+          attack: 1,
+          armor: 0,
+          maxAp: 0,
+        },
+        active: {
+          type: "healCarrier",
+          amount: 2,
+        },
+        activeUsedThisTurn: false,
+      },
+    ],
+  }),
+  pieceType: "unit",
+};
+
+export const PlayerAndOpponentBadges: StoryObj = {
+  render: () => {
+    const match = storyMatch();
+    return (
+      <main className="app-shell">
+        <section className="battlefield-hud battlefield-hud-player">
+          <PlayerBadge player={match.player} />
+        </section>
+        <section className="battlefield-hud battlefield-hud-hand">
+          <OpponentHandDisplay count={5} />
+        </section>
+      </main>
+    );
+  },
+};
+
+export const PieceTokenStates: StoryObj = {
+  render: () => (
+    <main className="app-shell centered">
+      <div className="board-field">
+        <PieceToken
+          piece={storyBoardUnit}
+          viewerSide="player"
+          visualCatalog={visualCatalog}
+        />
+        <PieceToken
+          piece={{
+            ...storyBoardUnit,
+            side: "opponent",
+            armor: 1,
+          }}
+          viewerSide="player"
+          visualCatalog={visualCatalog}
+        />
+      </div>
+    </main>
+  ),
+};
+
+export const UnitContextMenu: StoryObj = {
+  render: () => (
+    <main className="app-shell">
+      <UnitContextMenuView
+        menu={{ pieceId: storyBoardUnit.id, x: 40, y: 40 }}
+        unit={storyBoardUnit}
+        onClose={() => undefined}
+        onOpenCardInfo={() => undefined}
+        canActivateItems
+        onActivateItem={() => undefined}
+        building={{
+          id: "story-building",
+          templateId: "watchtower",
+          name: "Watchtower",
+          position: storyBoardUnit.position,
+          activatedThisTurn: false,
+          effect: {
+            type: "activatedDamageLine",
+            range: 3,
+            amount: 2,
+          },
+        }}
+        canActivateBuilding
+        onActivateBuilding={() => undefined}
+      />
+    </main>
+  ),
+};
+
+export const UnitModal: StoryObj = {
+  render: () => (
+    <main className="app-shell">
+      <UnitCardModal
+        unit={storyBoardUnit}
+        unitVisualIdentity={visualCatalog.unit(storyBoardUnit)}
+        onClose={() => undefined}
+      />
+    </main>
+  ),
+};
+
+export const TargetingStackOverlayRows: StoryObj = {
+  render: () => (
+    <main className="app-shell">
+      <TargetingStackOverlay
+        stack={[pendingAttackStack, pendingSpellStack, pendingMoveStack]}
+        prioritySide="player"
+        activeStackItemId={pendingSpellStack.id}
+        onActiveStackItemChange={() => undefined}
+      />
+    </main>
+  ),
 };

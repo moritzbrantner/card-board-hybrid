@@ -9,7 +9,7 @@
     "test:unit": "vitest run",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
-    "test:stories": "vitest run --environment jsdom src/components/board.stories.test.tsx src/pages/MatchScenariosPage.stories.test.tsx"
+    "test:stories": "vitest run --environment jsdom src/**/*.stories.test.tsx src/storybook/storyCoverage.test.ts"
   },
   "dependencies": {
     "@react-three/fiber": "^9.6.1",

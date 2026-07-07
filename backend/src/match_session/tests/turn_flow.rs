@@ -71,14 +71,6 @@ fn solo_ai_actions_wait_for_player_priority_response() {
 fn turn_start_mana_comes_from_hero_and_occupied_mana_sources() {
     let mut game = MatchState::new_with_seed(7);
     game.player.hero.position = hex(0, 0);
-    game.board.units.push(board_unit(
-        "source-worker",
-        Side::Player,
-        hex(2, 0),
-        1,
-        1,
-        2,
-    ));
     game.player.mana = 0;
     game.player.max_mana = 0;
     game.opponent.mana = 0;
@@ -86,8 +78,8 @@ fn turn_start_mana_comes_from_hero_and_occupied_mana_sources() {
 
     game.start_turn(Side::Player, &mut Vec::new(), None);
 
-    assert_eq!(game.player.max_mana, 5);
-    assert_eq!(game.player.mana, 5);
+    assert_eq!(game.player.max_mana, 4);
+    assert_eq!(game.player.mana, 4);
     assert_eq!(game.opponent.max_mana, 0);
     assert_eq!(game.opponent.mana, 0);
 }

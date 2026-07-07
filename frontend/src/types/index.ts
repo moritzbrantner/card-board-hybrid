@@ -90,10 +90,30 @@ export type ItemPassiveEffect = {
   maxAp: number;
 };
 
-export type ItemActiveEffect = {
-  type: "healCarrier";
-  amount: number;
-};
+export type ItemActiveEffect =
+  | {
+      type: "healCarrier";
+      amount: number;
+      priority?: number;
+    }
+  | {
+      type: "damageTarget";
+      amount: number;
+      range: number;
+      priority?: number;
+    }
+  | {
+      type: "draw";
+      amount: number;
+      priority?: number;
+    }
+  | {
+      type: "statMarker";
+      attack: number;
+      armor: number;
+      maxAp: number;
+      priority?: number;
+    };
 
 export type CardKind =
   | {
@@ -111,6 +131,7 @@ export type CardKind =
   | {
       type: "item";
       range: number;
+      targets?: BuffTargetPolicy;
       passive: ItemPassiveEffect;
       active?: ItemActiveEffect;
     }
@@ -410,6 +431,8 @@ export type Hero = {
   apRemaining: number;
   maxAp: number;
   hasAttacked: boolean;
+  items?: CarriedItem[];
+  statMarkers?: StatMarker[];
 };
 
 export type HeroType =
@@ -435,7 +458,8 @@ export type Unit = {
   apRemaining: number;
   maxAp: number;
   hasAttacked: boolean;
-  items: CarriedItem[];
+  items?: CarriedItem[];
+  statMarkers?: StatMarker[];
 };
 
 export type CarriedItem = {
@@ -445,6 +469,14 @@ export type CarriedItem = {
   passive: ItemPassiveEffect;
   active?: ItemActiveEffect;
   activeUsedThisTurn: boolean;
+};
+
+export type StatMarker = {
+  id: string;
+  sourceItemId: string;
+  attack: number;
+  armor: number;
+  maxAp: number;
 };
 
 export type DroppedItem = {
@@ -543,7 +575,8 @@ export type StackAction =
   | {
       type: "equipItem";
       card: CardSummary;
-      unitId: string;
+      carrierId: string;
+      unitId?: string;
     }
   | {
       type: "buildManaSource";
@@ -557,8 +590,10 @@ export type StackAction =
     }
   | {
       type: "activateItem";
-      unitId: string;
+      carrierId: string;
+      unitId?: string;
       itemId: string;
+      target?: ActionTarget | null;
     }
   | {
       type: "activateBuilding";
@@ -751,8 +786,10 @@ export type MatchActionRequest =
     }
   | {
       type: "activateItem";
-      unitId: string;
+      carrierId: string;
+      unitId?: string;
       itemId: string;
+      target?: ActionTarget | null;
     }
   | {
       type: "activateBuilding";
@@ -940,14 +977,16 @@ export type ReplayEvent =
   | {
       type: "itemEquipped";
       side: Side;
-      unitId: string;
+      carrierId: string;
+      unitId?: string;
       itemId: string;
       name: string;
     }
   | {
       type: "itemDropped";
       side: Side;
-      unitId: string;
+      carrierId: string;
+      unitId?: string;
       itemId: string;
       name: string;
       position: HexCoord;
@@ -955,7 +994,8 @@ export type ReplayEvent =
   | {
       type: "itemActivated";
       side: Side;
-      unitId: string;
+      carrierId: string;
+      unitId?: string;
       itemId: string;
       name: string;
     }

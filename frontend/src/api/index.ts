@@ -339,8 +339,8 @@ export function attack(matchId: string, attackerId: string, targetId: string) {
   return matchAction(matchId, { type: "attack", attackerId, targetId });
 }
 
-export function activateItem(matchId: string, unitId: string, itemId: string) {
-  return matchAction(matchId, { type: "activateItem", unitId, itemId });
+export function activateItem(matchId: string, carrierId: string, itemId: string, target: ActionTarget | null = null) {
+  return matchAction(matchId, { type: "activateItem", carrierId, itemId, target });
 }
 
 export function activateBuilding(matchId: string, buildingId: string) {

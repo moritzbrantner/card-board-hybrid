@@ -328,31 +328,36 @@ export function actionTrayEntriesForSelection({
     },
   );
 
-  if (piece.pieceType === "unit") {
-    for (const item of piece.items.filter((candidate) => candidate.active)) {
-      entries.push({
-        id: `item-${item.id}`,
-        label: item.name,
-        icon: "item",
-        enabled: canAct && piece.apRemaining > 0 && !item.activeUsedThisTurn && match.actionStack.length === 0,
-        reason:
-          item.activeUsedThisTurn
-            ? reason("itemExhausted", `${item.name} has already been activated this turn.`)
-            : piece.apRemaining <= 0
-              ? apReason
-              : match.actionStack.length > 0
-                ? stackReason
+  for (const item of (piece.items ?? []).filter((candidate) => candidate.active)) {
+    const activePriority = item.active?.priority ?? 0;
+    const pending = topStackItem(match);
+    const priorityReady = pending
+      ? match.prioritySide === viewerSide && activePriority > pending.priority
+      : match.activeSide === viewerSide;
+    entries.push({
+      id: `item-${item.id}`,
+      label: item.name,
+      icon: "item",
+      enabled: canAct && piece.apRemaining > 0 && !item.activeUsedThisTurn && priorityReady,
+      reason:
+        item.activeUsedThisTurn
+          ? reason("itemExhausted", `${item.name} has already been activated this turn.`)
+          : piece.apRemaining <= 0
+            ? apReason
+            : pending && match.prioritySide !== viewerSide
+              ? reason("waitingForPriority", "Waiting for priority.")
+              : pending && activePriority <= pending.priority
+                ? reason("priorityTooLow", `Needs priority higher than ${pending.priority} to respond.`)
                 : !canAct
                   ? turnReason
                   : undefined,
-        preview: {
-          title: item.name,
-          body: item.active ? itemActiveLabel(item.active) : itemPassiveLabel(item.passive),
-          details: ["Costs 1 Unit AP", itemPassiveLabel(item.passive)],
-          tone: "support",
-        },
-      });
-    }
+      preview: {
+        title: item.name,
+        body: item.active ? itemActiveLabel(item.active) : itemPassiveLabel(item.passive),
+        details: ["Costs 1 carrier AP", itemPassiveLabel(item.passive)],
+        tone: "support",
+      },
+    });
   }
 
   const building = buildingAt(match, piece.position);
@@ -393,8 +398,7 @@ export function turnChecklistForMatch(
       canAct &&
       match.actionStack.length === 0 &&
       piece.apRemaining > 0 &&
-      ((piece.pieceType === "unit" && piece.items.some((item) => item.active && !item.activeUsedThisTurn)) ||
-        Boolean(activatedReadyBuilding(match, piece))),
+      ((piece.items ?? []).some((item) => item.active && !item.activeUsedThisTurn) || Boolean(activatedReadyBuilding(match, piece))),
   ).length;
 
   if (match.phase === "matchOver") {
@@ -500,9 +504,9 @@ export function actionRecapFromReplayEvent(
     case "buildingActivated":
       return recap(`${sideLabel(event.side)} activated ${event.name}`, [`Occupant ${event.occupantId}.`], "support", event);
     case "itemEquipped":
-      return recap(`${sideLabel(event.side)} equipped ${event.name}`, [`Equipped to ${pieceLabel(event.unitId)}.`], "support", event);
+      return recap(`${sideLabel(event.side)} equipped ${event.name}`, [`Equipped to ${pieceLabel(event.carrierId ?? event.unitId)}.`], "support", event);
     case "itemActivated":
-      return recap(`${sideLabel(event.side)} activated ${event.name}`, [`Carrier ${pieceLabel(event.unitId)}.`], "support", event);
+      return recap(`${sideLabel(event.side)} activated ${event.name}`, [`Carrier ${pieceLabel(event.carrierId ?? event.unitId)}.`], "support", event);
     case "matchEnded":
       return recap(`${sideLabel(event.winner)} wins`, ["The match is over."], event.winner === viewerSide ? "support" : "attack", event);
     default:
@@ -691,9 +695,21 @@ function cardTargetSummary(kind: CardKind) {
     case "building":
       return "Adjacent empty hex without a Building";
     case "item":
-      return `Friendly Unit within range ${kind.range}`;
+      return `${itemTargetLabel(kind.targets ?? "unitsOnly")} within range ${kind.range}`;
     case "spell":
       return `Piece within range ${kind.range}`;
+  }
+}
+
+function itemTargetLabel(targets: Extract<CardKind, { type: "item" }>["targets"]) {
+  switch (targets) {
+    case "heroesOnly":
+      return "Friendly Hero";
+    case "unitsAndHeroes":
+      return "Friendly Unit or Hero";
+    case "unitsOnly":
+    default:
+      return "Friendly Unit";
   }
 }
 

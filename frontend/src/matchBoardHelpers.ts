@@ -96,6 +96,8 @@ export function pieceAt(match: MatchState, coord: HexCoord): BoardPiece | null {
     if (!participant.knockedOut && sameCoord(participant.hero.position, coord)) {
       return {
         ...participant.hero,
+        items: participant.hero.items ?? [],
+        statMarkers: participant.hero.statMarkers ?? [],
         pieceType: "hero",
         name: heroTypeLabel(participant.hero.heroType),
       };
@@ -103,7 +105,7 @@ export function pieceAt(match: MatchState, coord: HexCoord): BoardPiece | null {
   }
 
   const unit = match.board.units.find((candidate) => sameCoord(candidate.position, coord));
-  return unit ? { ...unit, pieceType: "unit" } : null;
+  return unit ? { ...unit, items: unit.items ?? [], statMarkers: unit.statMarkers ?? [], pieceType: "unit" } : null;
 }
 
 export function tileTitle(
@@ -164,6 +166,8 @@ export function pieceById(match: MatchState, pieceId: string): BoardPiece | null
     if (!participant.knockedOut && participant.hero.id === pieceId) {
       return {
         ...participant.hero,
+        items: participant.hero.items ?? [],
+        statMarkers: participant.hero.statMarkers ?? [],
         pieceType: "hero",
         name: heroTypeLabel(participant.hero.heroType),
       };
@@ -171,7 +175,7 @@ export function pieceById(match: MatchState, pieceId: string): BoardPiece | null
   }
 
   const unit = match.board.units.find((candidate) => candidate.id === pieceId);
-  return unit ? { ...unit, pieceType: "unit" } : null;
+  return unit ? { ...unit, items: unit.items ?? [], statMarkers: unit.statMarkers ?? [], pieceType: "unit" } : null;
 }
 
 export function participantBySide(match: MatchState, side: Side): MatchParticipantState {
@@ -228,10 +232,17 @@ export function piecesInMatch(match: MatchState): BoardPiece[] {
       .filter((participant) => !participant.knockedOut)
       .map((participant) => ({
         ...participant.hero,
+        items: participant.hero.items ?? [],
+        statMarkers: participant.hero.statMarkers ?? [],
         pieceType: "hero" as const,
         name: heroTypeLabel(participant.hero.heroType),
       })),
-    ...match.board.units.map((unit) => ({ ...unit, pieceType: "unit" as const })),
+    ...match.board.units.map((unit) => ({
+      ...unit,
+      items: unit.items ?? [],
+      statMarkers: unit.statMarkers ?? [],
+      pieceType: "unit" as const,
+    })),
   ];
 }
 
@@ -288,7 +299,7 @@ export function cardTargetForTile(
   }
 
   if (card.kind.type === "item") {
-    return piece && piece.pieceType === "unit" ? { type: "piece", pieceId: piece.id } : null;
+    return piece ? { type: "piece", pieceId: piece.id } : null;
   }
 
   return piece ? { type: "piece", pieceId: piece.id } : null;
@@ -321,7 +332,7 @@ export function isLegalCardTarget(
   if (card.kind.type === "item") {
     return (
       !!piece &&
-      piece.pieceType === "unit" &&
+      targetPolicyAllows(card.kind.targets ?? "unitsOnly", piece.pieceType === "hero") &&
       sameTeam(piece.side, viewerSide) &&
       distance(participant.hero.position, piece.position) <= card.kind.range
     );

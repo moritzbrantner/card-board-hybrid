@@ -175,7 +175,7 @@ export function LoadoutCarousel({
   );
 }
 
-function LoadoutPeek({ loadout, side }: { loadout: HomeLoadout; side: "previous" | "next" }) {
+export function LoadoutPeek({ loadout, side }: { loadout: HomeLoadout; side: "previous" | "next" }) {
   const hero = heroOptionByType(loadout.heroType);
 
   return (

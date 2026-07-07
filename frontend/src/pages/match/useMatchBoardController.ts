@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { BoardUnit, Selection, UnitContextMenu } from "../../appTypes";
+import type { BoardPiece, BoardUnit, Selection, UnitContextMenu } from "../../appTypes";
 import {
   boardCursorConfirmIntent,
   hideBoardCursor,
@@ -14,11 +14,14 @@ import {
   buildingAt,
   buildingEffectIsActivated,
   cardTargetForTile,
+  distance,
   handForSide,
   isLegalAttack,
   isLegalMove,
+  piecesInMatch,
   pieceAt,
   pieceById,
+  sameTeam,
   tileAt,
 } from "../../matchBoardHelpers";
 import type {
@@ -76,7 +79,7 @@ export function useMatchBoardController({
     return pieceById(match, selection.pieceId);
   }, [match, selection]);
 
-  const modalUnit = useMemo(() => {
+  const modalUnit = useMemo<BoardUnit | null>(() => {
     if (!match || unitModalPieceId === null) {
       return null;
     }
@@ -85,16 +88,16 @@ export function useMatchBoardController({
     return piece?.pieceType === "unit" ? piece : null;
   }, [match, unitModalPieceId]);
 
-  const contextMenuUnit = useMemo(() => {
+  const contextMenuUnit = useMemo<BoardPiece | null>(() => {
     if (!match || unitContextMenu === null) {
       return null;
     }
 
     const piece = pieceById(match, unitContextMenu.pieceId);
-    return piece?.pieceType === "unit" ? piece : null;
+    return piece;
   }, [match, unitContextMenu]);
 
-  const focusedUnit = useMemo(() => {
+  const focusedUnit = useMemo<BoardPiece | null>(() => {
     if (!match || focusedUnitPieceId === null) {
       return null;
     }
@@ -165,7 +168,7 @@ export function useMatchBoardController({
 
     setUnitContextMenu(null);
     const piece = pieceAt(match, tile.coord);
-    setFocusedUnitPieceId(piece?.pieceType === "unit" ? piece.id : null);
+    setFocusedUnitPieceId(piece?.id ?? null);
     const building = buildingAt(match, tile.coord);
 
     if (selectedCard) {
@@ -250,7 +253,7 @@ export function useMatchBoardController({
     setDraggedCardId(null);
   }
 
-  function openUnitContextMenu(unit: BoardUnit, x: number, y: number) {
+  function openUnitContextMenu(unit: BoardPiece, x: number, y: number) {
     if (!match || contextMenuDisabled || match.phase === "matchOver") {
       return;
     }
@@ -259,10 +262,23 @@ export function useMatchBoardController({
     setFocusedUnitPieceId(unit.id);
   }
 
-  function handleActivateUnitItem(unit: BoardUnit, itemId: string) {
+  function handleActivateUnitItem(unit: BoardPiece, itemId: string) {
     setUnitContextMenu(null);
+    const item = (unit.items ?? []).find((candidate) => candidate.id === itemId);
+    const damageActive = item?.active?.type === "damageTarget" ? item.active : null;
+    const target = damageActive && match
+      ? piecesInMatch(match)
+          .filter((piece) => !sameTeam(piece.side, unit.side))
+          .filter((piece) => distance(unit.position, piece.position) <= damageActive.range)
+          .sort((a, b) => distance(unit.position, a.position) - distance(unit.position, b.position))[0]
+      : null;
     if (!readOnly) {
-      submitAction({ type: "activateItem", unitId: unit.id, itemId });
+      submitAction({
+        type: "activateItem",
+        carrierId: unit.id,
+        itemId,
+        target: target ? { type: "piece", pieceId: target.id } : null,
+      });
     }
   }
 
@@ -283,7 +299,7 @@ export function useMatchBoardController({
     const coord = moveBoardCursorCoord(currentCoord, commandId, radius);
     const piece = pieceAt(match, coord);
     setBoardCursor({ coord, visible: true });
-    setFocusedUnitPieceId(piece?.pieceType === "unit" ? piece.id : null);
+    setFocusedUnitPieceId(piece?.id ?? null);
     setUnitContextMenu(null);
     onNotice?.(null);
     return true;
@@ -312,7 +328,7 @@ export function useMatchBoardController({
 
     if (intent.type === "selectPiece") {
       setSelection({ type: "piece", pieceId: intent.pieceId });
-      setFocusedUnitPieceId(piece?.pieceType === "unit" ? piece.id : null);
+      setFocusedUnitPieceId(piece?.id ?? null);
       setUnitContextMenu(null);
       setUnitModalPieceId(null);
       onNotice?.(null);
@@ -328,7 +344,7 @@ export function useMatchBoardController({
   }
 
   function openFocusedUnitInfo() {
-    const unit = contextMenuUnit ?? (selectedPiece?.pieceType === "unit" ? selectedPiece : null) ?? focusedUnit;
+    const unit = contextMenuUnit ?? (selectedPiece?.pieceType === "unit" ? selectedPiece : null) ?? (focusedUnit?.pieceType === "unit" ? focusedUnit : null);
     if (!unit) {
       return false;
     }

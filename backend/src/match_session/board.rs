@@ -12,11 +12,10 @@ impl HexBoard {
             }
         }
         tiles.sort_by_key(|tile| (tile.coord.r, tile.coord.q));
-        let buildings = vec![
-            mana_well_building("natural-mana-1".to_string(), HexCoord { q: -2, r: 0 }),
-            mana_well_building("natural-mana-2".to_string(), HexCoord { q: 0, r: 0 }),
-            mana_well_building("natural-mana-3".to_string(), HexCoord { q: 2, r: 0 }),
-        ];
+        let buildings = vec![mana_well_building(
+            "natural-mana-2".to_string(),
+            HexCoord { q: 0, r: 0 },
+        )];
         Self {
             radius,
             tiles,
@@ -63,6 +62,11 @@ impl HexBoard {
             ));
             next_index += 1;
         }
+    }
+
+    pub(super) fn remove_legacy_outer_natural_mana_wells(&mut self) {
+        self.buildings
+            .retain(|building| building.id != "natural-mana-1" && building.id != "natural-mana-3");
     }
 }
 

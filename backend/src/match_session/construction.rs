@@ -104,6 +104,8 @@ impl Hero {
             ap_remaining: max_ap,
             max_ap,
             has_attacked: false,
+            items: Vec::new(),
+            stat_markers: Vec::new(),
         }
     }
 }

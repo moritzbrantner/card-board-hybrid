@@ -28,7 +28,7 @@ use serialization::MatchSnapshot;
 #[cfg(test)]
 pub(crate) use solo_ai_policy::SoloAiRuleId;
 pub(crate) use solo_ai_policy::{AiPolicyConfig, SoloAiPolicy, default_policy_config_path};
-use solo_ai_policy::{SoloAiActionIntent, SoloAiDecision, SoloAiView};
+use solo_ai_policy::{SoloAiActionIntent, SoloAiCarriedItem, SoloAiDecision, SoloAiView};
 
 const BOARD_RADIUS: i32 = 3;
 const TWO_V_TWO_BOARD_RADIUS: i32 = 4;
@@ -196,8 +196,16 @@ impl MatchState {
             opponent_deck,
             player_progression,
             opponent_progression,
-            Some((player_two_hero_type, player_two_deck, player_two_progression)),
-            Some((opponent_two_hero_type, opponent_two_deck, opponent_two_progression)),
+            Some((
+                player_two_hero_type,
+                player_two_deck,
+                player_two_progression,
+            )),
+            Some((
+                opponent_two_hero_type,
+                opponent_two_deck,
+                opponent_two_progression,
+            )),
         )
     }
 
@@ -238,7 +246,10 @@ impl MatchState {
             "winner": self.winner,
         });
         if self.player_two.is_none() {
-            value.as_object_mut().expect("match value should be an object").remove("playerTwo");
+            value
+                .as_object_mut()
+                .expect("match value should be an object")
+                .remove("playerTwo");
         }
         if self.opponent_two.is_none() {
             value
@@ -503,7 +514,10 @@ impl MatchState {
             "winner": self.winner,
         });
         if self.player_two.is_none() {
-            value.as_object_mut().expect("match value should be an object").remove("playerTwo");
+            value
+                .as_object_mut()
+                .expect("match value should be an object")
+                .remove("playerTwo");
         }
         if self.opponent_two.is_none() {
             value
@@ -527,7 +541,8 @@ impl MatchState {
             .into_iter()
             .map(|participant| {
                 participant.replay_value(
-                    participant.side == viewer_side || participant.side.team() == viewer_side.team(),
+                    participant.side == viewer_side
+                        || participant.side.team() == viewer_side.team(),
                 )
             })
             .collect()
@@ -538,7 +553,8 @@ impl MatchState {
             .into_iter()
             .map(|participant| {
                 participant.replay_value(
-                    visibility == ReplayVisibility::Revealed || participant.side.team() == Team::Player,
+                    visibility == ReplayVisibility::Revealed
+                        || participant.side.team() == Team::Player,
                 )
             })
             .collect()
@@ -570,10 +586,18 @@ impl MatchState {
                 self.require_turn_action_side(side)?;
                 self.attack_for_side(side, &attacker_id, &target_id, &mut frames, action_index)
             }
-            MatchActionRequest::ActivateItem { unit_id, item_id } => {
-                self.require_turn_action_side(side)?;
-                self.activate_item_for_side(side, &unit_id, &item_id, &mut frames, action_index)
-            }
+            MatchActionRequest::ActivateItem {
+                carrier_id,
+                item_id,
+                target,
+            } => self.activate_item_for_side(
+                side,
+                &carrier_id,
+                &item_id,
+                target,
+                &mut frames,
+                action_index,
+            ),
             MatchActionRequest::ActivateBuilding { building_id } => {
                 self.require_turn_action_side(side)?;
                 self.activate_building_for_side(side, &building_id, &mut frames, action_index)
@@ -878,11 +902,7 @@ impl MatchState {
                     return Err(MatchError::InvalidTarget);
                 };
                 let target = self
-                    .board
-                    .units
-                    .iter()
-                    .find(|unit| unit.id == piece_id)
-                    .cloned()
+                    .piece_view(&piece_id)
                     .ok_or(MatchError::PieceNotFound)?;
                 let caster_position = self.player_ref(side).hero.position;
                 let planned_item_play = card_interactions::plan_item_play(
@@ -892,6 +912,12 @@ impl MatchState {
                     caster_position,
                     &target,
                 )?;
+                if self
+                    .carrier_item_count(&planned_item_play.carrier_id)
+                    .is_some_and(|count| count >= MAX_CARRIED_ITEMS)
+                {
+                    return Err(MatchError::InvalidTarget);
+                }
 
                 self.spend_card_resources(side, &card_id, &card)?;
                 self.log.insert(
@@ -903,7 +929,7 @@ impl MatchState {
                     0,
                     StackAction::EquipItem {
                         card: CardSummary::from(&card),
-                        unit_id: planned_item_play.unit_id.clone(),
+                        carrier_id: planned_item_play.carrier_id.clone(),
                     },
                 );
                 self.record_replay_frame(
@@ -913,7 +939,7 @@ impl MatchState {
                         side,
                         card: CardSummary::from(&card),
                         target: ActionTarget::Piece {
-                            piece_id: planned_item_play.unit_id,
+                            piece_id: planned_item_play.carrier_id,
                         },
                     },
                 );
@@ -1134,9 +1160,9 @@ impl MatchState {
                         ReplayEvent::CardDrawn {
                             side,
                             card: Some(CardSummary::from(&card)),
-                    hidden: side.team() == Team::Opponent,
-                },
-            );
+                            hidden: side.team() == Team::Opponent,
+                        },
+                    );
                 }
                 self.log_spell_resolution(side, card_name, resolved_spell.log);
             }
@@ -1183,7 +1209,8 @@ impl MatchState {
         self.next_stack_item_id += 1;
         self.action_stack.push(item.clone());
         self.priority_passes.clear();
-        self.priority_side = self.next_priority_side_for_team(side.opposing_team(), Some(side), &[]);
+        self.priority_side =
+            self.next_priority_side_for_team(side.opposing_team(), Some(side), &[]);
         item
     }
 
@@ -1202,11 +1229,9 @@ impl MatchState {
 
         if self.format() == "twoVTwo" {
             self.priority_passes.push(side);
-            if let Some(next_priority_side) = self.next_priority_side_for_team(
-                side.team(),
-                Some(side),
-                &self.priority_passes,
-            ) {
+            if let Some(next_priority_side) =
+                self.next_priority_side_for_team(side.team(), Some(side), &self.priority_passes)
+            {
                 self.priority_side = Some(next_priority_side);
                 return Ok(());
             }
@@ -1255,15 +1280,26 @@ impl MatchState {
             } => {
                 self.resolve_attack(item.side, &attacker_id, &target_id, frames, action_index);
             }
-            StackAction::EquipItem { card, unit_id } => {
-                self.resolve_item_card(item.side, card, &unit_id, frames, action_index);
+            StackAction::EquipItem { card, carrier_id } => {
+                self.resolve_item_card(item.side, card, &carrier_id, frames, action_index);
             }
             StackAction::BuildManaSource { card, coord }
             | StackAction::BuildBuilding { card, coord } => {
                 self.resolve_building_card(item.side, card, coord, frames, action_index);
             }
-            StackAction::ActivateItem { unit_id, item_id } => {
-                self.resolve_item_activation(item.side, &unit_id, &item_id, frames, action_index);
+            StackAction::ActivateItem {
+                carrier_id,
+                item_id,
+                target,
+            } => {
+                self.resolve_item_activation(
+                    item.side,
+                    &carrier_id,
+                    &item_id,
+                    target,
+                    frames,
+                    action_index,
+                );
             }
             StackAction::ActivateBuilding {
                 building_id,
@@ -1280,10 +1316,9 @@ impl MatchState {
         }
 
         self.priority_passes.clear();
-        self.priority_side = self
-            .action_stack
-            .last()
-            .and_then(|item| self.next_priority_side_for_team(item.side.opposing_team(), Some(item.side), &[]));
+        self.priority_side = self.action_stack.last().and_then(|item| {
+            self.next_priority_side_for_team(item.side.opposing_team(), Some(item.side), &[])
+        });
     }
 
     fn resolve_building_card(
@@ -1450,37 +1485,45 @@ impl MatchState {
         &mut self,
         side: Side,
         card: CardSummary,
-        unit_id: &str,
+        carrier_id: &str,
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) {
         let item_id = self.next_item_id(side);
-        let Some(unit_index) = self
-            .board
-            .units
-            .iter()
-            .position(|unit| unit.id == unit_id && unit.side.team() == side.team())
-        else {
+        let Some(carrier) = self.piece_view(carrier_id) else {
             self.log
                 .insert(0, format!("{} had no legal carrier.", card.name));
             return;
         };
+        if carrier.side.team() != side.team() {
+            self.log
+                .insert(0, format!("{} had no legal carrier.", card.name));
+            return;
+        }
 
-        let unit = &mut self.board.units[unit_index];
         let card_name = card.name.clone();
-        if card_interactions::equip_item_from_card(card, item_id.clone(), unit).is_err() {
+        let Ok(item) = card_interactions::equip_item_from_card(card, item_id.clone()) else {
+            return;
+        };
+        if !self.add_carried_item_to_carrier(carrier_id, item) {
             return;
         }
         self.log.insert(
             0,
-            format!("{} equipped {} to {}.", side.label(), card_name, unit.name),
+            format!(
+                "{} equipped {} to {}.",
+                side.label(),
+                card_name,
+                self.carrier_name(carrier_id)
+                    .unwrap_or_else(|| carrier_id.to_string())
+            ),
         );
         self.record_replay_frame(
             frames,
             action_index,
             ReplayEvent::ItemEquipped {
                 side,
-                unit_id: unit_id.to_string(),
+                carrier_id: carrier_id.to_string(),
                 item_id,
                 name: card_name,
             },
@@ -1490,46 +1533,100 @@ impl MatchState {
     fn resolve_item_activation(
         &mut self,
         side: Side,
-        unit_id: &str,
+        carrier_id: &str,
         item_id: &str,
+        target: Option<ActionTarget>,
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) {
-        let Some(unit) = self
-            .board
-            .units
-            .iter()
-            .find(|unit| unit.id == unit_id && unit.side == side)
-        else {
+        let Some(carrier) = self.piece_view(carrier_id) else {
             self.log.insert(
                 0,
-                format!("Item activation by {} had no legal item.", unit_id),
+                format!("Item activation by {} had no legal carrier.", carrier_id),
             );
             return;
         };
-
-        let Ok(resolved_item_activation) =
-            card_interactions::resolve_item_activation(unit, item_id)
-        else {
+        if carrier.side != side {
             self.log.insert(
                 0,
-                format!("Item activation by {} had no legal item.", unit_id),
+                format!("Item activation by {} had no legal carrier.", carrier_id),
+            );
+            return;
+        }
+        let Some(item) = self.carried_item(carrier_id, item_id) else {
+            self.log.insert(
+                0,
+                format!("Item activation by {} had no legal item.", carrier_id),
+            );
+            return;
+        };
+        let target_piece = target.as_ref().and_then(|target| match target {
+            ActionTarget::Piece { piece_id } => self.piece_view(piece_id),
+            ActionTarget::Hex { .. } => None,
+        });
+
+        let Ok(resolved_item_activation) = card_interactions::resolve_item_activation(
+            &carrier,
+            &item,
+            item_id,
+            target_piece.as_ref(),
+        ) else {
+            self.log.insert(
+                0,
+                format!("Item activation by {} had no legal item.", carrier_id),
             );
             return;
         };
 
         match resolved_item_activation.effect {
-            card_interactions::ResolvedItemActiveEffect::HealCarrier { unit_id, amount } => {
-                self.heal_piece(&unit_id, amount);
+            card_interactions::ResolvedItemActiveEffect::HealCarrier { carrier_id, amount } => {
+                self.heal_piece(&carrier_id, amount);
                 self.record_replay_frame(
                     frames,
                     action_index,
                     ReplayEvent::PieceHealed {
                         side,
-                        piece_id: unit_id,
+                        piece_id: carrier_id,
                         amount,
                     },
                 );
+            }
+            card_interactions::ResolvedItemActiveEffect::DamageTarget { target_id, amount } => {
+                self.damage_pieces(side, vec![target_id], amount, frames, action_index);
+            }
+            card_interactions::ResolvedItemActiveEffect::Draw { amount } => {
+                let drawn = self.draw_cards_for_side(side, amount);
+                for card in drawn {
+                    self.record_replay_frame(
+                        frames,
+                        action_index,
+                        ReplayEvent::CardDrawn {
+                            side,
+                            card: Some(CardSummary::from(&card)),
+                            hidden: false,
+                        },
+                    );
+                }
+            }
+            card_interactions::ResolvedItemActiveEffect::StatMarker {
+                carrier_id,
+                mut marker,
+            } => {
+                marker.id = self.next_stat_marker_id(&carrier_id, &marker.source_item_id);
+                let attack = marker.attack;
+                let armor = marker.armor;
+                if self.add_stat_marker_to_carrier(&carrier_id, marker) {
+                    self.record_replay_frame(
+                        frames,
+                        action_index,
+                        ReplayEvent::PieceBuffed {
+                            side,
+                            piece_id: carrier_id,
+                            attack_delta: attack,
+                            armor_delta: armor,
+                        },
+                    );
+                }
             }
         }
 
@@ -1546,7 +1643,7 @@ impl MatchState {
             action_index,
             ReplayEvent::ItemActivated {
                 side,
-                unit_id: unit_id.to_string(),
+                carrier_id: carrier_id.to_string(),
                 item_id: item_id.to_string(),
                 name: resolved_item_activation.item_name,
             },
@@ -1811,47 +1908,70 @@ impl MatchState {
     fn activate_item_for_side(
         &mut self,
         side: Side,
-        unit_id: &str,
+        carrier_id: &str,
         item_id: &str,
+        target: Option<ActionTarget>,
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) -> Result<(), MatchError> {
-        let unit = self
-            .board
-            .units
-            .iter_mut()
-            .find(|unit| unit.id == unit_id)
+        if self.player_ref(side).knocked_out {
+            return Err(MatchError::NotActiveSide);
+        }
+        let carrier = self
+            .piece_view(carrier_id)
             .ok_or(MatchError::PieceNotFound)?;
-        if unit.side != side {
+        if carrier.side != side {
             return Err(MatchError::NotYourPiece);
         }
-        if unit.ap_remaining == 0 {
+        if carrier.ap_remaining == 0 {
             return Err(MatchError::NoActionPoints);
         }
-        let item = unit
-            .items
-            .iter_mut()
-            .find(|item| item.id == item_id)
+        let item = self
+            .carried_item(carrier_id, item_id)
             .ok_or(MatchError::ItemNotFound)?;
-        if item.active.is_none() {
-            return Err(MatchError::InvalidTarget);
-        }
+        let active = item.active.as_ref().ok_or(MatchError::InvalidTarget)?;
+        let priority = card_interactions::item_active_priority(active);
         if item.active_used_this_turn {
             return Err(MatchError::ItemExhausted);
         }
+        if let Some(pending) = self.action_stack.last() {
+            if self.priority_side != Some(side) {
+                return Err(MatchError::NotPrioritySide);
+            }
+            if priority <= pending.priority {
+                return Err(MatchError::PriorityTooLow);
+            }
+        } else if side != self.active_side {
+            return Err(MatchError::NotActiveSide);
+        }
 
-        unit.ap_remaining -= 1;
-        item.active_used_this_turn = true;
+        let target_piece = target.as_ref().and_then(|target| match target {
+            ActionTarget::Piece { piece_id } => self.piece_view(piece_id),
+            ActionTarget::Hex { .. } => None,
+        });
+        card_interactions::resolve_item_activation(
+            &carrier,
+            &item,
+            item_id,
+            target_piece.as_ref(),
+        )?;
+
+        if !self.mark_carried_item_used(carrier_id, item_id) {
+            return Err(MatchError::ItemNotFound);
+        }
+
+        self.spend_piece_ap(carrier_id);
         self.log.insert(
             0,
-            format!("{} put {}'s item on the stack.", side.label(), unit.name),
+            format!("{} put {}'s item on the stack.", side.label(), carrier.id),
         );
         let stack_item = self.push_stack_item(
             side,
-            0,
+            priority,
             StackAction::ActivateItem {
-                unit_id: unit_id.to_string(),
+                carrier_id: carrier_id.to_string(),
                 item_id: item_id.to_string(),
+                target,
             },
         );
         self.record_replay_frame(
@@ -1933,11 +2053,14 @@ impl MatchState {
     }
 
     fn spend_piece_ap(&mut self, piece_id: &str) {
-        if self.player.hero.id == piece_id {
-            self.player.hero.ap_remaining = self.player.hero.ap_remaining.saturating_sub(1);
-        } else if self.opponent.hero.id == piece_id {
-            self.opponent.hero.ap_remaining = self.opponent.hero.ap_remaining.saturating_sub(1);
-        } else if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
+        for side in self.participant_sides() {
+            if self.player_ref(side).hero.id == piece_id {
+                let hero = &mut self.player_mut(side).hero;
+                hero.ap_remaining = hero.ap_remaining.saturating_sub(1);
+                return;
+            }
+        }
+        if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
             unit.ap_remaining = unit.ap_remaining.saturating_sub(1);
         }
     }
@@ -1963,7 +2086,10 @@ impl MatchState {
             return;
         };
 
-        if attacker.side != side || target.side.team() == side.team() || !piece_can_attack(&attacker, &target) {
+        if attacker.side != side
+            || target.side.team() == side.team()
+            || !piece_can_attack(&attacker, &target)
+        {
             self.log
                 .insert(0, format!("Attack by {} had no legal target.", attacker_id));
             return;
@@ -2113,6 +2239,14 @@ impl MatchState {
                 .move_piece_for_side(side, &piece_id, to, frames, action_index)
                 .map(|()| AiDecisionApplication::Applied)
                 .unwrap_or_else(AiDecisionApplication::Illegal),
+            SoloAiDecision::TakeAction(SoloAiActionIntent::ActivateItem {
+                carrier_id,
+                item_id,
+                target,
+            }) => self
+                .activate_item_for_side(side, &carrier_id, &item_id, target, frames, action_index)
+                .map(|()| AiDecisionApplication::Applied)
+                .unwrap_or_else(AiDecisionApplication::Illegal),
             SoloAiDecision::FinishTurn => AiDecisionApplication::FinishTurn,
         }
     }
@@ -2168,6 +2302,9 @@ impl MatchState {
             let player = self.player_mut(side);
             player.hero.ap_remaining = player.hero.max_ap;
             player.hero.has_attacked = false;
+            for item in &mut player.hero.items {
+                item.active_used_this_turn = false;
+            }
             if !should_draw {
                 player.has_started_first_turn = true;
             }
@@ -2355,6 +2492,35 @@ impl MatchState {
                 damaged_piece_ids.insert(piece.id.clone());
             }
         }
+        let mut opponent_carried_items = Vec::new();
+        for participant in self.participants() {
+            if participant.side == side {
+                let carrier = PieceView::from(&participant.hero);
+                for item in &participant.hero.items {
+                    if let Some(active) = &item.active {
+                        opponent_carried_items.push(SoloAiCarriedItem {
+                            carrier: carrier.clone(),
+                            item_id: item.id.clone(),
+                            active: active.clone(),
+                            active_used_this_turn: item.active_used_this_turn,
+                        });
+                    }
+                }
+            }
+        }
+        for unit in self.board.units.iter().filter(|unit| unit.side == side) {
+            let carrier = PieceView::from(unit);
+            for item in &unit.items {
+                if let Some(active) = &item.active {
+                    opponent_carried_items.push(SoloAiCarriedItem {
+                        carrier: carrier.clone(),
+                        item_id: item.id.clone(),
+                        active: active.clone(),
+                        active_used_this_turn: item.active_used_this_turn,
+                    });
+                }
+            }
+        }
 
         SoloAiView {
             controlled_side: side,
@@ -2364,6 +2530,7 @@ impl MatchState {
             player_pieces,
             opponent_units,
             player_units,
+            opponent_carried_items,
             opponent_hand: self.player_ref(side).hand.clone(),
             opponent_mana: self.player_ref(side).mana,
             opponent_deck_count: self.player_ref(side).deck_count,
@@ -2708,7 +2875,7 @@ impl MatchState {
                     action_index,
                     ReplayEvent::ItemDropped {
                         side,
-                        unit_id: unit_id.clone(),
+                        carrier_id: unit_id.clone(),
                         item_id: item.id,
                         name: item.name,
                         position,
@@ -2783,23 +2950,27 @@ impl MatchState {
     fn pick_up_dropped_items_at(
         &mut self,
         side: Side,
-        unit_id: &str,
+        carrier_id: &str,
         position: HexCoord,
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) {
-        let Some(unit_index) =
-            self.board.units.iter().position(|unit| {
-                unit.id == unit_id && unit.side == side && unit.position == position
-            })
-        else {
+        let Some(carrier) = self.piece_view(carrier_id) else {
             return;
         };
+        if carrier.side != side || carrier.position != position {
+            return;
+        }
 
         let mut picked_up = Vec::new();
+        let mut remaining_capacity = MAX_CARRIED_ITEMS.saturating_sub(
+            self.carrier_item_count(carrier_id)
+                .unwrap_or(MAX_CARRIED_ITEMS),
+        );
         self.board.dropped_items.retain(|dropped_item| {
-            if dropped_item.position == position {
+            if dropped_item.position == position && remaining_capacity > 0 {
                 picked_up.push(dropped_item.item.clone());
+                remaining_capacity -= 1;
                 false
             } else {
                 true
@@ -2809,19 +2980,17 @@ impl MatchState {
         for item in picked_up {
             let item_id = item.id.clone();
             let item_name = item.name.clone();
-            {
-                let unit = &mut self.board.units[unit_index];
-                card_interactions::apply_item_passive(unit, &item.passive);
-                unit.items.push(item);
+            if !self.add_carried_item_to_carrier(carrier_id, item) {
+                continue;
             }
             self.log
-                .insert(0, format!("{} picked up {}.", unit_id, item_name));
+                .insert(0, format!("{} picked up {}.", carrier_id, item_name));
             self.record_replay_frame(
                 frames,
                 action_index,
                 ReplayEvent::ItemEquipped {
                     side,
-                    unit_id: unit_id.to_string(),
+                    carrier_id: carrier_id.to_string(),
                     item_id,
                     name: item_name,
                 },
@@ -2829,12 +2998,161 @@ impl MatchState {
         }
     }
 
+    fn carrier_item_count(&self, carrier_id: &str) -> Option<usize> {
+        for participant in self.participants() {
+            if participant.hero.id == carrier_id {
+                return Some(participant.hero.items.len());
+            }
+        }
+        self.board
+            .units
+            .iter()
+            .find(|unit| unit.id == carrier_id)
+            .map(|unit| unit.items.len())
+    }
+
+    fn carried_item(&self, carrier_id: &str, item_id: &str) -> Option<CarriedItem> {
+        for participant in self.participants() {
+            if participant.hero.id == carrier_id {
+                return participant
+                    .hero
+                    .items
+                    .iter()
+                    .find(|item| item.id == item_id)
+                    .cloned();
+            }
+        }
+        self.board
+            .units
+            .iter()
+            .find(|unit| unit.id == carrier_id)
+            .and_then(|unit| unit.items.iter().find(|item| item.id == item_id).cloned())
+    }
+
+    fn carrier_name(&self, carrier_id: &str) -> Option<String> {
+        for participant in self.participants() {
+            if participant.hero.id == carrier_id {
+                return Some(format!("{:?}", participant.hero.hero_type));
+            }
+        }
+        self.board
+            .units
+            .iter()
+            .find(|unit| unit.id == carrier_id)
+            .map(|unit| unit.name.clone())
+    }
+
+    fn add_carried_item_to_carrier(&mut self, carrier_id: &str, item: CarriedItem) -> bool {
+        for side in self.participant_sides() {
+            if self.player_ref(side).hero.id == carrier_id {
+                let hero = &mut self.player_mut(side).hero;
+                if hero.items.len() >= MAX_CARRIED_ITEMS {
+                    return false;
+                }
+                card_interactions::apply_item_passive_to_hero(hero, &item.passive);
+                hero.items.push(item);
+                return true;
+            }
+        }
+        if let Some(unit) = self
+            .board
+            .units
+            .iter_mut()
+            .find(|unit| unit.id == carrier_id)
+        {
+            if unit.items.len() >= MAX_CARRIED_ITEMS {
+                return false;
+            }
+            card_interactions::apply_item_passive(unit, &item.passive);
+            unit.items.push(item);
+            return true;
+        }
+        false
+    }
+
+    fn mark_carried_item_used(&mut self, carrier_id: &str, item_id: &str) -> bool {
+        for side in self.participant_sides() {
+            if self.player_ref(side).hero.id == carrier_id {
+                let Some(item) = self
+                    .player_mut(side)
+                    .hero
+                    .items
+                    .iter_mut()
+                    .find(|item| item.id == item_id)
+                else {
+                    return false;
+                };
+                item.active_used_this_turn = true;
+                return true;
+            }
+        }
+        if let Some(item) = self
+            .board
+            .units
+            .iter_mut()
+            .find(|unit| unit.id == carrier_id)
+            .and_then(|unit| unit.items.iter_mut().find(|item| item.id == item_id))
+        {
+            item.active_used_this_turn = true;
+            return true;
+        }
+        false
+    }
+
+    fn add_stat_marker_to_carrier(&mut self, carrier_id: &str, marker: StatMarker) -> bool {
+        for side in self.participant_sides() {
+            if self.player_ref(side).hero.id == carrier_id {
+                let hero = &mut self.player_mut(side).hero;
+                hero.attack += marker.attack;
+                if marker.armor > 0 {
+                    hero.shield = hero.shield.saturating_add(marker.armor);
+                }
+                apply_ap_delta(&mut hero.ap_remaining, &mut hero.max_ap, marker.max_ap);
+                hero.stat_markers.push(marker);
+                return true;
+            }
+        }
+        if let Some(unit) = self
+            .board
+            .units
+            .iter_mut()
+            .find(|unit| unit.id == carrier_id)
+        {
+            unit.attack += marker.attack;
+            unit.armor += marker.armor;
+            unit.max_armor += marker.armor;
+            apply_ap_delta(&mut unit.ap_remaining, &mut unit.max_ap, marker.max_ap);
+            unit.stat_markers.push(marker);
+            return true;
+        }
+        false
+    }
+
+    fn next_stat_marker_id(&self, carrier_id: &str, source_item_id: &str) -> String {
+        for participant in self.participants() {
+            if participant.hero.id == carrier_id {
+                return format!(
+                    "{source_item_id}-marker-{}",
+                    participant.hero.stat_markers.len() + 1
+                );
+            }
+        }
+        let count = self
+            .board
+            .units
+            .iter()
+            .find(|unit| unit.id == carrier_id)
+            .map(|unit| unit.stat_markers.len() + 1)
+            .unwrap_or(1);
+        format!("{source_item_id}-marker-{count}")
+    }
+
     fn check_winner(&mut self, frames: &mut Vec<RecordedReplayFrame>, action_index: Option<u32>) {
         if self.phase == Phase::MatchOver {
             return;
         }
 
-        self.knock_out_defeated_heroes();
+        self.knock_out_defeated_heroes(frames, action_index);
 
         let player_team_out = self
             .participants()
@@ -2863,7 +3181,11 @@ impl MatchState {
         }
     }
 
-    fn knock_out_defeated_heroes(&mut self) {
+    fn knock_out_defeated_heroes(
+        &mut self,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
         let defeated_sides: Vec<_> = self
             .participant_sides()
             .into_iter()
@@ -2874,14 +3196,39 @@ impl MatchState {
             .collect();
 
         for side in defeated_sides {
+            let (hero_id, position, items) = {
+                let hero = &self.player_ref(side).hero;
+                (hero.id.clone(), hero.position, hero.items.clone())
+            };
             {
                 let participant = self.player_mut(side);
                 participant.knocked_out = true;
                 participant.hero.knocked_out = true;
                 participant.hero.ap_remaining = 0;
+                participant.hero.items.clear();
+            }
+            for item in items {
+                let dropped_id = format!("dropped-{}", item.id);
+                self.board.dropped_items.push(DroppedItem {
+                    id: dropped_id,
+                    position,
+                    item: item.clone(),
+                });
+                self.record_replay_frame(
+                    frames,
+                    action_index,
+                    ReplayEvent::ItemDropped {
+                        side,
+                        carrier_id: hero_id.clone(),
+                        item_id: item.id,
+                        name: item.name,
+                        position,
+                    },
+                );
             }
             self.board.units.retain(|unit| unit.side != side);
-            self.log.insert(0, format!("{} was knocked out.", side.label()));
+            self.log
+                .insert(0, format!("{} was knocked out.", side.label()));
         }
     }
 
