@@ -1,8 +1,9 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useRef, type DragEvent } from "react";
 import { projectBoardPositionToViewport } from "../boardRenderer";
+import { targetingProjectionPositionsEqual } from "../targetingOverlay";
 import type { HexCoord } from "../types";
-import { coordKey, projectedPositionsEqual } from "./geometry";
+import { coordKey } from "./geometry";
 import type { Board3DTileInteraction, BoardProjectedPosition } from "./types";
 
 export function ProjectedHitTargetSync({
@@ -26,7 +27,7 @@ export function ProjectedHitTargetSync({
       );
     }
 
-    if (!projectedPositionsEqual(previousPositionsRef.current, nextPositions)) {
+    if (!targetingProjectionPositionsEqual(previousPositionsRef.current, nextPositions)) {
       previousPositionsRef.current = nextPositions;
       onPositionsChange(nextPositions);
     }

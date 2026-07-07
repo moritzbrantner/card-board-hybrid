@@ -9,21 +9,17 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   DragEvent as ReactDragEvent,
   MouseEvent as ReactMouseEvent,
   ReactNode,
-  RefObject,
 } from "react";
-import {
-  Board3DRenderer,
-  TargetingIndicatorLayer,
-  type BoardProjectedPosition,
-} from "../../Board3D";
+import { Board3DRenderer } from "../../Board3D";
 import type { BoardAnimationCue, PieceAnimation } from "../../boardAnimations";
 import { buildBoardSurface } from "../../boardSurface";
+import { TargetingIndicatorLayer, useDomTargetingProjection } from "../../targetingOverlay";
 import {
   boardRendererFallbackMessage,
   canCreateWebGLContext,
@@ -62,92 +58,6 @@ import {
 } from "../../labels";
 
 const EMPTY_MATCH_VISUAL_CATALOG = createMatchVisualCatalog([]);
-
-function useMeasuredTilePositions(
-  boardFieldRef: RefObject<HTMLDivElement | null>,
-  tileElementByKeyRef: RefObject<Map<string, HTMLButtonElement>>,
-  tiles: HexTile[],
-) {
-  const [positions, setPositions] = useState<Map<string, BoardProjectedPosition>>(() => new Map());
-  const tileKeys = useMemo(() => tiles.map((tile) => coordKey(tile.coord)).join("|"), [tiles]);
-
-  useLayoutEffect(() => {
-    let frameId = 0;
-
-    function measure() {
-      window.cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(() => {
-        const boardField = boardFieldRef.current;
-        if (!boardField) {
-          setPositions(new Map());
-          return;
-        }
-
-        const fieldRect = boardField.getBoundingClientRect();
-        const nextPositions = new Map<string, BoardProjectedPosition>();
-        for (const key of tileKeys.split("|").filter(Boolean)) {
-          const element = tileElementByKeyRef.current.get(key);
-          if (!element) {
-            continue;
-          }
-
-          const rect = element.getBoundingClientRect();
-          nextPositions.set(key, {
-            x: rect.left - fieldRect.left + rect.width / 2,
-            y: rect.top - fieldRect.top + rect.height / 2,
-            visible: true,
-          });
-        }
-
-        setPositions((current) =>
-          projectedPositionMapsEqual(current, nextPositions) ? current : nextPositions,
-        );
-      });
-    }
-
-    measure();
-    const resizeObserver =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
-    if (boardFieldRef.current && resizeObserver) {
-      resizeObserver.observe(boardFieldRef.current);
-    }
-
-    window.addEventListener("resize", measure);
-    window.addEventListener("scroll", measure, true);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", measure);
-      window.removeEventListener("scroll", measure, true);
-    };
-  }, [boardFieldRef, tileElementByKeyRef, tileKeys]);
-
-  return positions;
-}
-
-function projectedPositionMapsEqual(
-  left: Map<string, BoardProjectedPosition>,
-  right: Map<string, BoardProjectedPosition>,
-) {
-  if (left.size !== right.size) {
-    return false;
-  }
-
-  for (const [key, rightPosition] of right) {
-    const leftPosition = left.get(key);
-    if (
-      !leftPosition ||
-      leftPosition.visible !== rightPosition.visible ||
-      Math.abs(leftPosition.x - rightPosition.x) > 0.25 ||
-      Math.abs(leftPosition.y - rightPosition.y) > 0.25
-    ) {
-      return false;
-    }
-  }
-
-  return true;
-}
 
 export function UnitContextMenuView({
   menu,
@@ -529,7 +439,6 @@ export function Board({
   const [hoveredCoord, setHoveredCoord] = useState<HexCoord | null>(null);
   const [activeStackItemId, setActiveStackItemId] = useState<string | null>(null);
   const boardFieldRef = useRef<HTMLDivElement | null>(null);
-  const tileElementByKeyRef = useRef(new Map<string, HTMLButtonElement>());
   const renderer = selectBoardRenderer({
     requestedMode: boardVisualMode,
     webglFailed,
@@ -537,7 +446,9 @@ export function Board({
   });
   const isInteractive = isBoardRendererInteractive({ renderer, readOnly, disabled });
   const [visibleAnimation, setVisibleAnimation] = useState<BoardAnimationCue | null>(animation ?? null);
-  const tilePositions = useMeasuredTilePositions(boardFieldRef, tileElementByKeyRef, match.board.tiles);
+  const boardCoords = useMemo(() => match.board.tiles.map((tile) => tile.coord), [match.board.tiles]);
+  const { positionsByCoordKey: tilePositions, registerTargetElement } =
+    useDomTargetingProjection(boardFieldRef, boardCoords);
   const boardSurface = useMemo(
     () =>
       buildBoardSurface({
@@ -691,11 +602,7 @@ export function Board({
                   <button
                     key={surfaceTile.key}
                     ref={(element) => {
-                      if (element) {
-                        tileElementByKeyRef.current.set(surfaceTile.key, element);
-                      } else {
-                        tileElementByKeyRef.current.delete(surfaceTile.key);
-                      }
+                      registerTargetElement(surfaceTile.coord, element);
                     }}
                     className={`hex-tile ${surfaceTile.hasManaSource ? "mana-source" : ""} ${surfaceTile.hasBuilding ? "building" : ""} ${surfaceTile.building ? `building-${surfaceTile.building.effect.type}` : ""} ${surfaceTile.occupantClass} ${surfaceTile.isLegal ? "legal" : ""} ${surfaceTile.isSelected ? "selected-piece" : ""} ${surfaceTile.isFocused ? "keyboard-focused" : ""} ${surfaceTile.tutorialHighlightTone ? `tutorial-highlight tutorial-highlight-${surfaceTile.tutorialHighlightTone}` : ""}`}
                     type="button"
