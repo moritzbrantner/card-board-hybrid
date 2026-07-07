@@ -1,5 +1,6 @@
 import type { Unit, Hero, HeroType } from "./types";
 import type { HeroVisualIdentity, UnitVisualIdentity } from "./matchVisualIdentity";
+import type { HeroAppearanceId } from "./heroAppearances";
 
 type PieceWithIdentity =
   | (Hero & { pieceType: "hero"; name: string })
@@ -35,6 +36,22 @@ export type ProceduralMiniatureRecipe = {
     shield?: "none" | "buckler" | "tower";
     motion?: "grounded" | "runner" | "leaping" | "floating";
   };
+  heroAppearance?: HeroProceduralAppearanceRecipe;
+};
+
+export type HeroProceduralAppearanceRecipe = {
+  id: HeroAppearanceId;
+  heroType: HeroType;
+  motif:
+    | "runes"
+    | "flame"
+    | "time"
+    | "shield"
+    | "arcaneBlade"
+    | "axe"
+    | "bow"
+    | "hammer";
+  trim: "plain" | "adept" | "mastery";
 };
 
 export type BoardPieceVisualEntry = {
@@ -78,11 +95,6 @@ const UNKNOWN_UNIT_PROCEDURAL: ProceduralMiniatureRecipe = {
 export const BOARD_PIECE_VISUAL_MANIFEST = {
   heroes: {
     runekeeper: {
-      modelAsset: {
-        kind: "gltf",
-        path: "/models/heroes/runekeeper.glb",
-        scale: 0.82,
-      },
       procedural: procedural("caster", 1.08, "#58b7a1", "#1e403a", "#d9b84f", {
         body: "medium",
         weapon: "staff",
@@ -207,14 +219,22 @@ export const BOARD_PIECE_VISUAL_MANIFEST = {
 export function resolveBoardPieceVisual(
   piece: PieceWithIdentity,
   visualIdentity: UnitVisualIdentity | HeroVisualIdentity,
-  manifest: BoardPieceVisualManifest = BOARD_PIECE_VISUAL_MANIFEST,
+  appearanceIdOrManifest?: HeroAppearanceId | BoardPieceVisualManifest | null,
+  manifestOverride?: BoardPieceVisualManifest,
 ): ResolvedBoardPieceVisual {
-  const entry =
-    piece.pieceType === "hero"
-      ? manifest.heroes[piece.heroType]
-      : manifest.units[
-          piece.templateId ?? ("templateId" in visualIdentity ? visualIdentity.templateId : null) ?? ""
-        ];
+  const appearanceId = typeof appearanceIdOrManifest === "string" ? appearanceIdOrManifest : null;
+  const manifest =
+    typeof appearanceIdOrManifest === "object" && appearanceIdOrManifest !== null
+      ? appearanceIdOrManifest
+      : manifestOverride ?? BOARD_PIECE_VISUAL_MANIFEST;
+  const unitEntries = manifest.units as Record<string, BoardPieceVisualEntry>;
+  const entry: BoardPieceVisualEntry | undefined = piece.pieceType === "hero"
+    ? appearanceId
+      ? resolveHeroVisualEntry(piece.heroType, appearanceId, manifest)
+      : manifest.heroes[piece.heroType]
+    : unitEntries[
+        piece.templateId ?? ("templateId" in visualIdentity ? visualIdentity.templateId : null) ?? ""
+      ];
 
   if (!entry) {
     return {
@@ -237,6 +257,51 @@ export function resolveBoardPieceVisual(
     modelAsset: entry.modelAsset,
     procedural: entry.procedural,
   };
+}
+
+export const BOARD_HERO_APPEARANCE_RECIPES: Record<string, ProceduralMiniatureRecipe> = {
+  "runekeeper-base": heroAppearance("runekeeper", "runekeeper-base", "runes", "plain", "#58b7a1", "#1e403a", "#d9b84f"),
+  "runekeeper-jade-archivist": heroAppearance("runekeeper", "runekeeper-jade-archivist", "runes", "adept", "#66c7a9", "#183f39", "#b8e986"),
+  "runekeeper-golden-sigilist": heroAppearance("runekeeper", "runekeeper-golden-sigilist", "runes", "mastery", "#70cdb2", "#263928", "#f3c969"),
+  "pyromancer-base": heroAppearance("pyromancer", "pyromancer-base", "flame", "plain", "#d1665a", "#4a1f1a", "#ffd08a"),
+  "pyromancer-ember-mantle": heroAppearance("pyromancer", "pyromancer-ember-mantle", "flame", "adept", "#e2774f", "#552116", "#ffb35c"),
+  "pyromancer-inferno-crown": heroAppearance("pyromancer", "pyromancer-inferno-crown", "flame", "mastery", "#f05d3f", "#46130f", "#ffe08a"),
+  "chronomancer-base": heroAppearance("chronomancer", "chronomancer-base", "time", "plain", "#7aa7d9", "#253a56", "#b6f0ff"),
+  "chronomancer-glass-hour": heroAppearance("chronomancer", "chronomancer-glass-hour", "time", "adept", "#a9c8f0", "#263a63", "#d7fbff"),
+  "chronomancer-starclock": heroAppearance("chronomancer", "chronomancer-starclock", "time", "mastery", "#8fb9f2", "#1f2f59", "#f6f0a4"),
+  "warden-base": heroAppearance("warden", "warden-base", "shield", "plain", "#77b36f", "#243d26", "#e8f5d6"),
+  "warden-mossguard": heroAppearance("warden", "warden-mossguard", "shield", "adept", "#6fa66a", "#28442c", "#b8d98a"),
+  "warden-ironroot": heroAppearance("warden", "warden-ironroot", "shield", "mastery", "#82916f", "#25352b", "#d7c27a"),
+  "battlemage-base": heroAppearance("battlemage", "battlemage-base", "arcaneBlade", "plain", "#b06ad9", "#39234f", "#f0d7ff"),
+  "battlemage-arc-duelist": heroAppearance("battlemage", "battlemage-arc-duelist", "arcaneBlade", "adept", "#c07bea", "#31204a", "#dff7ff"),
+  "battlemage-stormplate": heroAppearance("battlemage", "battlemage-stormplate", "arcaneBlade", "mastery", "#8c83d9", "#24324f", "#c7f2ff"),
+  "barbarian-base": heroAppearance("barbarian", "barbarian-base", "axe", "plain", "#b75343", "#49261e", "#f2c66d"),
+  "barbarian-warpaint": heroAppearance("barbarian", "barbarian-warpaint", "axe", "adept", "#c95e4f", "#4d211f", "#f0e0c2"),
+  "barbarian-ironhide-ravager": heroAppearance("barbarian", "barbarian-ironhide-ravager", "axe", "mastery", "#a84e42", "#2f2f31", "#d6b064"),
+  "archer-base": heroAppearance("archer", "archer-base", "bow", "plain", "#4f9a71", "#1f3a29", "#e9f4a3"),
+  "archer-trail-scout": heroAppearance("archer", "archer-trail-scout", "bow", "adept", "#5aa47d", "#223b2b", "#cfe89b"),
+  "archer-moonshot": heroAppearance("archer", "archer-moonshot", "bow", "mastery", "#5f9f98", "#1e3540", "#dfeeff"),
+  "builder-base": heroAppearance("builder", "builder-base", "hammer", "plain", "#c49b54", "#4b3820", "#e7eef4"),
+  "builder-field-engineer": heroAppearance("builder", "builder-field-engineer", "hammer", "adept", "#c7a76a", "#4c3b24", "#b9d6e8"),
+  "builder-runeforge": heroAppearance("builder", "builder-runeforge", "hammer", "mastery", "#c49b54", "#2f3b3f", "#9ee8d4"),
+};
+
+function resolveHeroVisualEntry(
+  heroType: HeroType,
+  appearanceId: HeroAppearanceId | null | undefined,
+  manifest: BoardPieceVisualManifest,
+): BoardPieceVisualEntry | undefined {
+  const requested = appearanceId ? BOARD_HERO_APPEARANCE_RECIPES[appearanceId] : null;
+  if (requested?.heroAppearance?.heroType === heroType) {
+    return { procedural: requested };
+  }
+
+  const base = BOARD_HERO_APPEARANCE_RECIPES[`${heroType}-base`];
+  if (base) {
+    return { procedural: base };
+  }
+
+  return manifest.heroes[heroType];
 }
 
 function heroRecipe(primary: string, secondary: string, accent: string): BoardPieceVisualEntry {
@@ -284,4 +349,52 @@ function procedural(
     },
     silhouette,
   };
+}
+
+function heroAppearance(
+  heroType: HeroType,
+  id: HeroAppearanceId,
+  motif: HeroProceduralAppearanceRecipe["motif"],
+  trim: HeroProceduralAppearanceRecipe["trim"],
+  primary: string,
+  secondary: string,
+  accent: string,
+): ProceduralMiniatureRecipe {
+  const silhouette = heroSilhouette(heroType);
+  return {
+    family: heroType === "warden" ? "fortress" : heroType === "builder" ? "construct" : "caster",
+    scale: heroType === "barbarian" || heroType === "warden" ? 1.12 : 1.08,
+    palette: {
+      primary,
+      secondary,
+      accent,
+      glow: accent,
+    },
+    silhouette,
+    heroAppearance: {
+      id,
+      heroType,
+      motif,
+      trim,
+    },
+  };
+}
+
+function heroSilhouette(heroType: HeroType): ProceduralMiniatureRecipe["silhouette"] {
+  switch (heroType) {
+    case "warden":
+      return { body: "heavy", weapon: "spear", shield: "tower", motion: "grounded" };
+    case "battlemage":
+      return { body: "heavy", weapon: "sword", shield: "buckler", motion: "grounded" };
+    case "barbarian":
+      return { body: "heavy", weapon: "axe", shield: "none", motion: "grounded" };
+    case "archer":
+      return { body: "light", weapon: "bow", shield: "none", motion: "runner" };
+    case "builder":
+      return { body: "heavy", weapon: "hammer", shield: "buckler", motion: "grounded" };
+    case "runekeeper":
+    case "pyromancer":
+    case "chronomancer":
+      return { body: "medium", weapon: "staff", shield: "none", motion: "floating" };
+  }
 }

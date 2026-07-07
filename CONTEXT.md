@@ -236,6 +236,10 @@ _Avoid_: board state, match mode, rules mode
 A presentation-only 3D asset used by Board visual mode to render a Hero or Unit. It is not match state, replay data, card rules, or catalog legality.
 _Avoid_: model, skin, piece data
 
+**Board appearance variant**:
+A presentation-only Hero Board visual selected by a player and rendered by Board visual mode. It can be unlocked through Hero mastery, but it never changes match rules, replay data, card legality, or frozen loadouts.
+_Avoid_: skin, cosmetic data, piece data
+
 **Procedural miniature**:
 A code-generated 3D fallback representation for a Hero or Unit when no Board model asset is configured or when that asset cannot load.
 _Avoid_: marker, placeholder, token

@@ -224,6 +224,7 @@ function progressionResponse(): ProgressionResponse {
     ],
     skillTrees: [],
     loadouts: [],
+    heroAppearances: [],
   };
 }
 

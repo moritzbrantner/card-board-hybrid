@@ -162,6 +162,7 @@ pub(crate) struct JoinSharedMatchRequest {
 pub(crate) struct MatchResponse {
     pub(crate) match_id: String,
     pub(crate) match_state: MatchState,
+    pub(crate) hero_appearances: Vec<HeroAppearanceAssignment>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) replay_frames: Vec<ReplayFrameResponse>,
 }
@@ -283,7 +284,26 @@ pub(crate) struct SharedMatchResponse {
     pub(crate) active_side: Option<Side>,
     pub(crate) opponent_connected: bool,
     pub(crate) can_claim_forfeit_at: Option<i64>,
+    pub(crate) hero_appearances: Vec<HeroAppearanceAssignment>,
     pub(crate) match_state: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HeroAppearanceAssignment {
+    pub(crate) side: Side,
+    pub(crate) hero_type: HeroType,
+    pub(crate) appearance_id: String,
+    pub(crate) source: HeroAppearanceAssignmentSource,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code, reason = "viewer-local fallback is emitted by the frontend")]
+pub(crate) enum HeroAppearanceAssignmentSource {
+    OwnerSelection,
+    ViewerSelection,
+    Base,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -391,6 +411,7 @@ impl From<StoredMatch> for MatchResponse {
         Self {
             match_id: stored_match.id,
             match_state: stored_match.state,
+            hero_appearances: Vec::new(),
             replay_frames: Vec::new(),
         }
     }
@@ -416,6 +437,7 @@ impl MatchResponse {
         Self {
             match_id: stored_match.id,
             match_state: stored_match.state,
+            hero_appearances: Vec::new(),
             replay_frames: replay_frames
                 .iter()
                 .enumerate()
@@ -539,6 +561,7 @@ impl From<StoredSharedMatch> for SharedMatchResponse {
             active_side,
             opponent_connected,
             can_claim_forfeit_at,
+            hero_appearances: Vec::new(),
             match_state,
         }
     }

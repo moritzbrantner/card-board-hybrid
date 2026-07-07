@@ -95,7 +95,10 @@ pub(crate) fn progression_error_response(error: ProgressionError) -> axum::respo
         | ProgressionError::UnknownSkill(_)
         | ProgressionError::SkillAlreadyUnlocked(_)
         | ProgressionError::SkillPrerequisiteMissing(_)
-        | ProgressionError::NotEnoughSkillPoints => StatusCode::BAD_REQUEST,
+        | ProgressionError::NotEnoughSkillPoints
+        | ProgressionError::UnknownHeroAppearance(_)
+        | ProgressionError::LockedHeroAppearance(_)
+        | ProgressionError::MismatchedHeroAppearance { .. } => StatusCode::BAD_REQUEST,
     };
     (
         status,

@@ -362,6 +362,22 @@ export type ProgressionResponse = {
   heroes: HeroProgression[];
   skillTrees: HeroSkillTree[];
   loadouts: SavedRuneLoadout[];
+  heroAppearances: HeroAppearanceProgression[];
+};
+
+export type HeroAppearanceProgression = {
+  heroType: HeroType;
+  selectedAppearanceId: string;
+  appearances: HeroAppearanceDefinition[];
+};
+
+export type HeroAppearanceDefinition = {
+  id: string;
+  heroType: HeroType;
+  name: string;
+  text: string;
+  unlockLevel: number | null;
+  unlocked: boolean;
 };
 
 export type MatchProgressionEffects = {
@@ -553,6 +569,7 @@ export type StackAction =
 export type MatchResponse = {
   matchId: string;
   matchState: MatchState;
+  heroAppearances: HeroAppearanceAssignment[];
   replayFrames?: ReplayFrame[];
 };
 
@@ -591,7 +608,15 @@ export type SharedMatchResponse = {
   activeSide: Side | null;
   opponentConnected: boolean;
   canClaimForfeitAt: number | null;
+  heroAppearances: HeroAppearanceAssignment[];
   matchState: MatchState | null;
+};
+
+export type HeroAppearanceAssignment = {
+  side: Side;
+  heroType: HeroType;
+  appearanceId: string;
+  source: "ownerSelection" | "viewerSelection" | "base";
 };
 
 export type SharedSeat = {
@@ -679,6 +704,12 @@ export type MatchUnlockCallout =
       type: "skillPointUnlocked";
       heroType: HeroType;
       skillPoints: number;
+    }
+  | {
+      type: "heroAppearanceUnlocked";
+      heroType: HeroType;
+      appearanceId: string;
+      name: string;
     };
 
 export type MatchScenarioSummary = {

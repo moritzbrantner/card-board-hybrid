@@ -144,6 +144,16 @@ export function saveHeroRuneLoadout(heroType: HeroType, runeIds: string[]) {
   );
 }
 
+export function saveHeroAppearance(heroType: HeroType, appearanceId: string) {
+  return request<ProgressionResponse>(
+    `/api/progression/heroes/${encodeURIComponent(heroType)}/appearance`,
+    {
+      method: "POST",
+      body: JSON.stringify({ appearanceId }),
+    },
+  );
+}
+
 export function loadDecks() {
   return request<DeckListResponse>("/api/decks");
 }

@@ -11,6 +11,7 @@ import {
 } from "react";
 import { BOARD_3D_CAMERA, BOARD_3D_GROUP_ROTATION_Y } from "../boardRenderer";
 import { BOARD_PIECE_VISUAL_MANIFEST } from "../board3dModelManifest";
+import { resolveHeroAppearanceId } from "../heroAppearances";
 import type { HexCoord, HexTile } from "../types";
 import { BoardCameraControls } from "./BoardCameraControls";
 import { Board3DHitTarget, ProjectedHitTargetSync } from "./HitTargets";
@@ -59,6 +60,7 @@ export function Board3DRenderer({
   disabled,
   tileInteractions,
   targetingIndicators,
+  heroAppearances = [],
   animation,
   onTileClick,
   onTileDrop,
@@ -216,6 +218,15 @@ export function Board3DRenderer({
               <PieceMesh
                 key={piece.id}
                 piece={piece}
+                appearanceId={
+                  piece.pieceType === "hero"
+                    ? resolveHeroAppearanceId({
+                        side: piece.side,
+                        heroType: piece.heroType,
+                        assignments: heroAppearances,
+                      })
+                    : null
+                }
                 animation={animationByPieceId.get(piece.id)}
                 visualCatalog={visualCatalog}
                 manifest={manifest}

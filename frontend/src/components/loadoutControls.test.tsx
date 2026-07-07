@@ -136,4 +136,5 @@ const progression: ProgressionResponse = {
   heroes: [],
   skillTrees: [],
   loadouts: [],
+  heroAppearances: [],
 };

@@ -149,6 +149,177 @@ fn skill_unlock_spends_hero_mastery_points_and_respec_restores_them() {
 }
 
 #[test]
+fn hero_appearance_selection_respects_mastery_unlocks() {
+    let mut connection = Connection::open_in_memory().expect("in-memory database should open");
+    identity::migrate(&connection).expect("identity schema should migrate");
+    migrate(&connection).expect("progression schema should migrate");
+    insert_user(&connection, 1, 0);
+    connection
+        .execute(
+            "INSERT INTO hero_mastery (user_id, hero_type, xp) VALUES (1, 'pyromancer', 100)",
+            [],
+        )
+        .expect("hero mastery should insert");
+
+    {
+        let mut progression = ProgressionModule::new(&mut connection);
+        let response = progression.load_for_user(1).expect("progression should load");
+        let pyromancer = response
+            .hero_appearances
+            .iter()
+            .find(|hero| hero.hero_type == HeroType::Pyromancer)
+            .expect("pyromancer appearances should load");
+        assert_eq!(pyromancer.selected_appearance_id, "pyromancer-base");
+        assert!(
+            pyromancer
+                .appearances
+                .iter()
+                .any(|appearance| appearance.id == "pyromancer-base" && appearance.unlocked)
+        );
+
+        let locked = progression.save_hero_appearance_selection(
+            1,
+            HeroType::Pyromancer,
+            SaveHeroAppearanceRequest {
+                appearance_id: "pyromancer-ember-mantle".to_string(),
+            },
+        );
+        assert!(matches!(
+            locked,
+            Err(ProgressionError::LockedHeroAppearance(_))
+        ));
+    }
+
+    connection
+        .execute(
+            "UPDATE hero_mastery SET xp = 300 WHERE user_id = 1 AND hero_type = 'pyromancer'",
+            [],
+        )
+        .expect("hero mastery should update");
+    {
+        let mut progression = ProgressionModule::new(&mut connection);
+        let response = progression
+            .save_hero_appearance_selection(
+                1,
+                HeroType::Pyromancer,
+                SaveHeroAppearanceRequest {
+                    appearance_id: "pyromancer-ember-mantle".to_string(),
+                },
+            )
+            .expect("level 3 appearance should save");
+        let pyromancer = response
+            .hero_appearances
+            .iter()
+            .find(|hero| hero.hero_type == HeroType::Pyromancer)
+            .expect("pyromancer appearances should load");
+        assert_eq!(pyromancer.selected_appearance_id, "pyromancer-ember-mantle");
+    }
+
+    connection
+        .execute(
+            "UPDATE hero_mastery SET xp = 1500 WHERE user_id = 1 AND hero_type = 'pyromancer'",
+            [],
+        )
+        .expect("hero mastery should update");
+    let mut progression = ProgressionModule::new(&mut connection);
+    let response = progression
+        .save_hero_appearance_selection(
+            1,
+            HeroType::Pyromancer,
+            SaveHeroAppearanceRequest {
+                appearance_id: "pyromancer-inferno-crown".to_string(),
+            },
+        )
+        .expect("level 6 appearance should save");
+    let pyromancer = response
+        .hero_appearances
+        .iter()
+        .find(|hero| hero.hero_type == HeroType::Pyromancer)
+        .expect("pyromancer appearances should load");
+    assert_eq!(pyromancer.selected_appearance_id, "pyromancer-inferno-crown");
+}
+
+#[test]
+fn hero_appearance_selection_rejects_unknown_and_wrong_hero_ids() {
+    let mut connection = Connection::open_in_memory().expect("in-memory database should open");
+    identity::migrate(&connection).expect("identity schema should migrate");
+    migrate(&connection).expect("progression schema should migrate");
+    insert_user(&connection, 1, 0);
+    connection
+        .execute(
+            "INSERT INTO hero_mastery (user_id, hero_type, xp) VALUES (1, 'pyromancer', 1500)",
+            [],
+        )
+        .expect("hero mastery should insert");
+
+    let mut progression = ProgressionModule::new(&mut connection);
+    let unknown = progression.save_hero_appearance_selection(
+        1,
+        HeroType::Pyromancer,
+        SaveHeroAppearanceRequest {
+            appearance_id: "pyromancer-missing".to_string(),
+        },
+    );
+    assert!(matches!(
+        unknown,
+        Err(ProgressionError::UnknownHeroAppearance(_))
+    ));
+
+    let wrong_hero = progression.save_hero_appearance_selection(
+        1,
+        HeroType::Pyromancer,
+        SaveHeroAppearanceRequest {
+            appearance_id: "warden-mossguard".to_string(),
+        },
+    );
+    assert!(matches!(
+        wrong_hero,
+        Err(ProgressionError::MismatchedHeroAppearance { .. })
+    ));
+}
+
+#[test]
+fn reward_summary_includes_hero_appearance_unlocks() {
+    let mut connection = Connection::open_in_memory().expect("in-memory database should open");
+    identity::migrate(&connection).expect("identity schema should migrate");
+    migrate(&connection).expect("progression schema should migrate");
+    insert_user(&connection, 1, 100);
+    connection
+        .execute(
+            "INSERT INTO hero_mastery (user_id, hero_type, xp) VALUES (1, 'pyromancer', 350)",
+            [],
+        )
+        .expect("hero mastery should insert");
+    connection
+        .execute(
+            "
+            INSERT INTO match_xp_awards (
+                match_id, user_id, account_xp, hero_type, hero_xp, won, awarded_at
+            )
+            VALUES ('match-appearance', 1, 100, 'pyromancer', 100, 0, 1)
+            ",
+            [],
+        )
+        .expect("award should insert");
+
+    let progression = ProgressionModule::new(&mut connection);
+    let reward = progression
+        .match_reward_summary(1, "match-appearance", Side::Player)
+        .expect("reward should load")
+        .expect("reward should exist");
+    assert!(reward.unlocks.iter().any(|unlock| {
+        matches!(
+            unlock,
+            MatchUnlockCallout::HeroAppearanceUnlocked {
+                hero_type: HeroType::Pyromancer,
+                appearance_id: "pyromancer-ember-mantle",
+                ..
+            }
+        )
+    }));
+}
+
+#[test]
 fn completed_match_awards_account_and_hero_xp_once() {
     let path = test_db_path("progression-award");
     let mut store = SqliteMatchStore::new(&path).expect("store should open");

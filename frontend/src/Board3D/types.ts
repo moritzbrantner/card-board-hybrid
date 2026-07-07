@@ -2,7 +2,7 @@ import type { ProjectedBoardPosition } from "../boardRenderer";
 import type { BoardSurfaceTileInteraction } from "../boardSurface";
 import type { MatchVisualCatalog } from "../matchVisualIdentity";
 import type { TargetingIndicator } from "../targetingIndicators";
-import type { HexCoord, HexTile, HeroType, Side, Unit } from "../types";
+import type { HexCoord, HexTile, HeroAppearanceAssignment, HeroType, Side, Unit } from "../types";
 import type { BoardAnimationCue } from "../boardAnimations";
 import type { BoardPieceVisualManifest } from "../board3dModelManifest";
 
@@ -53,6 +53,7 @@ export type Board3DRendererProps = {
   disabled: boolean;
   tileInteractions: Board3DTileInteraction[];
   targetingIndicators: TargetingIndicator[];
+  heroAppearances?: HeroAppearanceAssignment[];
   animation?: BoardAnimationCue | null;
   onTileClick?: (tile: HexTile) => void;
   onTileDrop?: (tile: HexTile, cardId: string) => void;

@@ -64,6 +64,17 @@ describe("3D board model manifest", () => {
     });
     expect(resolved.procedural.family).toBe("humanoid");
   });
+
+  it("resolves Hero Board appearance variants and falls back to the Hero base appearance", () => {
+    const selected = resolveBoardPieceVisual(makeHero("pyromancer"), heroVisual("pyromancer"), "pyromancer-inferno-crown");
+    expect(selected.source).toBe("procedural");
+    expect(selected.procedural.heroAppearance?.id).toBe("pyromancer-inferno-crown");
+    expect(selected.procedural.heroAppearance?.motif).toBe("flame");
+
+    const mismatched = resolveBoardPieceVisual(makeHero("pyromancer"), heroVisual("pyromancer"), "warden-ironroot");
+    expect(mismatched.source).toBe("procedural");
+    expect(mismatched.procedural.heroAppearance?.id).toBe("pyromancer-base");
+  });
 });
 
 function makeHero(heroType: Hero["heroType"]): Hero & { pieceType: "hero"; name: string } {

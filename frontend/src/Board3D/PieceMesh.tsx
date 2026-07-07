@@ -21,6 +21,7 @@ export function PieceMesh({
   manifest,
   onAssetFailure,
   interaction,
+  appearanceId,
   readOnly,
   disabled,
   onClick,
@@ -32,6 +33,7 @@ export function PieceMesh({
   manifest: BoardPieceVisualManifest;
   onAssetFailure?: (path: string) => void;
   interaction?: Board3DTileInteraction;
+  appearanceId?: string | null;
   readOnly: boolean;
   disabled: boolean;
   onClick: (coord: HexCoord) => void;
@@ -41,7 +43,7 @@ export function PieceMesh({
   const [x, y, z] = axialToBoardPosition(piece.position, 1);
   const visualIdentity =
     piece.pieceType === "hero" ? visualCatalog.hero(piece) : visualCatalog.unit(piece);
-  const resolved = resolveBoardPieceVisual(piece, visualIdentity, manifest);
+  const resolved = resolveBoardPieceVisual(piece, visualIdentity, appearanceId, manifest);
   const resolvedAssetPath = resolved.source === "model" ? resolved.modelAsset.path : null;
   const handleAssetFailure = useCallback(() => {
     setAssetFailed(true);
@@ -150,7 +152,13 @@ function AnimatedPieceGroup({
     } else if (animation?.kind === "heal" || animation?.kind === "buff") {
       group.position.y = target.y + Math.sin(progress * Math.PI) * 0.16;
       group.scale.setScalar(1 + Math.sin(progress * Math.PI) * 0.07);
+    } else if (piece.pieceType === "hero" && !browserPrefersReducedMotion()) {
+      const idle = elapsed / 1000;
+      group.position.y = target.y + Math.sin(idle * 1.9) * 0.035;
+      group.rotation.y = Math.sin(idle * 1.2) * 0.035;
+      group.scale.setScalar(1 + Math.sin(idle * 1.7) * 0.018);
     } else {
+      group.rotation.y = 0;
       group.scale.setScalar(1);
     }
   });
@@ -160,6 +168,14 @@ function AnimatedPieceGroup({
       {children}
     </group>
   );
+}
+
+function browserPrefersReducedMotion() {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 function LoadableModelPiece({

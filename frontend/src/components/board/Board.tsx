@@ -31,6 +31,7 @@ import type {
   HexTile,
   MatchParticipantState,
   MatchState,
+  HeroAppearanceAssignment,
   Side,
   StackItem,
 } from "../../types";
@@ -398,6 +399,7 @@ export function Board({
   selectedCard,
   selectedPiece,
   focusedCoord,
+  heroAppearances = [],
   disabled,
   readOnly = false,
   onTileClick,
@@ -414,6 +416,7 @@ export function Board({
   selectedCard: Card | null;
   selectedPiece: BoardPiece | null;
   focusedCoord?: HexCoord | null;
+  heroAppearances?: HeroAppearanceAssignment[];
   disabled: boolean;
   readOnly?: boolean;
   onTileClick?: (tile: HexTile) => void;
@@ -517,6 +520,7 @@ export function Board({
           disabled={disabled}
           tileInteractions={boardSurface.tileInteractions}
           targetingIndicators={boardSurface.targetingIndicators}
+          heroAppearances={heroAppearances}
           onTileClick={onTileClick}
           onTileDrop={onTileDrop}
           onTileContextMenu={(tile, event) => {

@@ -4,6 +4,7 @@ import {
   loadProfileMatches,
   loadProgression,
   respecHeroSkills,
+  saveHeroAppearance,
   saveHeroRuneLoadout,
   unlockHeroSkill,
   updateProfile,
@@ -18,9 +19,13 @@ import type {
   HeroProgression,
   HeroSkillTree,
   HeroType,
+  HeroAppearanceProgression,
+  HeroAppearanceDefinition,
 } from "./types";
 import { AccountActions } from "./components/common";
 import { HERO_OPTIONS } from "./heroes";
+import { HeroPreview3D } from "./HeroPreview3D";
+import { saveLocalHeroAppearance } from "./heroAppearances";
 
 type ProfilePageProps = {
   currentUser: AccountProfile;
@@ -317,6 +322,9 @@ function ProgressionPanel({
   const tree = progression.skillTrees.find((candidate) => candidate.heroType === selectedHero);
   const loadout =
     progression.loadouts.find((candidate) => candidate.heroType === selectedHero)?.runeIds ?? [];
+  const appearanceProgression = progression.heroAppearances.find(
+    (candidate) => candidate.heroType === selectedHero,
+  );
   const selectedHeroOption = HERO_OPTIONS.find((option) => option.id === selectedHero);
 
   async function handleToggleRune(rune: RuneDefinition) {
@@ -337,6 +345,15 @@ function ProgressionPanel({
 
   async function handleRespec() {
     const updated = await respecHeroSkills(selectedHero);
+    onProgressionChanged(updated);
+  }
+
+  async function handleAppearanceSelect(appearance: HeroAppearanceDefinition) {
+    if (!appearance.unlocked) {
+      return;
+    }
+    saveLocalHeroAppearance(selectedHero, appearance.id);
+    const updated = await saveHeroAppearance(selectedHero, appearance.id);
     onProgressionChanged(updated);
   }
 
@@ -406,6 +423,13 @@ function ProgressionPanel({
             value={hero.xpIntoLevel}
             max={hero.nextLevelXp - hero.currentLevelXp}
           />
+          {appearanceProgression ? (
+            <HeroAppearanceSelector
+              heroName={selectedHeroOption?.name ?? selectedHero}
+              appearanceProgression={appearanceProgression}
+              onSelect={handleAppearanceSelect}
+            />
+          ) : null}
           <div className="rune-loadout-editor" aria-label="Default rune loadout">
             <h3>Default Runes</h3>
             <div className="rune-grid">
@@ -432,6 +456,60 @@ function ProgressionPanel({
           <SkillTreeGraph tree={tree} hero={hero} onUnlock={handleUnlock} />
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function HeroAppearanceSelector({
+  heroName,
+  appearanceProgression,
+  onSelect,
+}: {
+  heroName: string;
+  appearanceProgression: HeroAppearanceProgression;
+  onSelect: (appearance: HeroAppearanceDefinition) => Promise<void>;
+}) {
+  return (
+    <div className="hero-appearance-selector" aria-label="Board appearance variants">
+      <div className="hero-appearance-preview">
+        <HeroPreview3D
+          heroType={appearanceProgression.heroType}
+          label={heroName}
+          appearanceId={appearanceProgression.selectedAppearanceId}
+        />
+      </div>
+      <div className="hero-appearance-options">
+        <h3>Board Appearance</h3>
+        <div className="hero-appearance-grid">
+          {appearanceProgression.appearances.map((appearance) => {
+            const selected = appearance.id === appearanceProgression.selectedAppearanceId;
+            return (
+              <button
+                key={appearance.id}
+                type="button"
+                className={selected ? "selected" : ""}
+                disabled={!appearance.unlocked}
+                aria-pressed={selected}
+                onClick={() => void onSelect(appearance)}
+                title={
+                  appearance.unlocked
+                    ? appearance.text
+                    : `Unlocks at mastery level ${appearance.unlockLevel}`
+                }
+              >
+                <strong>{appearance.name}</strong>
+                <span>
+                  {appearance.unlocked
+                    ? selected
+                      ? "Selected"
+                      : appearance.text
+                    : `Mastery ${appearance.unlockLevel}`}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

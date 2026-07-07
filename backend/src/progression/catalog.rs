@@ -76,6 +76,244 @@ pub(super) fn rune_definition(rune_id: &str) -> Option<RuneDefinition> {
         .find(|rune| rune.id == rune_id)
 }
 
+pub(super) fn appearance_definitions_for_hero(
+    hero_type: HeroType,
+) -> Vec<HeroAppearanceDefinition> {
+    hero_appearance_definitions()
+        .into_iter()
+        .filter(|appearance| appearance.hero_type == hero_type)
+        .collect()
+}
+
+pub(super) fn hero_appearance_definition(
+    hero_type: HeroType,
+    appearance_id: &str,
+) -> Option<HeroAppearanceDefinition> {
+    appearance_definitions_for_hero(hero_type)
+        .into_iter()
+        .find(|appearance| appearance.id == appearance_id)
+}
+
+pub(super) fn hero_appearance_definition_any(
+    appearance_id: &str,
+) -> Option<HeroAppearanceDefinition> {
+    hero_appearance_definitions()
+        .into_iter()
+        .find(|appearance| appearance.id == appearance_id)
+}
+
+pub(super) fn appearance_unlocked(
+    hero_level: u32,
+    definition: &HeroAppearanceDefinition,
+) -> bool {
+    definition
+        .unlock_level
+        .is_none_or(|unlock_level| hero_level >= unlock_level)
+}
+
+pub(super) fn base_hero_appearance_id(hero_type: HeroType) -> &'static str {
+    match hero_type {
+        HeroType::Runekeeper => "runekeeper-base",
+        HeroType::Pyromancer => "pyromancer-base",
+        HeroType::Chronomancer => "chronomancer-base",
+        HeroType::Warden => "warden-base",
+        HeroType::Battlemage => "battlemage-base",
+        HeroType::Barbarian => "barbarian-base",
+        HeroType::Archer => "archer-base",
+        HeroType::Builder => "builder-base",
+    }
+}
+
+pub(super) fn hero_appearance_definitions() -> Vec<HeroAppearanceDefinition> {
+    vec![
+        appearance(
+            HeroType::Runekeeper,
+            "runekeeper-base",
+            "Runekeeper",
+            "A steady rune caster with a balanced board presence.",
+            None,
+        ),
+        appearance(
+            HeroType::Runekeeper,
+            "runekeeper-jade-archivist",
+            "Jade Archivist",
+            "A jade-clad keeper with brighter archive glyphs.",
+            Some(3),
+        ),
+        appearance(
+            HeroType::Runekeeper,
+            "runekeeper-golden-sigilist",
+            "Golden Sigilist",
+            "A gilded rune caster framed by ceremonial sigils.",
+            Some(6),
+        ),
+        appearance(
+            HeroType::Pyromancer,
+            "pyromancer-base",
+            "Pyromancer",
+            "A direct flame caster with a compact ember focus.",
+            None,
+        ),
+        appearance(
+            HeroType::Pyromancer,
+            "pyromancer-ember-mantle",
+            "Ember Mantle",
+            "A hotter mantle and ember aura for an advancing fire mage.",
+            Some(3),
+        ),
+        appearance(
+            HeroType::Pyromancer,
+            "pyromancer-inferno-crown",
+            "Inferno Crown",
+            "A crowned pyromancer with a taller inferno focus.",
+            Some(6),
+        ),
+        appearance(
+            HeroType::Chronomancer,
+            "chronomancer-base",
+            "Chronomancer",
+            "A mobile caster surrounded by measured time rings.",
+            None,
+        ),
+        appearance(
+            HeroType::Chronomancer,
+            "chronomancer-glass-hour",
+            "Glass Hour",
+            "A glassy timekeeper with suspended hour fragments.",
+            Some(3),
+        ),
+        appearance(
+            HeroType::Chronomancer,
+            "chronomancer-starclock",
+            "Starclock",
+            "A star-marked chronomancer with a brighter clock halo.",
+            Some(6),
+        ),
+        appearance(
+            HeroType::Warden,
+            "warden-base",
+            "Warden",
+            "A rooted defender with a broad protective shield.",
+            None,
+        ),
+        appearance(
+            HeroType::Warden,
+            "warden-mossguard",
+            "Mossguard",
+            "A moss-covered protector with softened green armor.",
+            Some(3),
+        ),
+        appearance(
+            HeroType::Warden,
+            "warden-ironroot",
+            "Ironroot",
+            "A heavier warden reinforced with ironwood plating.",
+            Some(6),
+        ),
+        appearance(
+            HeroType::Battlemage,
+            "battlemage-base",
+            "Battlemage",
+            "A front-line caster balancing weapon and focus.",
+            None,
+        ),
+        appearance(
+            HeroType::Battlemage,
+            "battlemage-arc-duelist",
+            "Arc Duelist",
+            "A sharper duelist with brighter arcane edgework.",
+            Some(3),
+        ),
+        appearance(
+            HeroType::Battlemage,
+            "battlemage-stormplate",
+            "Stormplate",
+            "A storm-armored battlemage with a charged off-hand.",
+            Some(6),
+        ),
+        appearance(
+            HeroType::Barbarian,
+            "barbarian-base",
+            "Barbarian",
+            "A heavy brawler built around a brutal axe silhouette.",
+            None,
+        ),
+        appearance(
+            HeroType::Barbarian,
+            "barbarian-warpaint",
+            "Warpaint",
+            "A painted raider with brighter battle markings.",
+            Some(3),
+        ),
+        appearance(
+            HeroType::Barbarian,
+            "barbarian-ironhide-ravager",
+            "Ironhide Ravager",
+            "An ironhide champion with heavier armor and axe mass.",
+            Some(6),
+        ),
+        appearance(
+            HeroType::Archer,
+            "archer-base",
+            "Archer",
+            "A light skirmisher with a clear bow profile.",
+            None,
+        ),
+        appearance(
+            HeroType::Archer,
+            "archer-trail-scout",
+            "Trail Scout",
+            "A scout-marked archer with a leaner trail silhouette.",
+            Some(3),
+        ),
+        appearance(
+            HeroType::Archer,
+            "archer-moonshot",
+            "Moonshot",
+            "A moonlit archer with a brighter longbow focus.",
+            Some(6),
+        ),
+        appearance(
+            HeroType::Builder,
+            "builder-base",
+            "Builder",
+            "A sturdy support hero carrying tools and a hammer.",
+            None,
+        ),
+        appearance(
+            HeroType::Builder,
+            "builder-field-engineer",
+            "Field Engineer",
+            "A field-ready builder with reinforced tool gear.",
+            Some(3),
+        ),
+        appearance(
+            HeroType::Builder,
+            "builder-runeforge",
+            "Runeforge",
+            "A runeforge builder with a brighter hammer and frame.",
+            Some(6),
+        ),
+    ]
+}
+
+fn appearance(
+    hero_type: HeroType,
+    id: &'static str,
+    name: &'static str,
+    text: &'static str,
+    unlock_level: Option<u32>,
+) -> HeroAppearanceDefinition {
+    HeroAppearanceDefinition {
+        id,
+        hero_type,
+        name,
+        text,
+        unlock_level,
+        unlocked: false,
+    }
+}
+
 pub(super) fn effects_for(rune_ids: &[String], skill_ids: &[String]) -> MatchProgressionEffects {
     let mut effects = MatchProgressionEffects::default();
     for rune_id in rune_ids {

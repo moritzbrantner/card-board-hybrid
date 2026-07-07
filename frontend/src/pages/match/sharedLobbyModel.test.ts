@@ -71,6 +71,7 @@ function shared(overrides: Partial<SharedMatchResponse>): SharedMatchResponse {
     activeSide: null,
     opponentConnected: false,
     canClaimForfeitAt: null,
+    heroAppearances: [],
     matchState: null,
     ...overrides,
   };

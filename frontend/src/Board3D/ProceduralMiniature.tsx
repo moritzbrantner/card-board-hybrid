@@ -69,6 +69,7 @@ export function ProceduralMiniature({
         <MiniatureBody recipe={recipe} pieceType={pieceType} />
         <MiniatureWeapon recipe={recipe} />
         <MiniatureShield recipe={recipe} />
+        {pieceType === "hero" ? <HeroAppearanceAdornments recipe={recipe} /> : null}
         <mesh position={[0, 0.1, 0]} rotation={[Math.PI / 2, 0, 0]}>
           <torusGeometry args={[0.34, 0.012, 8, 24]} />
           <meshStandardMaterial color={glow} emissive={glow} emissiveIntensity={0.2} />
@@ -76,6 +77,121 @@ export function ProceduralMiniature({
       </group>
     </group>
   );
+}
+
+function HeroAppearanceAdornments({ recipe }: { recipe: ProceduralMiniatureRecipe }) {
+  const appearance = recipe.heroAppearance;
+  if (!appearance) {
+    return null;
+  }
+
+  const accent = recipe.palette.accent;
+  const secondary = recipe.palette.secondary;
+  const masteryScale = appearance.trim === "mastery" ? 1.18 : appearance.trim === "adept" ? 1.08 : 1;
+  const emissiveIntensity = appearance.trim === "mastery" ? 0.42 : appearance.trim === "adept" ? 0.3 : 0.2;
+
+  switch (appearance.motif) {
+    case "runes":
+      return (
+        <group scale={[masteryScale, masteryScale, masteryScale]}>
+          <mesh position={[0, 0.84, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.43, 0.012, 8, 32]} />
+            <meshStandardMaterial color={accent} emissive={accent} emissiveIntensity={emissiveIntensity} />
+          </mesh>
+          {[0, 1, 2].map((index) => (
+            <mesh key={index} position={[Math.cos(index * 2.1) * 0.33, 0.86, Math.sin(index * 2.1) * 0.33]}>
+              <octahedronGeometry args={[0.055]} />
+              <meshStandardMaterial color={accent} emissive={accent} emissiveIntensity={0.35} />
+            </mesh>
+          ))}
+        </group>
+      );
+    case "flame":
+      return (
+        <group scale={[masteryScale, masteryScale, masteryScale]}>
+          <mesh position={[0, 1.12, 0]} rotation={[0, 0, 0.08]}>
+            <coneGeometry args={[0.18, 0.42, 7]} />
+            <meshStandardMaterial color={accent} emissive={accent} emissiveIntensity={emissiveIntensity} />
+          </mesh>
+          <mesh position={[0.18, 0.88, 0.12]} rotation={[0.1, 0, -0.25]}>
+            <coneGeometry args={[0.1, 0.28, 6]} />
+            <meshStandardMaterial color={recipe.palette.primary} emissive={accent} emissiveIntensity={0.18} />
+          </mesh>
+        </group>
+      );
+    case "time":
+      return (
+        <group scale={[masteryScale, masteryScale, masteryScale]}>
+          <mesh position={[0, 0.78, 0]} rotation={[Math.PI / 2, 0.3, 0]}>
+            <torusGeometry args={[0.38, 0.011, 8, 36]} />
+            <meshStandardMaterial color={accent} emissive={accent} emissiveIntensity={emissiveIntensity} />
+          </mesh>
+          <mesh position={[0, 0.78, 0]} rotation={[Math.PI / 2, -0.58, 0]}>
+            <torusGeometry args={[0.27, 0.01, 8, 30]} />
+            <meshStandardMaterial color={recipe.palette.primary} emissive={accent} emissiveIntensity={0.18} />
+          </mesh>
+        </group>
+      );
+    case "shield":
+      return (
+        <mesh position={[-0.42, 0.62, 0.02]} scale={[masteryScale, masteryScale, masteryScale]}>
+          <boxGeometry args={[0.18, 0.56, 0.08]} />
+          <meshStandardMaterial color={accent} roughness={0.5} metalness={0.14} />
+        </mesh>
+      );
+    case "arcaneBlade":
+      return (
+        <group scale={[masteryScale, masteryScale, masteryScale]}>
+          <mesh position={[0.42, 0.72, 0]} rotation={[0, 0, -0.66]}>
+            <coneGeometry args={[0.07, 0.46, 4]} />
+            <meshStandardMaterial color={accent} emissive={accent} emissiveIntensity={emissiveIntensity} />
+          </mesh>
+          <mesh position={[-0.28, 0.66, 0]}>
+            <octahedronGeometry args={[0.09]} />
+            <meshStandardMaterial color={recipe.palette.primary} emissive={accent} emissiveIntensity={0.22} />
+          </mesh>
+        </group>
+      );
+    case "axe":
+      return (
+        <group scale={[masteryScale, masteryScale, masteryScale]}>
+          <mesh position={[0.47, 0.72, 0]} rotation={[0, 0, -0.72]}>
+            <cylinderGeometry args={[0.026, 0.026, 0.72, 8]} />
+            <meshStandardMaterial color={secondary} roughness={0.58} />
+          </mesh>
+          <mesh position={[0.66, 0.98, 0]} rotation={[0, 0, Math.PI / 2]}>
+            <coneGeometry args={[0.18, 0.26, 5]} />
+            <meshStandardMaterial color={accent} roughness={0.5} metalness={0.18} />
+          </mesh>
+        </group>
+      );
+    case "bow":
+      return (
+        <group position={[0.4, 0.7, 0]} scale={[masteryScale, masteryScale, masteryScale]}>
+          <mesh rotation={[0, 0, -0.1]}>
+            <torusGeometry args={[0.26, 0.014, 8, 26, Math.PI]} />
+            <meshStandardMaterial color={accent} emissive={accent} emissiveIntensity={0.16} />
+          </mesh>
+          <mesh position={[0.03, 0, 0]}>
+            <cylinderGeometry args={[0.01, 0.01, 0.58, 8]} />
+            <meshStandardMaterial color={secondary} roughness={0.7} />
+          </mesh>
+        </group>
+      );
+    case "hammer":
+      return (
+        <group scale={[masteryScale, masteryScale, masteryScale]}>
+          <mesh position={[0.42, 0.65, 0]} rotation={[0, 0, -0.46]}>
+            <cylinderGeometry args={[0.024, 0.024, 0.68, 8]} />
+            <meshStandardMaterial color={secondary} roughness={0.62} />
+          </mesh>
+          <mesh position={[0.56, 0.9, 0]}>
+            <boxGeometry args={[0.32, 0.18, 0.18]} />
+            <meshStandardMaterial color={accent} roughness={0.48} metalness={0.12} />
+          </mesh>
+        </group>
+      );
+  }
 }
 
 function MiniatureBody({

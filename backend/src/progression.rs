@@ -38,6 +38,7 @@ pub struct ProgressionResponse {
     pub heroes: Vec<HeroProgression>,
     pub skill_trees: Vec<HeroSkillTree>,
     pub loadouts: Vec<SavedRuneLoadout>,
+    pub hero_appearances: Vec<HeroAppearanceProgression>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -94,6 +95,11 @@ pub enum MatchUnlockCallout {
         hero_type: HeroType,
         skill_points: usize,
     },
+    HeroAppearanceUnlocked {
+        hero_type: HeroType,
+        appearance_id: &'static str,
+        name: &'static str,
+    },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -146,6 +152,31 @@ pub struct SavedRuneLoadout {
     pub rune_ids: Vec<String>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeroAppearanceProgression {
+    pub hero_type: HeroType,
+    pub selected_appearance_id: String,
+    pub appearances: Vec<HeroAppearanceDefinition>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeroAppearanceDefinition {
+    pub id: &'static str,
+    pub hero_type: HeroType,
+    pub name: &'static str,
+    pub text: &'static str,
+    pub unlock_level: Option<u32>,
+    pub unlocked: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveHeroAppearanceRequest {
+    pub appearance_id: String,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveRuneLoadoutRequest {
@@ -168,6 +199,12 @@ pub enum ProgressionError {
     SkillAlreadyUnlocked(String),
     SkillPrerequisiteMissing(String),
     NotEnoughSkillPoints,
+    UnknownHeroAppearance(String),
+    LockedHeroAppearance(String),
+    MismatchedHeroAppearance {
+        hero_type: HeroType,
+        appearance_id: String,
+    },
 }
 
 impl fmt::Display for ProgressionError {
@@ -194,6 +231,19 @@ impl fmt::Display for ProgressionError {
                 write!(f, "Skill prerequisite is not unlocked: {node_id}")
             }
             Self::NotEnoughSkillPoints => write!(f, "Not enough skill points."),
+            Self::UnknownHeroAppearance(appearance_id) => {
+                write!(f, "Unknown hero appearance: {appearance_id}")
+            }
+            Self::LockedHeroAppearance(appearance_id) => {
+                write!(f, "Hero appearance is not unlocked: {appearance_id}")
+            }
+            Self::MismatchedHeroAppearance {
+                hero_type,
+                appearance_id,
+            } => write!(
+                f,
+                "Hero appearance {appearance_id} does not belong to {hero_type:?}"
+            ),
         }
     }
 }
@@ -210,6 +260,10 @@ impl From<serde_json::Error> for ProgressionError {
     fn from(error: serde_json::Error) -> Self {
         Self::Snapshot(error)
     }
+}
+
+pub fn default_hero_appearance_id(hero_type: HeroType) -> String {
+    base_hero_appearance_id(hero_type).to_string()
 }
 
 impl<'a> ProgressionModule<'a> {
@@ -237,6 +291,7 @@ impl<'a> ProgressionModule<'a> {
             heroes,
             skill_trees: skill_trees(),
             loadouts: self.load_saved_loadouts(user_id)?,
+            hero_appearances: self.load_hero_appearances(user_id)?,
         })
     }
 
@@ -391,6 +446,63 @@ impl<'a> ProgressionModule<'a> {
             params![user_id, hero_type_to_db(hero_type), rune_ids_json],
         )?;
         self.load_for_user(user_id)
+    }
+
+    pub fn save_hero_appearance_selection(
+        &mut self,
+        user_id: i64,
+        hero_type: HeroType,
+        request: SaveHeroAppearanceRequest,
+    ) -> Result<ProgressionResponse, ProgressionError> {
+        let Some(definition) = hero_appearance_definition_any(&request.appearance_id) else {
+            return Err(ProgressionError::UnknownHeroAppearance(
+                request.appearance_id,
+            ));
+        };
+        if definition.hero_type != hero_type {
+            return Err(ProgressionError::MismatchedHeroAppearance {
+                hero_type,
+                appearance_id: request.appearance_id,
+            });
+        }
+
+        let hero_level = self.hero_progression(user_id, hero_type)?.level;
+        if !appearance_unlocked(hero_level, &definition) {
+            return Err(ProgressionError::LockedHeroAppearance(
+                request.appearance_id,
+            ));
+        }
+
+        self.connection.execute(
+            "
+            INSERT INTO hero_appearance_selections (user_id, hero_type, appearance_id, updated_at)
+            VALUES (?1, ?2, ?3, unixepoch())
+            ON CONFLICT(user_id, hero_type) DO UPDATE SET
+                appearance_id = excluded.appearance_id,
+                updated_at = unixepoch()
+            ",
+            params![user_id, hero_type_to_db(hero_type), definition.id],
+        )?;
+        self.load_for_user(user_id)
+    }
+
+    pub fn selected_hero_appearance_id(
+        &self,
+        user_id: i64,
+        hero_type: HeroType,
+    ) -> Result<Option<String>, ProgressionError> {
+        let Some(selected) = self.saved_hero_appearance_id(user_id, hero_type)? else {
+            return Ok(None);
+        };
+        let Some(definition) = hero_appearance_definition(hero_type, &selected) else {
+            return Ok(None);
+        };
+        let hero_level = summary_for_xp(self.hero_xp(user_id, hero_type)?).level;
+        if appearance_unlocked(hero_level, &definition) {
+            Ok(Some(selected))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn match_loadout(
@@ -556,6 +668,56 @@ impl<'a> ProgressionModule<'a> {
         Ok(loadouts)
     }
 
+    fn load_hero_appearances(
+        &self,
+        user_id: i64,
+    ) -> Result<Vec<HeroAppearanceProgression>, ProgressionError> {
+        let mut appearances = Vec::new();
+        for hero_type in hero_types() {
+            let hero_level = self.hero_progression(user_id, hero_type)?.level;
+            let definitions: Vec<_> = appearance_definitions_for_hero(hero_type)
+                .into_iter()
+                .map(|definition| HeroAppearanceDefinition {
+                    unlocked: appearance_unlocked(hero_level, &definition),
+                    ..definition
+                })
+                .collect();
+            let saved = self.saved_hero_appearance_id(user_id, hero_type)?;
+            let selected_appearance_id = saved
+                .filter(|appearance_id| {
+                    definitions
+                        .iter()
+                        .any(|definition| definition.id == appearance_id && definition.unlocked)
+                })
+                .unwrap_or_else(|| base_hero_appearance_id(hero_type).to_string());
+            appearances.push(HeroAppearanceProgression {
+                hero_type,
+                selected_appearance_id,
+                appearances: definitions,
+            });
+        }
+        Ok(appearances)
+    }
+
+    fn saved_hero_appearance_id(
+        &self,
+        user_id: i64,
+        hero_type: HeroType,
+    ) -> Result<Option<String>, ProgressionError> {
+        self.connection
+            .query_row(
+                "
+                SELECT appearance_id
+                FROM hero_appearance_selections
+                WHERE user_id = ?1 AND hero_type = ?2
+                ",
+                params![user_id, hero_type_to_db(hero_type)],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(ProgressionError::from)
+    }
+
     fn saved_rune_ids(
         &self,
         user_id: i64,
@@ -646,6 +808,14 @@ pub fn migrate(connection: &Connection) -> Result<(), ProgressionError> {
             user_id INTEGER NOT NULL,
             hero_type TEXT NOT NULL,
             rune_ids_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (user_id, hero_type),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS hero_appearance_selections (
+            user_id INTEGER NOT NULL,
+            hero_type TEXT NOT NULL,
+            appearance_id TEXT NOT NULL,
             updated_at INTEGER NOT NULL,
             PRIMARY KEY (user_id, hero_type),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -927,6 +1097,19 @@ fn reward_unlocks(
 
     for level in (hero_before.level + 1)..=hero_after.level {
         unlocks.push(MatchUnlockCallout::HeroMasteryLevel { hero_type, level });
+    }
+
+    for appearance in appearance_definitions_for_hero(hero_type) {
+        let Some(unlock_level) = appearance.unlock_level else {
+            continue;
+        };
+        if hero_before.level < unlock_level && hero_after.level >= unlock_level {
+            unlocks.push(MatchUnlockCallout::HeroAppearanceUnlocked {
+                hero_type,
+                appearance_id: appearance.id,
+                name: appearance.name,
+            });
+        }
     }
 
     if hero_after.total_skill_points > hero_before.total_skill_points {

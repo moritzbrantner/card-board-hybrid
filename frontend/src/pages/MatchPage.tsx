@@ -100,7 +100,13 @@ export function MatchPage({
     setBoardAnimation(null);
     setActionRecap(null);
     loadMatch(matchId)
-      .then((response) => setLoadState({ status: "ready", match: response.matchState }))
+      .then((response) =>
+        setLoadState({
+          status: "ready",
+          match: response.matchState,
+          heroAppearances: response.heroAppearances,
+        }),
+      )
       .catch((error: unknown) =>
         setLoadState({
           status: "error",
@@ -120,6 +126,7 @@ export function MatchPage({
     [catalogCards],
   );
   const readyMatch = loadState.status === "ready" ? loadState.match : null;
+  const heroAppearances = loadState.status === "ready" ? loadState.heroAppearances ?? [] : [];
   const playerHasPriorityResponse = useMemo(
     () => (readyMatch ? hasPlayablePriorityResponse(readyMatch, viewerSide) : false),
     [readyMatch, viewerSide],
@@ -189,7 +196,11 @@ export function MatchPage({
     let previousMatch = loadState.status === "ready" ? loadState.match : null;
 
     function acceptMatch(nextMatch: MatchState, event?: ReplayEvent | null) {
-      setLoadState({ status: "ready", match: nextMatch });
+      setLoadState({
+        status: "ready",
+        match: nextMatch,
+        heroAppearances: response.heroAppearances,
+      });
       setBoardAnimation(
         createBoardAnimationCue({
           previous: previousMatch,
@@ -215,7 +226,11 @@ export function MatchPage({
       updateActionRecap(frame.event);
     }
 
-    setLoadState({ status: "ready", match: response.matchState });
+    setLoadState({
+      status: "ready",
+      match: response.matchState,
+      heroAppearances: response.heroAppearances,
+    });
   }
 
   function updateActionRecap(event: ReplayEvent | null | undefined) {
@@ -495,6 +510,7 @@ export function MatchPage({
             selectedCard={selectedCard}
             selectedPiece={selectedPiece}
             focusedCoord={boardCursor.visible ? boardCursor.coord : null}
+            heroAppearances={heroAppearances}
             disabled={busy || match.phase === "matchOver"}
             onTileClick={handleTileClick}
             onTileDrop={handleCardDrop}

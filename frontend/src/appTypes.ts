@@ -14,11 +14,12 @@ import type {
   SystemDeckListResponse,
   Unit,
   Hero,
+  HeroAppearanceAssignment,
 } from "./types";
 
 export type LoadState =
   | { status: "loading" }
-  | { status: "ready"; match: MatchState }
+  | { status: "ready"; match: MatchState; heroAppearances?: HeroAppearanceAssignment[] }
   | { status: "error"; message: string };
 
 export type CatalogLoadState =

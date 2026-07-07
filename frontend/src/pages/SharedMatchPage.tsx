@@ -804,6 +804,7 @@ export function SharedMatchPage({
             selectedCard={selectedCard}
             selectedPiece={selectedPiece}
             focusedCoord={boardCursor.visible ? boardCursor.coord : null}
+            heroAppearances={shared.heroAppearances}
             disabled={busy || match.phase === "matchOver" || !canAct}
             onTileClick={handleTileClick}
             onTileDrop={handleCardDrop}

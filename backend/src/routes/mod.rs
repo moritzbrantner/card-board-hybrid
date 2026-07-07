@@ -11,10 +11,13 @@ use crate::loadout_resolution::*;
 use crate::match_access::{Actor, MatchAccess};
 use crate::match_commands::MatchCommands;
 use crate::match_session::{HeroType, MatchActionRequest, MatchMode, ReplayVisibility, Side};
-use crate::match_store::{SharedMatchFormat, SharedMatchStatus, SqliteMatchStore};
+use crate::match_store::{
+    SharedMatchFormat, SharedMatchStatus, SqliteMatchStore, StoredMatch, StoredSharedMatch,
+};
 use crate::preferences::{PreferencesModule, UpdatePreferencesRequest};
 use crate::progression::{
-    ProgressionError, ProgressionModule, ProgressionResponse, SaveRuneLoadoutRequest,
+    ProgressionError, ProgressionModule, ProgressionResponse, SaveHeroAppearanceRequest,
+    SaveRuneLoadoutRequest, default_hero_appearance_id,
 };
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -73,6 +76,10 @@ pub fn create_app(store: SqliteMatchStore) -> Router {
         .route(
             "/api/progression/heroes/{hero_type}/loadout",
             patch(save_progression_loadout),
+        )
+        .route(
+            "/api/progression/heroes/{hero_type}/appearance",
+            post(save_progression_appearance),
         )
         .route("/api/matches", get(list_matches).post(create_match))
         .route("/api/matches/{match_id}", get(load_match))
@@ -607,6 +614,17 @@ async fn save_progression_loadout(
     })
 }
 
+async fn save_progression_appearance(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(hero_type): Path<HeroType>,
+    Json(request): Json<SaveHeroAppearanceRequest>,
+) -> impl IntoResponse {
+    mutate_progression(&state, &headers, |progression, user_id| {
+        progression.save_hero_appearance_selection(user_id, hero_type, request)
+    })
+}
+
 fn mutate_progression(
     state: &SharedState,
     headers: &HeaderMap,
@@ -713,7 +731,7 @@ async fn create_match(
         }
     };
 
-    let created = {
+    let response = {
         let mut store = state
             .store
             .lock()
@@ -746,12 +764,19 @@ async fn create_match(
             profile.as_ref().map(|profile| profile.id),
         );
         match result {
-            Ok(created) => created,
+            Ok(created) => match match_response_with_appearances(
+                &mut store,
+                created,
+                profile.as_ref().map(|profile| profile.id),
+            ) {
+                Ok(response) => response,
+                Err(error) => return progression_error_response(error),
+            },
             Err(error) => return store_error_response(error),
         }
     };
 
-    Json(MatchResponse::from(created)).into_response()
+    Json(response).into_response()
 }
 
 #[cfg(debug_assertions)]
@@ -780,18 +805,21 @@ async fn create_match_scenario(
             .into_response();
     };
 
-    let created = {
+    let response = {
         let mut store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
         match store.create_scenario_match(&scenario_id, match_state) {
-            Ok(created) => created,
+            Ok(created) => match match_response_with_appearances(&mut store, created, None) {
+                Ok(response) => response,
+                Err(error) => return progression_error_response(error),
+            },
             Err(error) => return store_error_response(error),
         }
     };
 
-    Json(MatchResponse::from(created)).into_response()
+    Json(response).into_response()
 }
 
 async fn create_shared_match(
@@ -840,7 +868,18 @@ async fn load_shared_match(
         }
     };
 
-    Json(SharedMatchResponse::from(shared)).into_response()
+    let response = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        match shared_match_response_with_appearances(&mut store, shared) {
+            Ok(response) => response,
+            Err(error) => return progression_error_response(error),
+        }
+    };
+
+    Json(response).into_response()
 }
 
 async fn join_shared_match(
@@ -886,7 +925,18 @@ async fn join_shared_match(
     };
     state.notify_match(&match_id);
 
-    Json(SharedMatchResponse::from(shared)).into_response()
+    let response = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        match shared_match_response_with_appearances(&mut store, shared) {
+            Ok(response) => response,
+            Err(error) => return progression_error_response(error),
+        }
+    };
+
+    Json(response).into_response()
 }
 
 async fn shared_match_ws(
@@ -1076,9 +1126,10 @@ fn apply_shared_socket_action(
         .store
         .lock()
         .expect("store lock should not be poisoned");
-    MatchCommands::new(&mut store)
+    let applied = MatchCommands::new(&mut store)
         .apply_shared_seat_action(match_id, seat_token, action)
-        .map(|applied| SharedMatchResponse::from(applied.shared_match))
+        .map_err(|error| error.to_string())?;
+    shared_match_response_with_appearances(&mut store, applied.shared_match)
         .map_err(|error| error.to_string())
 }
 
@@ -1091,9 +1142,10 @@ fn claim_shared_forfeit(
         .store
         .lock()
         .expect("store lock should not be poisoned");
-    MatchCommands::new(&mut store)
+    let applied = MatchCommands::new(&mut store)
         .claim_shared_forfeit(match_id, seat_token, unix_timestamp())
-        .map(|applied| SharedMatchResponse::from(applied.shared_match))
+        .map_err(|error| error.to_string())?;
+    shared_match_response_with_appearances(&mut store, applied.shared_match)
         .map_err(|error| error.to_string())
 }
 
@@ -1103,17 +1155,17 @@ fn shared_snapshot_message(
     seat_token: &str,
     presence: bool,
 ) -> Option<SharedServerMessage> {
-    let shared = {
-        let store = state
+    let payload = {
+        let mut store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        store
+        let shared = store
             .load_shared_match_for_seat(match_id, seat_token)
             .ok()
-            .flatten()
-    }?;
-    let payload = SharedMatchResponse::from(shared);
+            .flatten()?;
+        shared_match_response_with_appearances(&mut store, shared).ok()?
+    };
     if presence {
         Some(SharedServerMessage::PresenceChanged { payload })
     } else {
@@ -1138,6 +1190,118 @@ fn unix_timestamp() -> i64 {
         .unwrap_or(0)
 }
 
+fn match_response_with_appearances(
+    store: &mut SqliteMatchStore,
+    stored: StoredMatch,
+    owner_user_id: Option<i64>,
+) -> Result<MatchResponse, ProgressionError> {
+    let hero_appearances = solo_hero_appearance_assignments(store, &stored, owner_user_id)?;
+    let mut response = MatchResponse::from(stored);
+    response.hero_appearances = hero_appearances;
+    Ok(response)
+}
+
+fn match_response_with_replay_frames_and_appearances(
+    store: &mut SqliteMatchStore,
+    stored: StoredMatch,
+    owner_user_id: Option<i64>,
+    replay_frames: Vec<crate::match_session::RecordedReplayFrame>,
+) -> Result<MatchResponse, ProgressionError> {
+    let hero_appearances = solo_hero_appearance_assignments(store, &stored, owner_user_id)?;
+    let mut response = MatchResponse::from_stored_with_replay_frames(stored, replay_frames);
+    response.hero_appearances = hero_appearances;
+    Ok(response)
+}
+
+fn shared_match_response_with_appearances(
+    store: &mut SqliteMatchStore,
+    shared: StoredSharedMatch,
+) -> Result<SharedMatchResponse, ProgressionError> {
+    let hero_appearances = shared_hero_appearance_assignments(store, &shared)?;
+    let mut response = SharedMatchResponse::from(shared);
+    response.hero_appearances = hero_appearances;
+    Ok(response)
+}
+
+fn solo_hero_appearance_assignments(
+    store: &mut SqliteMatchStore,
+    stored: &StoredMatch,
+    owner_user_id: Option<i64>,
+) -> Result<Vec<HeroAppearanceAssignment>, ProgressionError> {
+    let mut assignments = Vec::new();
+    let participants = [
+        Some((&stored.state.player, owner_user_id)),
+        Some((&stored.state.opponent, None)),
+        stored
+            .state
+            .player_two
+            .as_ref()
+            .map(|participant| (participant, None)),
+        stored
+            .state
+            .opponent_two
+            .as_ref()
+            .map(|participant| (participant, None)),
+    ];
+    let progression = ProgressionModule::new(store.connection_mut());
+    for (participant, user_id) in participants.into_iter().flatten() {
+        let (appearance_id, source) = selected_appearance_for_user(
+            &progression,
+            user_id,
+            participant.hero.hero_type,
+        )?;
+        assignments.push(HeroAppearanceAssignment {
+            side: participant.side,
+            hero_type: participant.hero.hero_type,
+            appearance_id,
+            source,
+        });
+    }
+    Ok(assignments)
+}
+
+fn shared_hero_appearance_assignments(
+    store: &mut SqliteMatchStore,
+    shared: &StoredSharedMatch,
+) -> Result<Vec<HeroAppearanceAssignment>, ProgressionError> {
+    let progression = ProgressionModule::new(store.connection_mut());
+    let mut assignments = Vec::new();
+    for seat in &shared.seats {
+        let Some(hero_type) = seat.hero_type else {
+            continue;
+        };
+        let (appearance_id, source) =
+            selected_appearance_for_user(&progression, seat.participant_user_id, hero_type)?;
+        assignments.push(HeroAppearanceAssignment {
+            side: seat.side,
+            hero_type,
+            appearance_id,
+            source,
+        });
+    }
+    Ok(assignments)
+}
+
+fn selected_appearance_for_user(
+    progression: &ProgressionModule<'_>,
+    user_id: Option<i64>,
+    hero_type: HeroType,
+) -> Result<(String, HeroAppearanceAssignmentSource), ProgressionError> {
+    let Some(user_id) = user_id else {
+        return Ok((
+            default_hero_appearance_id(hero_type),
+            HeroAppearanceAssignmentSource::Base,
+        ));
+    };
+    match progression.selected_hero_appearance_id(user_id, hero_type)? {
+        Some(appearance_id) => Ok((appearance_id, HeroAppearanceAssignmentSource::OwnerSelection)),
+        None => Ok((
+            default_hero_appearance_id(hero_type),
+            HeroAppearanceAssignmentSource::Base,
+        )),
+    }
+}
+
 async fn load_match(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -1147,8 +1311,8 @@ async fn load_match(
         Ok(profile) => profile,
         Err(response) => return response,
     };
-    let loaded = {
-        let store = state
+    let response = {
+        let mut store = state
             .store
             .lock()
             .expect("store lock should not be poisoned");
@@ -1163,10 +1327,17 @@ async fn load_match(
         if !MatchAccess::new(&store).can_load_match(&actor, &match_id) {
             return match_not_found_response(&match_id);
         }
-        loaded
+        match match_response_with_appearances(
+            &mut store,
+            loaded,
+            profile.as_ref().map(|profile| profile.id),
+        ) {
+            Ok(response) => response,
+            Err(error) => return progression_error_response(error),
+        }
     };
 
-    Json(MatchResponse::from(loaded)).into_response()
+    Json(response).into_response()
 }
 
 async fn load_replay(
@@ -1413,11 +1584,23 @@ async fn apply_match_action(
         }
     };
 
-    Json(MatchResponse::from_stored_with_replay_frames(
-        applied.stored_match,
-        applied.replay_frames,
-    ))
-    .into_response()
+    let response = {
+        let mut store = state
+            .store
+            .lock()
+            .expect("store lock should not be poisoned");
+        match match_response_with_replay_frames_and_appearances(
+            &mut store,
+            applied.stored_match,
+            profile.as_ref().map(|profile| profile.id),
+            applied.replay_frames,
+        ) {
+            Ok(response) => response,
+            Err(error) => return progression_error_response(error),
+        }
+    };
+
+    Json(response).into_response()
 }
 
 fn generated_avatar_is_valid(avatar: &GeneratedAvatarRequest) -> bool {
