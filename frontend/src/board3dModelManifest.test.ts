@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOARD_HERO_APPEARANCE_MODEL_ASSETS,
   resolveBoardPieceVisual,
   type BoardPieceVisualManifest,
   type ProceduralMiniatureRecipe,
@@ -72,8 +73,32 @@ describe("3D board model manifest", () => {
     expect(selected.procedural.heroAppearance?.motif).toBe("flame");
 
     const mismatched = resolveBoardPieceVisual(makeHero("pyromancer"), heroVisual("pyromancer"), "warden-ironroot");
-    expect(mismatched.source).toBe("procedural");
+    expect(mismatched.source).toBe("model");
+    if (mismatched.source !== "model") {
+      throw new Error("Expected mismatched pyromancer appearance to fall back to a model-backed base appearance");
+    }
+    expect(mismatched.modelAsset).toBe(BOARD_HERO_APPEARANCE_MODEL_ASSETS["pyromancer-base"]);
     expect(mismatched.procedural.heroAppearance?.id).toBe("pyromancer-base");
+  });
+
+  it("resolves pilot base Hero appearances to generated Board model assets", () => {
+    for (const heroType of ["runekeeper", "pyromancer", "warden"] as const) {
+      const resolved = resolveBoardPieceVisual(makeHero(heroType), heroVisual(heroType), `${heroType}-base`);
+
+      expect(resolved.source).toBe("model");
+      if (resolved.source !== "model") {
+        throw new Error(`Expected ${heroType} to resolve to a model-backed base appearance`);
+      }
+      expect(resolved.modelAsset).toBe(BOARD_HERO_APPEARANCE_MODEL_ASSETS[`${heroType}-base`]);
+      expect(resolved.procedural.heroAppearance?.id).toBe(`${heroType}-base`);
+    }
+  });
+
+  it("keeps non-pilot Hero appearances procedural", () => {
+    const resolved = resolveBoardPieceVisual(makeHero("battlemage"), heroVisual("battlemage"), "battlemage-base");
+
+    expect(resolved.source).toBe("procedural");
+    expect(resolved.procedural.heroAppearance?.id).toBe("battlemage-base");
   });
 });
 

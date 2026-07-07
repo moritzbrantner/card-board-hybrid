@@ -286,6 +286,24 @@ export const BOARD_HERO_APPEARANCE_RECIPES: Record<string, ProceduralMiniatureRe
   "builder-runeforge": heroAppearance("builder", "builder-runeforge", "hammer", "mastery", "#c49b54", "#2f3b3f", "#9ee8d4"),
 };
 
+export const BOARD_HERO_APPEARANCE_MODEL_ASSETS: Partial<Record<HeroAppearanceId, BoardModelAssetEntry>> = {
+  "runekeeper-base": {
+    kind: "gltf",
+    path: "/models/heroes/runekeeper.glb",
+    scale: 1.05,
+  },
+  "pyromancer-base": {
+    kind: "gltf",
+    path: "/models/heroes/pyromancer.glb",
+    scale: 1.05,
+  },
+  "warden-base": {
+    kind: "gltf",
+    path: "/models/heroes/warden.glb",
+    scale: 1.08,
+  },
+};
+
 function resolveHeroVisualEntry(
   heroType: HeroType,
   appearanceId: HeroAppearanceId | null | undefined,
@@ -293,12 +311,19 @@ function resolveHeroVisualEntry(
 ): BoardPieceVisualEntry | undefined {
   const requested = appearanceId ? BOARD_HERO_APPEARANCE_RECIPES[appearanceId] : null;
   if (requested?.heroAppearance?.heroType === heroType) {
-    return { procedural: requested };
+    return {
+      modelAsset: BOARD_HERO_APPEARANCE_MODEL_ASSETS[appearanceId ?? ""],
+      procedural: requested,
+    };
   }
 
-  const base = BOARD_HERO_APPEARANCE_RECIPES[`${heroType}-base`];
+  const baseAppearanceId = `${heroType}-base`;
+  const base = BOARD_HERO_APPEARANCE_RECIPES[baseAppearanceId];
   if (base) {
-    return { procedural: base };
+    return {
+      modelAsset: BOARD_HERO_APPEARANCE_MODEL_ASSETS[baseAppearanceId],
+      procedural: base,
+    };
   }
 
   return manifest.heroes[heroType];

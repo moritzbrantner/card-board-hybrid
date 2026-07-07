@@ -1,0 +1,39 @@
+{
+  "heroes": [
+    {
+      "id": "runekeeper",
+      "name": "Runekeeper",
+      "appearanceId": "runekeeper-base",
+      "reference": "references/runekeeper.png",
+      "rawDir": "runekeeper",
+      "asset": "../../frontend/public/models/heroes/runekeeper.glb",
+      "targetHeight": 1.05,
+      "rotationZDegrees": 0
+    },
+    {
+      "id": "pyromancer",
+      "name": "Pyromancer",
+      "appearanceId": "pyromancer-base",
+      "reference": "references/pyromancer.png",
+      "rawDir": "pyromancer",
+      "asset": "../../frontend/public/models/heroes/pyromancer.glb",
+      "targetHeight": 1.05,
+      "rotationZDegrees": 0
+    },
+    {
+      "id": "warden",
+      "name": "Warden",
+      "appearanceId": "warden-base",
+      "reference": "references/warden.png",
+      "rawDir": "warden",
+      "asset": "../../frontend/public/models/heroes/warden.glb",
+      "targetHeight": 1.08,
+      "rotationZDegrees": 0
+    }
+  ],
+  "budgets": {
+    "maxTriangles": 15000,
+    "maxTextureSize": 512,
+    "maxGlbBytes": 2097152
+  }
+}
