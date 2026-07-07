@@ -322,7 +322,7 @@ function ProgressionPanel({
   const tree = progression.skillTrees.find((candidate) => candidate.heroType === selectedHero);
   const loadout =
     progression.loadouts.find((candidate) => candidate.heroType === selectedHero)?.runeIds ?? [];
-  const appearanceProgression = progression.heroAppearances.find(
+  const appearanceProgression = progression.heroAppearances?.find(
     (candidate) => candidate.heroType === selectedHero,
   );
   const selectedHeroOption = HERO_OPTIONS.find((option) => option.id === selectedHero);
