@@ -9,6 +9,9 @@ TRIPOSR_DIR="$WORK_DIR/vendor/TripoSR"
 VENV_DIR="$WORK_DIR/.venv"
 RAW_DIR="$WORK_DIR/raw"
 TEXTURE_RESOLUTION="${TEXTURE_RESOLUTION:-512}"
+BAKE_TEXTURE="${BAKE_TEXTURE:-1}"
+MODEL_SAVE_FORMAT="${MODEL_SAVE_FORMAT:-obj}"
+NO_REMOVE_BG="${NO_REMOVE_BG:-0}"
 
 if [[ ! -f "$VENV_DIR/bin/activate" || ! -f "$TRIPOSR_DIR/run.py" ]]; then
   echo "TripoSR is not set up. Run: tools/hero-model-pipeline/setup_triposr.sh" >&2
@@ -68,12 +71,21 @@ PY
 
   rm -rf "$output_dir"
   mkdir -p "$output_dir"
+  mkdir -p "$output_dir/0"
   echo "Running TripoSR for $hero_id -> $output_dir"
+  triposr_args=(
+    "$reference"
+    --output-dir "$output_dir"
+    --model-save-format "$MODEL_SAVE_FORMAT"
+  )
+  if [[ "$BAKE_TEXTURE" == "1" ]]; then
+    triposr_args+=(--bake-texture --texture-resolution "$TEXTURE_RESOLUTION")
+  fi
+  if [[ "$NO_REMOVE_BG" == "1" ]]; then
+    triposr_args+=(--no-remove-bg)
+  fi
   (
     cd "$TRIPOSR_DIR"
-    python run.py "$reference" \
-      --output-dir "$output_dir" \
-      --bake-texture \
-      --texture-resolution "$TEXTURE_RESOLUTION"
+    python run.py "${triposr_args[@]}"
   )
 done

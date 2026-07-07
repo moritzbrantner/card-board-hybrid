@@ -28,6 +28,12 @@ The checked-in GLBs are runtime assets for the app. If TripoSR has not been run 
 tools/hero-model-pipeline/setup_triposr.sh
 ```
 
+By default this installs the command-line TripoSR dependencies and skips Gradio, because this pipeline uses `run.py` rather than the TripoSR demo app. Install the optional demo UI dependencies with:
+
+```bash
+INSTALL_GRADIO=1 tools/hero-model-pipeline/setup_triposr.sh
+```
+
 If Python auto-detection fails, provide a supported interpreter:
 
 ```bash
@@ -60,6 +66,18 @@ If the 8GB GPU runs out of memory, close browser/dev servers and retry one hero.
 
 ```bash
 TEXTURE_RESOLUTION=256 tools/hero-model-pipeline/run_triposr.sh runekeeper
+```
+
+If TripoSR texture baking fails, export an unbaked GLB raw mesh and let Blender produce the final app GLB:
+
+```bash
+BAKE_TEXTURE=0 MODEL_SAVE_FORMAT=glb tools/hero-model-pipeline/run_triposr.sh runekeeper
+```
+
+For clean reference images that already have a simple background, skip TripoSR's background-removal step:
+
+```bash
+NO_REMOVE_BG=1 BAKE_TEXTURE=0 MODEL_SAVE_FORMAT=glb tools/hero-model-pipeline/run_triposr.sh runekeeper
 ```
 
 ## Post-Process
