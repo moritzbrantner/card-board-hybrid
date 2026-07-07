@@ -1934,10 +1934,10 @@ h1 {
   place-items: center;
   width: 56px;
   min-height: 48px;
-  border: 1px solid rgba(247, 243, 234, 0.18);
+  border: 1px solid transparent;
   border-radius: 8px;
   color: #fffaf0;
-  background: rgba(10, 13, 13, 0.18);
+  background: transparent;
   cursor: pointer;
   pointer-events: auto;
   transform: translate(-50%, -50%);
@@ -2012,7 +2012,7 @@ h1 {
 
 .board-3d-hit-target:not(:disabled):hover,
 .board-3d-hit-target:focus-visible {
-  border-color: var(--teal);
+  border-color: transparent;
   outline: none;
 }
 
