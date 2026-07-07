@@ -19,14 +19,8 @@ import type {
 import { Board3DRenderer } from "../../Board3D";
 import type { BoardAnimationCue, PieceAnimation } from "../../boardAnimations";
 import { buildBoardSurface } from "../../boardSurface";
+import { useBoardRendererDegradation } from "../../boardRendererDegradation";
 import { TargetingIndicatorLayer, useDomTargetingProjection } from "../../targetingOverlay";
-import {
-  boardRendererFallbackMessage,
-  canCreateWebGLContext,
-  isBoardRendererInteractive,
-  selectBoardRenderer,
-  type BoardRendererFallbackReason,
-} from "../../boardRenderer";
 import { createMatchVisualCatalog, type CardVisualIdentity, type MatchVisualCatalog, type UnitVisualIdentity, type HeroVisualIdentity } from "../../matchVisualIdentity";
 import type { BoardPiece, BoardUnit, UnitContextMenu } from "../../appTypes";
 import type {
@@ -428,23 +422,14 @@ export function Board({
   onFocusedUnitChange?: (pieceId: string | null) => void;
   tutorialHighlights?: BoardTutorialHighlight[];
 }) {
-  const [webglFailed, setWebglFailed] = useState(
-    () => boardVisualMode === "3d" && !canCreateWebGLContext(),
-  );
-  const [rendererFallbackReason, setRendererFallbackReason] =
-    useState<BoardRendererFallbackReason | null>(() =>
-      boardVisualMode === "3d" && !canCreateWebGLContext() ? "webgl-unavailable" : null,
-    );
-  const [assetFailureCount, setAssetFailureCount] = useState(0);
   const [hoveredCoord, setHoveredCoord] = useState<HexCoord | null>(null);
   const [activeStackItemId, setActiveStackItemId] = useState<string | null>(null);
   const boardFieldRef = useRef<HTMLDivElement | null>(null);
-  const renderer = selectBoardRenderer({
+  const rendererPolicy = useBoardRendererDegradation({
     requestedMode: boardVisualMode,
-    webglFailed,
     readOnly,
+    disabled,
   });
-  const isInteractive = isBoardRendererInteractive({ renderer, readOnly, disabled });
   const [visibleAnimation, setVisibleAnimation] = useState<BoardAnimationCue | null>(animation ?? null);
   const boardCoords = useMemo(() => match.board.tiles.map((tile) => tile.coord), [match.board.tiles]);
   const { positionsByCoordKey: tilePositions, registerTargetElement } =
@@ -458,7 +443,7 @@ export function Board({
         selectedPiece,
         focusedCoord: focusedCoord ?? null,
         hoveredCoord,
-        isInteractive,
+        isInteractive: rendererPolicy.isInteractive,
         tutorialHighlights,
         animation: visibleAnimation,
         activeStackItemId,
@@ -467,8 +452,8 @@ export function Board({
       activeStackItemId,
       focusedCoord,
       hoveredCoord,
-      isInteractive,
       match,
+      rendererPolicy.isInteractive,
       selectedCard,
       selectedPiece,
       tutorialHighlights,
@@ -476,24 +461,6 @@ export function Board({
       visibleAnimation,
     ],
   );
-
-  useEffect(() => {
-    if (boardVisualMode === "2d") {
-      setWebglFailed(false);
-      setRendererFallbackReason(null);
-      setAssetFailureCount(0);
-      return;
-    }
-
-    if (!canCreateWebGLContext()) {
-      setWebglFailed(true);
-      setRendererFallbackReason("webgl-unavailable");
-      return;
-    }
-
-    setWebglFailed(false);
-    setRendererFallbackReason(null);
-  }, [boardVisualMode]);
 
   useEffect(() => {
     setVisibleAnimation(animation ?? null);
@@ -521,16 +488,16 @@ export function Board({
     setHoveredCoord(null);
   }, [selectedCard?.id, selectedPiece?.id]);
 
-  if (renderer === "3d") {
+  if (rendererPolicy.renderer === "3d") {
     return (
       <section
         className={`board board-visual-mode-${boardVisualMode} ${readOnly ? "read-only" : ""}`}
         data-board-visual-mode={boardVisualMode}
         data-board-renderer="3d"
-        data-board-asset-failures={assetFailureCount}
+        data-board-asset-failures={rendererPolicy.assetFailureCount}
         aria-label="Hex board"
       >
-        {assetFailureCount > 0 ? (
+        {rendererPolicy.assetFailureCount > 0 ? (
           <div className="board-renderer-notice" role="status">
             Some 3D models are unavailable, so procedural miniatures are shown.
           </div>
@@ -561,11 +528,8 @@ export function Board({
             onUnitContextMenu(piece, { x: event.clientX, y: event.clientY });
           }}
           onTileHoverChange={setHoveredCoord}
-          onFatalRenderError={() => {
-            setWebglFailed(true);
-            setRendererFallbackReason("render-failed");
-          }}
-          onAssetFailure={() => setAssetFailureCount((count) => count + 1)}
+          onFatalRenderError={rendererPolicy.reportFatalRenderError}
+          onAssetFailure={rendererPolicy.reportAssetFailure}
         />
       </section>
     );
@@ -578,9 +542,9 @@ export function Board({
       data-board-renderer="2d"
       aria-label="Hex board"
     >
-      {rendererFallbackReason ? (
+      {rendererPolicy.fallbackMessage ? (
         <div className="board-renderer-notice" role="status">
-          {boardRendererFallbackMessage(rendererFallbackReason)}
+          {rendererPolicy.fallbackMessage}
         </div>
       ) : null}
       <TargetingStackOverlay
