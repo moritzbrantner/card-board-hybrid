@@ -118,15 +118,30 @@ button {
 }
 
 .match-app-shell {
+  --match-overlay-inset: 18px;
+  --match-chrome-top: 16px;
+  --match-chrome-safe-top: 132px;
+  --match-top-stack-gap: 10px;
+  --match-action-top: var(--match-chrome-safe-top);
+  --match-checklist-top: var(--match-chrome-safe-top);
+  --match-ux-top: calc(var(--match-chrome-safe-top) + 52px);
+  --match-hud-top: calc(var(--match-chrome-safe-top) + 112px);
+  --match-hand-bottom: 22px;
+  --match-player-bottom: 18px;
+  --match-hand-safe-height: 288px;
+
   min-height: 100svh;
   overflow-x: hidden;
   padding: 0;
 }
 
 .match-table {
+  position: relative;
   width: 100%;
+  height: 100svh;
   min-height: 100svh;
   margin: 0;
+  overflow: hidden;
 }
 
 .catalog-layout {
@@ -1259,9 +1274,9 @@ button {
 
 .match-chrome {
   position: fixed;
-  top: 16px;
-  left: 16px;
-  right: 16px;
+  top: var(--match-chrome-top);
+  left: var(--match-overlay-inset);
+  right: var(--match-overlay-inset);
   z-index: 18;
   margin: 0;
   border: 1px solid rgba(247, 243, 234, 0.16);
@@ -1280,10 +1295,15 @@ button {
   display: none;
 }
 
+.match-chrome-minimized {
+  --match-chrome-safe-top: 72px;
+  --match-hud-top: 128px;
+}
+
 .match-chrome-restore {
   position: fixed;
-  top: 16px;
-  left: 16px;
+  top: var(--match-chrome-top);
+  left: var(--match-overlay-inset);
   z-index: 18;
   display: none;
   background: rgba(21, 24, 23, 0.88);
@@ -1296,8 +1316,8 @@ button {
 
 .match-action-dock {
   position: fixed;
-  top: 116px;
-  right: 18px;
+  top: var(--match-action-top);
+  right: var(--match-overlay-inset);
   z-index: 17;
   display: flex;
   flex-wrap: wrap;
@@ -1308,13 +1328,13 @@ button {
 }
 
 .match-chrome-minimized .match-action-dock {
-  top: 16px;
+  top: var(--match-chrome-top);
 }
 
 .match-ux-dock {
   position: fixed;
-  top: 166px;
-  left: 18px;
+  top: var(--match-ux-top);
+  left: var(--match-overlay-inset);
   z-index: 16;
   display: grid;
   gap: 10px;
@@ -1323,7 +1343,7 @@ button {
 }
 
 .match-chrome-minimized .match-ux-dock {
-  top: 72px;
+  top: calc(var(--match-chrome-top) + 56px);
 }
 
 .match-ux-panel,
@@ -1445,8 +1465,8 @@ button {
 
 .turn-checklist {
   position: fixed;
-  top: 116px;
-  left: 18px;
+  top: var(--match-checklist-top);
+  left: var(--match-overlay-inset);
   z-index: 17;
   display: flex;
   flex-wrap: wrap;
@@ -1459,7 +1479,7 @@ button {
 }
 
 .match-chrome-minimized .turn-checklist {
-  top: 16px;
+  top: var(--match-chrome-top);
   left: 72px;
 }
 
@@ -1643,7 +1663,10 @@ h1 {
 }
 
 .match-table .battlefield {
+  width: 100vw;
+  height: 100svh;
   min-height: 100svh;
+  overflow: hidden;
 }
 
 .battlefield-hud {
@@ -1655,22 +1678,22 @@ h1 {
 .battlefield-hud-player {
   position: fixed;
   z-index: 13;
-  bottom: 18px;
-  left: 24px;
+  bottom: var(--match-player-bottom);
+  left: var(--match-overlay-inset);
 }
 
 .battlefield-hud-opponent {
-  top: 18px;
-  right: 18px;
+  top: var(--match-hud-top);
+  right: var(--match-overlay-inset);
 }
 
 .battlefield-hud-hand {
-  top: 18px;
-  left: 18px;
+  top: var(--match-hud-top);
+  left: var(--match-overlay-inset);
 }
 
 .battlefield-hud-phase {
-  top: 18px;
+  top: var(--match-hud-top);
   left: 50%;
   transform: translateX(-50%);
 }
@@ -1754,10 +1777,11 @@ h1 {
 
 .match-table .board {
   width: 100vw;
+  height: 100svh;
   min-height: 100svh;
   border: 0;
   border-radius: 0;
-  padding: 124px 30px 144px;
+  padding: 0;
 }
 
 .match-table .board-visual-mode-3d {
@@ -1768,19 +1792,28 @@ h1 {
 
 .match-table .board-3d-shell,
 .match-table .board-3d-fallback {
-  width: 100%;
+  width: 100vw;
   min-width: 0;
-  height: 100%;
-  min-height: calc(100svh - 268px);
+  height: 100svh;
+  min-height: 100svh;
+  border: 0;
+  border-radius: 0;
+}
+
+.match-table .board-visual-mode-2d {
+  align-items: start;
+  justify-items: start;
+  overflow: auto;
+  padding: var(--match-hud-top) 30px var(--match-hand-safe-height);
 }
 
 .hand-overlay {
   position: fixed;
-  bottom: 22px;
-  right: 24px;
+  bottom: var(--match-hand-bottom);
+  right: var(--match-overlay-inset);
   z-index: 12;
   display: flex;
-  width: min(940px, calc(100vw - 48px));
+  width: min(832px, calc(100vw - 48px));
   justify-content: flex-end;
   pointer-events: none;
 }
@@ -3995,13 +4028,17 @@ h1 {
   gap: 14px;
 }
 
+.replay-shell {
+  --match-player-bottom: 136px;
+}
+
 .replay-table .top-bar,
 .replay-table .score-row {
   margin-bottom: 0;
 }
 
 .replay-table .replay-battlefield .board {
-  padding-bottom: 168px;
+  padding-bottom: 0;
 }
 
 .replay-inspector {
@@ -5163,7 +5200,24 @@ h1 {
   }
 
   .match-app-shell {
+    --match-overlay-inset: 14px;
+    --match-chrome-top: 10px;
+    --match-chrome-safe-top: 204px;
+    --match-action-top: var(--match-chrome-safe-top);
+    --match-checklist-top: calc(var(--match-action-top) + 50px);
+    --match-ux-top: calc(var(--match-checklist-top) + 54px);
+    --match-hud-top: calc(var(--match-checklist-top) + 108px);
+    --match-hand-bottom: 14px;
+    --match-player-bottom: calc(var(--match-hand-bottom) + var(--match-hand-safe-height) + 12px);
+    --match-hand-safe-height: 278px;
     padding: 0;
+  }
+
+  .match-app-shell.match-chrome-minimized {
+    --match-action-top: 14px;
+    --match-checklist-top: 64px;
+    --match-ux-top: 116px;
+    --match-hud-top: 178px;
   }
 
   .top-bar,
@@ -5252,31 +5306,31 @@ h1 {
   }
 
   .match-action-dock {
-    top: 184px;
-    right: 14px;
+    top: var(--match-action-top);
+    right: var(--match-overlay-inset);
     max-width: calc(100vw - 28px);
   }
 
   .match-chrome-minimized .match-action-dock {
-    top: 14px;
+    top: var(--match-overlay-inset);
   }
 
   .turn-checklist {
-    top: 236px;
-    right: 14px;
-    left: 14px;
+    top: var(--match-checklist-top);
+    right: var(--match-overlay-inset);
+    left: var(--match-overlay-inset);
     max-width: calc(100vw - 28px);
   }
 
   .match-chrome-minimized .turn-checklist {
     top: 64px;
-    left: 14px;
+    left: var(--match-overlay-inset);
   }
 
   .match-ux-dock {
-    top: 292px;
-    right: 14px;
-    left: 14px;
+    top: var(--match-ux-top);
+    right: var(--match-overlay-inset);
+    left: var(--match-overlay-inset);
     width: auto;
   }
 
@@ -5346,32 +5400,34 @@ h1 {
 
   .board {
     justify-items: start;
-    padding: 248px 18px 138px;
+    padding: 0;
   }
 
   .board-3d-shell,
   .board-3d-fallback {
-    min-width: 680px;
-    height: 540px;
+    width: 100vw;
+    min-width: 0;
+    height: 100svh;
+    min-height: 100svh;
   }
 
   .battlefield-hud-player {
-    bottom: 310px;
-    left: 14px;
+    bottom: var(--match-player-bottom);
+    left: var(--match-overlay-inset);
   }
 
   .battlefield-hud-opponent {
-    top: 14px;
-    right: 14px;
+    top: var(--match-hud-top);
+    right: var(--match-overlay-inset);
   }
 
   .battlefield-hud-hand {
-    top: 14px;
-    left: 14px;
+    top: var(--match-hud-top);
+    left: var(--match-overlay-inset);
   }
 
   .battlefield-hud-phase {
-    top: 136px;
+    top: var(--match-hud-top);
   }
 
   .targeting-stack-overlay {
@@ -5405,8 +5461,8 @@ h1 {
   }
 
   .hand-overlay {
-    bottom: 14px;
-    right: 14px;
+    bottom: var(--match-hand-bottom);
+    right: var(--match-overlay-inset);
     width: calc(100vw - 28px);
   }
 
@@ -5470,6 +5526,23 @@ h1 {
 }
 
 @media (max-width: 520px) {
+  .match-app-shell {
+    --match-chrome-safe-top: 232px;
+    --match-action-top: var(--match-chrome-safe-top);
+    --match-checklist-top: calc(var(--match-action-top) + 48px);
+    --match-ux-top: calc(var(--match-checklist-top) + 54px);
+    --match-hud-top: calc(var(--match-checklist-top) + 52px);
+    --match-hand-safe-height: 218px;
+    --match-player-bottom: calc(var(--match-hand-bottom) + var(--match-hand-safe-height) + 12px);
+  }
+
+  .match-app-shell.match-chrome-minimized {
+    --match-action-top: 14px;
+    --match-checklist-top: 64px;
+    --match-ux-top: 116px;
+    --match-hud-top: 178px;
+  }
+
   .match-end-panel {
     padding: 18px;
   }
@@ -5484,7 +5557,7 @@ h1 {
   }
 
   .match-action-dock {
-    top: 232px;
+    top: var(--match-action-top);
   }
 
   .match-chrome-minimized .match-action-dock {
@@ -5496,37 +5569,40 @@ h1 {
     padding: 0 12px;
   }
 
-  .board {
-    padding-top: 340px;
-  }
-
   .turn-checklist {
-    top: 284px;
+    top: var(--match-checklist-top);
   }
 
   .match-ux-dock {
-    top: 340px;
+    top: var(--match-ux-top);
   }
 
   .board-3d-shell,
   .board-3d-fallback {
-    min-width: 620px;
-    height: 520px;
+    width: 100vw;
+    min-width: 0;
+    height: 100svh;
+    min-height: 100svh;
   }
 
   .battlefield-hud-opponent {
-    top: 86px;
+    top: calc(var(--match-hud-top) + 76px);
     right: 12px;
-    left: 12px;
+    left: auto;
+    max-width: calc((100vw - 36px) / 2);
   }
 
   .battlefield-hud-opponent .player-badge {
     justify-content: space-between;
-    width: 100%;
+    width: auto;
+    max-width: calc((100vw - 36px) / 2);
   }
 
   .battlefield-hud-phase {
-    top: 214px;
+    top: var(--match-hud-top);
+    right: 12px;
+    left: auto;
+    transform: none;
   }
 
   .targeting-stack-overlay {
@@ -5537,13 +5613,16 @@ h1 {
   }
 
   .battlefield-hud-player {
-    bottom: 274px;
-    right: 12px;
+    top: calc(var(--match-hud-top) + 76px);
+    right: auto;
+    bottom: auto;
     left: 12px;
+    max-width: calc((100vw - 36px) / 2);
   }
 
   .battlefield-hud-player .player-badge {
-    width: 100%;
+    width: auto;
+    max-width: calc((100vw - 36px) / 2);
   }
 
   .opponent-hand-display {
@@ -5559,9 +5638,9 @@ h1 {
   }
 
   .card-button {
-    flex-basis: 154px;
-    margin-left: -48px;
-    min-height: 228px;
+    flex-basis: 140px;
+    margin-left: -44px;
+    min-height: 184px;
   }
 
   .match-ux-panel {
@@ -5570,7 +5649,7 @@ h1 {
   }
 
   .card-button-art {
-    height: 68px;
+    height: 54px;
   }
 
   .open-match-form div {

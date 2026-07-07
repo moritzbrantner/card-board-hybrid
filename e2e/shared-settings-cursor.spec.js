@@ -25,18 +25,17 @@ test("shared active matches use persistent full-screen collapsible chrome", asyn
   await mockSharedApi(page, { signedIn: false });
 
   await page.goto(`/match/${MATCH_ID}/${PLAYER_SEAT_TOKEN}`);
-  const board = page.getByRole("region", { name: "Hex board" });
-  const boardBox = await board.boundingBox();
-  expect(boardBox.width).toBeGreaterThanOrEqual(1276);
-  expect(boardBox.height).toBeGreaterThanOrEqual(716);
+  await expectFullViewportBoard(page, { width: 1280, height: 720 });
   await expect.poll(() => hasPainted3dCanvas(page)).toBe(true);
   await expect(page.getByText("You", { exact: true })).toBeVisible();
   await expect(page.getByText("Opponent", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "End Turn" })).toBeVisible();
+  await expectNoVisibleOverlap(page, matchOverlaySelectors());
 
   await page.getByRole("button", { name: "Minimize match chrome" }).click();
   await expect(page.getByRole("button", { name: "Restore match chrome" })).toBeVisible();
   await expect(page.getByRole("button", { name: "End Turn" })).toBeVisible();
+  await expectNoVisibleOverlap(page, minimizedMatchOverlaySelectors());
   await expect
     .poll(() => page.evaluate((key) => localStorage.getItem(key), MATCH_CHROME_STORAGE_KEY))
     .toBe("true");
@@ -47,9 +46,9 @@ test("shared active matches use persistent full-screen collapsible chrome", asyn
 
   await page.setViewportSize({ width: 390, height: 700 });
   await page.reload();
-  const mobileBoardBox = await board.boundingBox();
-  expect(mobileBoardBox.width).toBeGreaterThanOrEqual(386);
-  expect(mobileBoardBox.height).toBeGreaterThanOrEqual(696);
+  await expectFullViewportBoard(page, { width: 390, height: 700 });
+  await ensureMatchChromeMinimized(page);
+  await expectNoVisibleOverlap(page, minimizedMatchOverlaySelectors());
   await expect(page.getByLabel("Hand", { exact: true })).toBeVisible();
 });
 
@@ -275,6 +274,112 @@ async function sharedActions(page) {
       .filter((message) => message.type === "action")
       .map((message) => message.action),
   );
+}
+
+async function expectFullViewportBoard(page, viewport) {
+  const boardBox = await page.getByRole("region", { name: "Hex board" }).boundingBox();
+  expect(boardBox).not.toBeNull();
+  expect(boardBox.width).toBeGreaterThanOrEqual(viewport.width - 4);
+  expect(boardBox.height).toBeGreaterThanOrEqual(viewport.height - 4);
+
+  const shellBox = await page.locator(".board-3d-shell").boundingBox();
+  expect(shellBox).not.toBeNull();
+  expect(shellBox.width).toBeGreaterThanOrEqual(viewport.width - 4);
+  expect(shellBox.height).toBeGreaterThanOrEqual(viewport.height - 4);
+  expect(shellBox.width).toBeLessThanOrEqual(viewport.width + 4);
+}
+
+async function expectNoVisibleOverlap(page, selectors) {
+  const boxes = await page.evaluate((items) => {
+    return items.flatMap((item) => {
+      const element = document.querySelector(item.selector);
+      if (!element) {
+        return [];
+      }
+
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      if (
+        style.display === "none" ||
+        style.visibility === "hidden" ||
+        Number(style.opacity) === 0 ||
+        rect.width < 2 ||
+        rect.height < 2
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          name: item.name,
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+        },
+      ];
+    });
+  }, selectors);
+
+  for (let index = 0; index < boxes.length; index += 1) {
+    for (let nextIndex = index + 1; nextIndex < boxes.length; nextIndex += 1) {
+      expect(rectanglesOverlap(boxes[index], boxes[nextIndex]), overlapMessage(boxes[index], boxes[nextIndex])).toBe(
+        false,
+      );
+    }
+  }
+}
+
+async function ensureMatchChromeMinimized(page) {
+  const restoreChrome = page.getByRole("button", { name: "Restore match chrome" });
+  if ((await page.locator(".match-app-shell.match-chrome-minimized").count()) === 0) {
+    await page.getByRole("button", { name: "Minimize match chrome" }).click();
+  }
+
+  await expect(page.locator(".match-app-shell.match-chrome-minimized")).toBeVisible();
+  await expect(restoreChrome).toBeVisible();
+}
+
+function rectanglesOverlap(first, second) {
+  const tolerancePx = 2;
+  return (
+    first.left < second.right - tolerancePx &&
+    first.right > second.left + tolerancePx &&
+    first.top < second.bottom - tolerancePx &&
+    first.bottom > second.top + tolerancePx
+  );
+}
+
+function overlapMessage(first, second) {
+  return `${first.name} overlaps ${second.name}: ${JSON.stringify({ first, second })}`;
+}
+
+function matchOverlaySelectors() {
+  return [
+    { name: "match chrome", selector: ".match-chrome" },
+    { name: "match action dock", selector: ".match-action-dock" },
+    { name: "turn checklist", selector: ".turn-checklist" },
+    { name: "match UX dock", selector: ".match-ux-dock" },
+    { name: "opponent badge", selector: ".battlefield-hud-opponent" },
+    { name: "opponent hand", selector: ".battlefield-hud-hand" },
+    { name: "phase pill", selector: ".battlefield-hud-phase" },
+    { name: "player badge", selector: ".battlefield-hud-player" },
+    { name: "hand", selector: ".hand-overlay" },
+  ];
+}
+
+function minimizedMatchOverlaySelectors() {
+  return [
+    { name: "restore chrome", selector: ".match-chrome-restore" },
+    { name: "match action dock", selector: ".match-action-dock" },
+    { name: "turn checklist", selector: ".turn-checklist" },
+    { name: "match UX dock", selector: ".match-ux-dock" },
+    { name: "opponent badge", selector: ".battlefield-hud-opponent" },
+    { name: "opponent hand", selector: ".battlefield-hud-hand" },
+    { name: "phase pill", selector: ".battlefield-hud-phase" },
+    { name: "player badge", selector: ".battlefield-hud-player" },
+    { name: "hand", selector: ".hand-overlay" },
+  ];
 }
 
 async function hasPainted3dCanvas(page) {

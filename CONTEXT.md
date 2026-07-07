@@ -256,6 +256,10 @@ _Avoid_: replay event, match log
 A player presentation preference that chooses between the complete 2D board and the enhanced 3D board. It is stored on the account profile or locally for anonymous and seat-link play, and never changes match state, replay data, legality, or shared-match protocol semantics.
 _Avoid_: board state, match mode, rules mode
 
+**Match chrome**:
+Player-facing controls and status overlays around the Board visual mode during match and replay play.
+_Avoid_: match rules, board state, HUD state
+
 **Board model asset**:
 A presentation-only 3D asset used by Board visual mode to render a Hero or Unit. It is not match state, replay data, card rules, or catalog legality.
 _Avoid_: model, skin, piece data
