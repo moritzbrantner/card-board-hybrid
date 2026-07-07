@@ -20,10 +20,10 @@ import type {
 import {
   Board3DRenderer,
   TargetingIndicatorLayer,
-  type Board3DTileInteraction,
   type BoardProjectedPosition,
 } from "../../Board3D";
 import type { BoardAnimationCue, PieceAnimation } from "../../boardAnimations";
+import { buildBoardSurface } from "../../boardSurface";
 import {
   boardRendererFallbackMessage,
   canCreateWebGLContext,
@@ -44,26 +44,12 @@ import type {
   Side,
   StackItem,
 } from "../../types";
-import type { BoardTutorialHighlight, TutorialHighlightTone } from "../../tutorial/tutorialHighlights";
-import { sameTutorialCoord } from "../../tutorial/tutorialHighlights";
+import type { BoardTutorialHighlight } from "../../tutorial/tutorialHighlights";
 import { DetailStat } from "../common";
 import {
   coordKey,
-  buildingAt,
-  droppedItemsAt,
-  groupTilesByColumn,
-  isLegalAttack,
-  isLegalCardTarget,
-  isLegalMove,
-  isManaSourceAt,
   pieceAnimationFeedback,
   pieceAnimationStyle,
-  pieceAt,
-  pieceStatLabel,
-  piecesForAnimation,
-  piecesInMatch,
-  sameCoord,
-  tileTitle,
 } from "../../matchBoardHelpers";
 import {
   itemActiveLabel,
@@ -74,10 +60,6 @@ import {
   viewerSideShortLabel,
   heroTypeLabel,
 } from "../../labels";
-import {
-  selectedTargetingIndicators,
-  stackTargetingIndicators,
-} from "../../targetingIndicators";
 
 const EMPTY_MATCH_VISUAL_CATALOG = createMatchVisualCatalog([]);
 
@@ -554,72 +536,35 @@ export function Board({
     readOnly,
   });
   const isInteractive = isBoardRendererInteractive({ renderer, readOnly, disabled });
-  const columns = groupTilesByColumn(match.board.tiles);
   const [visibleAnimation, setVisibleAnimation] = useState<BoardAnimationCue | null>(animation ?? null);
-  const pieces = piecesForAnimation(piecesInMatch(match), visibleAnimation);
-  const displayPieceByCoord = useMemo(
-    () => new Map(pieces.map((piece) => [coordKey(piece.position), piece])),
-    [pieces],
-  );
-  const animationByPieceId = useMemo(
-    () => new Map((visibleAnimation?.pieces ?? []).map((pieceAnimation) => [pieceAnimation.pieceId, pieceAnimation])),
-    [visibleAnimation],
-  );
   const tilePositions = useMeasuredTilePositions(boardFieldRef, tileElementByKeyRef, match.board.tiles);
-  const selectedIndicators = useMemo(
+  const boardSurface = useMemo(
     () =>
-      selectedTargetingIndicators({
+      buildBoardSurface({
         match,
         viewerSide,
         selectedCard,
         selectedPiece,
         focusedCoord: focusedCoord ?? null,
         hoveredCoord,
+        isInteractive,
+        tutorialHighlights,
+        animation: visibleAnimation,
+        activeStackItemId,
       }),
-    [focusedCoord, hoveredCoord, match, selectedCard, selectedPiece, viewerSide],
+    [
+      activeStackItemId,
+      focusedCoord,
+      hoveredCoord,
+      isInteractive,
+      match,
+      selectedCard,
+      selectedPiece,
+      tutorialHighlights,
+      viewerSide,
+      visibleAnimation,
+    ],
   );
-  const stackIndicators = useMemo(() => stackTargetingIndicators(match), [match]);
-  const targetingIndicators = useMemo(() => {
-    if (activeStackItemId) {
-      return stackIndicators.filter(
-        (indicator) =>
-          indicator.source.type === "stack" && indicator.source.stackItemId === activeStackItemId,
-      );
-    }
-
-    return [...stackIndicators, ...selectedIndicators];
-  }, [activeStackItemId, selectedIndicators, stackIndicators]);
-  const tileInteractions = match.board.tiles.map((tile): Board3DTileInteraction => {
-    const piece = pieceAt(match, tile.coord);
-    const hasManaSource = isManaSourceAt(match, tile.coord);
-    const hasBuilding = !!buildingAt(match, tile.coord);
-    const isLegal =
-      isInteractive &&
-      ((selectedCard && isLegalCardTarget(match, viewerSide, selectedCard, tile.coord, piece)) ||
-        (selectedPiece &&
-          ((!piece && isLegalMove(match, viewerSide, selectedPiece, tile.coord)) ||
-            (piece && isLegalAttack(match, viewerSide, selectedPiece, piece)))));
-    const isSelected = Boolean(piece && selectedPiece && piece.id === selectedPiece.id);
-    const isFocused = focusedCoord ? sameCoord(tile.coord, focusedCoord) : false;
-    const tutorialHighlightTone = tutorialHighlightForTile(tile.coord, piece?.id ?? null, tutorialHighlights);
-
-    return {
-      coord: tile.coord,
-      title: tileTitle(tile, piece, viewerSide, 0, hasManaSource),
-      disabled: !isInteractive,
-      isLegal: Boolean(isLegal),
-      isSelected,
-      isFocused,
-      tutorialHighlightTone,
-      hasManaSource,
-      hasBuilding,
-      hasPiece: Boolean(piece),
-      pieceSide: piece?.side,
-      pieceType: piece?.pieceType,
-      pieceLabel: piece ? viewerSideShortLabel(piece.side, viewerSide) : undefined,
-      pieceStatLabel: piece ? pieceStatLabel(piece) : undefined,
-    };
-  });
 
   useEffect(() => {
     if (boardVisualMode === "2d") {
@@ -686,18 +631,18 @@ export function Board({
           onActiveStackItemChange={setActiveStackItemId}
         />
         <Board3DRenderer
-          tiles={match.board.tiles}
-          pieces={pieces}
+          tiles={boardSurface.tiles}
+          pieces={boardSurface.pieces}
           animation={visibleAnimation}
           visualCatalog={visualCatalog}
           readOnly={readOnly}
           disabled={disabled}
-          tileInteractions={tileInteractions}
-          targetingIndicators={targetingIndicators}
+          tileInteractions={boardSurface.tileInteractions}
+          targetingIndicators={boardSurface.targetingIndicators}
           onTileClick={onTileClick}
           onTileDrop={onTileDrop}
           onTileContextMenu={(tile, event) => {
-            const piece = pieceAt(match, tile.coord);
+            const piece = boardSurface.tileByKey.get(coordKey(tile.coord))?.piece ?? null;
             if (piece?.pieceType !== "unit" || !onUnitContextMenu) {
               return;
             }
@@ -735,56 +680,39 @@ export function Board({
       />
       <div className="hex-board-field" ref={boardFieldRef}>
         <TargetingIndicatorLayer
-          indicators={targetingIndicators}
+          indicators={boardSurface.targetingIndicators}
           positionsByCoordKey={tilePositions}
         />
         <div className="hex-board">
-          {columns.map((column) => (
+          {boardSurface.columns.map((column) => (
             <div className="hex-column" key={column.q}>
-              {column.tiles.map((tile) => {
-                const tileKey = coordKey(tile.coord);
-                const piece = pieceAt(match, tile.coord);
-                const displayPiece = displayPieceByCoord.get(tileKey) ?? piece;
-                const droppedItems = droppedItemsAt(match, tile.coord);
-                const hasManaSource = isManaSourceAt(match, tile.coord);
-                const building = buildingAt(match, tile.coord);
-                const hasBuilding = !!building;
-                const interaction = tileInteractions.find(
-                  (candidate) => coordKey(candidate.coord) === tileKey,
-                );
-                const isLegal = interaction?.isLegal ?? false;
-                const isSelected = Boolean(piece && selectedPiece && piece.id === selectedPiece.id);
-                const isFocused = focusedCoord ? sameCoord(tile.coord, focusedCoord) : false;
-                const tutorialHighlightTone = tutorialHighlightForTile(tile.coord, piece?.id ?? null, tutorialHighlights);
-                const occupantClass = displayPiece ? `occupied occupied-${displayPiece.side}` : "";
-                const title = building
-                  ? `${tileTitle(tile, piece, viewerSide, droppedItems.length, hasManaSource)}, building ${building.name}`
-                  : tileTitle(tile, piece, viewerSide, droppedItems.length, hasManaSource);
-
+              {column.tiles.map((surfaceTile) => {
                 return (
                   <button
-                    key={tileKey}
+                    key={surfaceTile.key}
                     ref={(element) => {
                       if (element) {
-                        tileElementByKeyRef.current.set(tileKey, element);
+                        tileElementByKeyRef.current.set(surfaceTile.key, element);
                       } else {
-                        tileElementByKeyRef.current.delete(tileKey);
+                        tileElementByKeyRef.current.delete(surfaceTile.key);
                       }
                     }}
-                    className={`hex-tile ${hasManaSource ? "mana-source" : ""} ${hasBuilding ? "building" : ""} ${building ? `building-${building.effect.type}` : ""} ${occupantClass} ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""} ${isFocused ? "keyboard-focused" : ""} ${tutorialHighlightTone ? `tutorial-highlight tutorial-highlight-${tutorialHighlightTone}` : ""}`}
+                    className={`hex-tile ${surfaceTile.hasManaSource ? "mana-source" : ""} ${surfaceTile.hasBuilding ? "building" : ""} ${surfaceTile.building ? `building-${surfaceTile.building.effect.type}` : ""} ${surfaceTile.occupantClass} ${surfaceTile.isLegal ? "legal" : ""} ${surfaceTile.isSelected ? "selected-piece" : ""} ${surfaceTile.isFocused ? "keyboard-focused" : ""} ${surfaceTile.tutorialHighlightTone ? `tutorial-highlight tutorial-highlight-${surfaceTile.tutorialHighlightTone}` : ""}`}
                     type="button"
                     disabled={disabled && !readOnly}
                     tabIndex={readOnly ? -1 : undefined}
-                    onPointerEnter={() => setHoveredCoord(tile.coord)}
+                    onPointerEnter={() => setHoveredCoord(surfaceTile.coord)}
                     onPointerLeave={() => setHoveredCoord(null)}
                     onFocus={() => {
-                      setHoveredCoord(tile.coord);
-                      onFocusedUnitChange?.(piece?.pieceType === "unit" ? piece.id : null);
+                      setHoveredCoord(surfaceTile.coord);
+                      onFocusedUnitChange?.(
+                        surfaceTile.piece?.pieceType === "unit" ? surfaceTile.piece.id : null,
+                      );
                     }}
                     onBlur={() => setHoveredCoord(null)}
-                    onClick={() => onTileClick?.(tile)}
+                    onClick={() => onTileClick?.(surfaceTile.tile)}
                     onDragOver={(event: ReactDragEvent<HTMLButtonElement>) => {
-                      if (readOnly || disabled || !selectedCard || !isLegal) {
+                      if (readOnly || disabled || !selectedCard || !surfaceTile.isLegal) {
                         return;
                       }
 
@@ -799,50 +727,50 @@ export function Board({
                       event.preventDefault();
                       const cardId = event.dataTransfer.getData("text/plain");
                       if (cardId) {
-                        onTileDrop(tile, cardId);
+                        onTileDrop(surfaceTile.tile, cardId);
                       }
                     }}
                     onContextMenu={(event: ReactMouseEvent<HTMLButtonElement>) => {
-                      if (readOnly || piece?.pieceType !== "unit" || !onUnitContextMenu) {
+                      if (readOnly || surfaceTile.piece?.pieceType !== "unit" || !onUnitContextMenu) {
                         return;
                       }
 
                       event.preventDefault();
-                      onUnitContextMenu(piece, { x: event.clientX, y: event.clientY });
+                      onUnitContextMenu(surfaceTile.piece, { x: event.clientX, y: event.clientY });
                     }}
-                    title={title}
-                    aria-label={title}
+                    title={surfaceTile.title}
+                    aria-label={surfaceTile.title}
                   >
-                    {hasManaSource ? (
+                    {surfaceTile.hasManaSource ? (
                       <span className="mana-source-marker" aria-hidden="true">
                         M
                       </span>
                     ) : null}
-                    {building && !hasManaSource ? (
+                    {surfaceTile.building && !surfaceTile.hasManaSource ? (
                       <span className="building-marker" aria-hidden="true">
                         B
                       </span>
                     ) : null}
-                    {displayPiece ? (
+                    {surfaceTile.displayPiece ? (
                       <>
                         <span
-                          className={`hex-occupant-marker ${displayPiece.side}`}
+                          className={`hex-occupant-marker ${surfaceTile.displayPiece.side}`}
                           aria-hidden="true"
                         >
-                          {viewerSideShortLabel(displayPiece.side, viewerSide)}
+                          {surfaceTile.pieceLabel}
                         </span>
                         <PieceToken
-                          key={`${displayPiece.id}-${visibleAnimation?.sequence ?? 0}`}
-                          piece={displayPiece}
-                          animation={animationByPieceId.get(displayPiece.id)}
+                          key={`${surfaceTile.displayPiece.id}-${visibleAnimation?.sequence ?? 0}`}
+                          piece={surfaceTile.displayPiece}
+                          animation={boardSurface.animationByPieceId.get(surfaceTile.displayPiece.id)}
                           viewerSide={viewerSide}
                           visualCatalog={visualCatalog}
                         />
                       </>
                     ) : null}
-                    {droppedItems.length > 0 ? (
+                    {surfaceTile.droppedItems.length > 0 ? (
                       <span className="dropped-item-count" aria-hidden="true">
-                        {droppedItems.length}
+                        {surfaceTile.droppedItems.length}
                       </span>
                     ) : null}
                   </button>
@@ -982,18 +910,4 @@ export function CardButton({
       <span className="card-text">{card.text}</span>
     </button>
   );
-}
-
-function tutorialHighlightForTile(
-  coord: HexCoord,
-  pieceId: string | null,
-  highlights: BoardTutorialHighlight[],
-): TutorialHighlightTone | undefined {
-  return highlights.find((highlight) => {
-    if (highlight.kind === "coord") {
-      return sameTutorialCoord(highlight.coord, coord);
-    }
-
-    return pieceId !== null && highlight.pieceId === pieceId;
-  })?.tone;
 }

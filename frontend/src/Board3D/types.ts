@@ -1,7 +1,7 @@
 import type { ProjectedBoardPosition } from "../boardRenderer";
+import type { BoardSurfaceTileInteraction } from "../boardSurface";
 import type { MatchVisualCatalog } from "../matchVisualIdentity";
 import type { TargetingIndicator } from "../targetingIndicators";
-import type { TutorialHighlightTone } from "../tutorial/tutorialHighlights";
 import type { HexCoord, HexTile, HeroType, Side, Unit } from "../types";
 import type { BoardAnimationCue } from "../boardAnimations";
 import type { BoardPieceVisualManifest } from "../board3dModelManifest";
@@ -41,23 +41,7 @@ export type Board3DUnit = {
 
 export type Board3DPiece = Board3DHero | Board3DUnit;
 
-export type Board3DTileInteraction = {
-  coord: HexCoord;
-  title: string;
-  disabled: boolean;
-  isLegal: boolean;
-  isSelected: boolean;
-  isFocused?: boolean;
-  tutorialHighlightTone?: TutorialHighlightTone;
-  hasManaSource?: boolean;
-  hasBuilding?: boolean;
-  hasPiece: boolean;
-  pieceSide?: Side;
-  pieceType?: Board3DPiece["pieceType"];
-  pieceLabel?: string;
-  pieceStatLabel?: string;
-  droppedItemCount?: number;
-};
+export type Board3DTileInteraction = BoardSurfaceTileInteraction;
 
 export type BoardProjectedPosition = ProjectedBoardPosition;
 
