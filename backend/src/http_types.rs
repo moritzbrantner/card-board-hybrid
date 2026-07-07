@@ -104,6 +104,15 @@ pub(crate) struct CreateMatchRequest {
     pub(crate) ai_opponent: Option<AiOpponentRequest>,
     #[serde(default)]
     pub(crate) rune_ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) format: Option<SharedMatchFormatRequest>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum SharedMatchFormatRequest {
+    Duel,
+    TwoVTwo,
 }
 
 #[derive(Deserialize)]
@@ -240,10 +249,21 @@ pub(crate) struct ReplayFrameResponse {
 pub(crate) struct CreateSharedMatchResponse {
     pub(crate) match_id: String,
     pub(crate) mode: &'static str,
+    pub(crate) format: &'static str,
     pub(crate) status: &'static str,
     pub(crate) viewer_side: Side,
     pub(crate) player_seat_url: String,
     pub(crate) invite_seat_url: String,
+    pub(crate) seat_urls: Vec<SharedSeatUrlResponse>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SharedSeatUrlResponse {
+    pub(crate) side: Side,
+    pub(crate) team: crate::match_session::Team,
+    pub(crate) label: &'static str,
+    pub(crate) url: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -251,16 +271,31 @@ pub(crate) struct CreateSharedMatchResponse {
 pub(crate) struct SharedMatchResponse {
     pub(crate) match_id: String,
     pub(crate) mode: &'static str,
+    pub(crate) format: &'static str,
     pub(crate) status: &'static str,
     pub(crate) viewer_side: Side,
+    pub(crate) viewer_team: crate::match_session::Team,
     pub(crate) viewer_hero_type: Option<HeroType>,
     pub(crate) opponent_hero_type: Option<HeroType>,
     pub(crate) viewer_ready: bool,
     pub(crate) opponent_ready: bool,
+    pub(crate) seats: Vec<SharedSeatResponse>,
     pub(crate) active_side: Option<Side>,
     pub(crate) opponent_connected: bool,
     pub(crate) can_claim_forfeit_at: Option<i64>,
     pub(crate) match_state: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SharedSeatResponse {
+    pub(crate) side: Side,
+    pub(crate) team: crate::match_session::Team,
+    pub(crate) label: &'static str,
+    pub(crate) ready: bool,
+    pub(crate) connected: bool,
+    pub(crate) hero_type: Option<HeroType>,
+    pub(crate) knocked_out: bool,
 }
 
 #[derive(Deserialize)]
@@ -392,13 +427,45 @@ impl MatchResponse {
 
 impl From<CreatedSharedMatch> for CreateSharedMatchResponse {
     fn from(created: CreatedSharedMatch) -> Self {
+        let mut seat_urls = vec![
+            SharedSeatUrlResponse {
+                side: Side::Player,
+                team: Side::Player.team(),
+                label: "Player 1",
+                url: format!("/match/{}/{}", created.match_id, created.player_token),
+            },
+            SharedSeatUrlResponse {
+                side: Side::Opponent,
+                team: Side::Opponent.team(),
+                label: "Opponent 1",
+                url: format!("/match/{}/{}", created.match_id, created.opponent_token),
+            },
+        ];
+        if let Some(token) = &created.player_two_token {
+            seat_urls.push(SharedSeatUrlResponse {
+                side: Side::PlayerTwo,
+                team: Side::PlayerTwo.team(),
+                label: "Player 2",
+                url: format!("/match/{}/{}", created.match_id, token),
+            });
+        }
+        if let Some(token) = &created.opponent_two_token {
+            seat_urls.push(SharedSeatUrlResponse {
+                side: Side::OpponentTwo,
+                team: Side::OpponentTwo.team(),
+                label: "Opponent 2",
+                url: format!("/match/{}/{}", created.match_id, token),
+            });
+        }
         Self {
             player_seat_url: format!("/match/{}/{}", created.match_id, created.player_token),
             invite_seat_url: format!("/match/{}/{}", created.match_id, created.opponent_token),
             match_id: created.match_id,
             mode: "shared",
+            format: created.format.as_str(),
             status: "setup",
             viewer_side: Side::Player,
+            seat_urls,
         }
     }
 }
@@ -416,13 +483,27 @@ impl From<StoredSharedMatch> for SharedMatchResponse {
             .state
             .as_ref()
             .map(|state| state.public_value_for_side(shared.viewer_seat.side));
-        let opponent_connected = shared.opposing_seat.joined_at.is_some()
-            && shared.opposing_seat.disconnected_at.is_none();
+        let opponent_connected = shared
+            .seats
+            .iter()
+            .filter(|seat| seat.side.team() != shared.viewer_seat.side.team())
+            .any(|seat| seat.joined_at.is_some() && seat.disconnected_at.is_none());
         let can_claim_forfeit_at = if shared.status == SharedMatchStatus::Active {
-            shared
-                .opposing_seat
-                .disconnected_at
-                .map(|disconnected_at| disconnected_at + 120)
+            let opposing_disconnect_times: Vec<_> = shared
+                .seats
+                .iter()
+                .filter(|seat| seat.side.team() != shared.viewer_seat.side.team())
+                .map(|seat| seat.disconnected_at)
+                .collect();
+            if opposing_disconnect_times.iter().all(Option::is_some) {
+                opposing_disconnect_times
+                    .into_iter()
+                    .flatten()
+                    .map(|disconnected_at| disconnected_at + 120)
+                    .max()
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -430,12 +511,31 @@ impl From<StoredSharedMatch> for SharedMatchResponse {
         Self {
             match_id: shared.match_id,
             mode: "shared",
+            format: shared.format.as_str(),
             status: shared.status.as_str(),
             viewer_side: shared.viewer_seat.side,
+            viewer_team: shared.viewer_seat.side.team(),
             viewer_hero_type: shared.viewer_seat.hero_type,
             opponent_hero_type: shared.opposing_seat.hero_type,
             viewer_ready: shared.viewer_seat.joined_at.is_some(),
             opponent_ready: shared.opposing_seat.joined_at.is_some(),
+            seats: shared
+                .seats
+                .iter()
+                .map(|seat| SharedSeatResponse {
+                    side: seat.side,
+                    team: seat.side.team(),
+                    label: seat.side.label_for_response(),
+                    ready: seat.joined_at.is_some(),
+                    connected: seat.joined_at.is_some() && seat.disconnected_at.is_none(),
+                    hero_type: seat.hero_type,
+                    knocked_out: shared
+                        .state
+                        .as_ref()
+                        .and_then(|state| state.participant_for_public(seat.side))
+                        .is_some_and(|participant| participant.knocked_out),
+                })
+                .collect(),
             active_side,
             opponent_connected,
             can_claim_forfeit_at,

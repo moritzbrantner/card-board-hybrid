@@ -1,4 +1,6 @@
-export type Side = "player" | "opponent";
+export type Side = "player" | "opponent" | "playerTwo" | "opponentTwo";
+export type Team = "player" | "opponent";
+export type MatchFormat = "duel" | "twoVTwo";
 
 export type Phase = "planning" | "matchOver";
 
@@ -459,6 +461,8 @@ export type Building = {
 
 export type MatchParticipantState = {
   side: Side;
+  team?: Team;
+  knockedOut?: boolean;
   mana: number;
   maxMana: number;
   hero: Hero;
@@ -475,12 +479,16 @@ export type MatchPlayerState = MatchParticipantState & {
 
 export type MatchState = {
   mode: MatchMode;
+  format?: MatchFormat;
   round: number;
   phase: Phase;
   activeSide: Side;
   prioritySide: Side | null;
   player: MatchPlayerState;
   opponent: MatchParticipantState;
+  playerTwo?: MatchParticipantState | null;
+  opponentTwo?: MatchParticipantState | null;
+  participants?: MatchParticipantState[];
   board: HexBoard;
   actionStack: StackItem[];
   log: string[];
@@ -551,10 +559,19 @@ export type MatchResponse = {
 export type CreateSharedMatchResponse = {
   matchId: string;
   mode: "shared";
+  format?: MatchFormat;
   status: SharedMatchStatus;
   viewerSide: Side;
   playerSeatUrl: string;
   inviteSeatUrl: string;
+  seatUrls?: SharedSeatUrl[];
+};
+
+export type SharedSeatUrl = {
+  side: Side;
+  team: Team;
+  label: string;
+  url: string;
 };
 
 export type SharedMatchStatus = "setup" | "active" | "completed" | "forfeited";
@@ -562,16 +579,29 @@ export type SharedMatchStatus = "setup" | "active" | "completed" | "forfeited";
 export type SharedMatchResponse = {
   matchId: string;
   mode: "shared";
+  format?: MatchFormat;
   status: SharedMatchStatus;
   viewerSide: Side;
+  viewerTeam?: Team;
   viewerHeroType: HeroType | null;
   opponentHeroType: HeroType | null;
   viewerReady: boolean;
   opponentReady: boolean;
+  seats?: SharedSeat[];
   activeSide: Side | null;
   opponentConnected: boolean;
   canClaimForfeitAt: number | null;
   matchState: MatchState | null;
+};
+
+export type SharedSeat = {
+  side: Side;
+  team: Team;
+  label: string;
+  ready: boolean;
+  connected: boolean;
+  heroType: HeroType | null;
+  knockedOut: boolean;
 };
 
 export type ReplayVisibility = "public" | "revealed";

@@ -152,11 +152,22 @@ impl<'a> MatchCommands<'a> {
         if shared.status != SharedMatchStatus::Active {
             return Err(MatchCommandError::NotActiveSharedMatch);
         }
-        let disconnected_at = shared
-            .opposing_seat
-            .disconnected_at
+        let opposing_disconnect_times: Vec<_> = shared
+            .seats
+            .iter()
+            .filter(|seat| seat.side.team() != shared.viewer_seat.side.team())
+            .map(|seat| seat.disconnected_at)
+            .collect();
+        if opposing_disconnect_times.iter().any(Option::is_none) {
+            return Err(MatchCommandError::OpponentStillConnected);
+        }
+        let claimable_at = opposing_disconnect_times
+            .into_iter()
+            .flatten()
+            .map(|disconnected_at| disconnected_at + 120)
+            .max()
             .ok_or(MatchCommandError::OpponentStillConnected)?;
-        if now < disconnected_at + 120 {
+        if now < claimable_at {
             return Err(MatchCommandError::ForfeitNotClaimable);
         }
 
@@ -191,6 +202,7 @@ mod tests {
     use super::*;
     use crate::deck_library::starter_deck_snapshot;
     use crate::match_session::{HeroType, MatchProgressionLoadout, ReplayEvent, Side};
+    use crate::match_store::SharedMatchFormat;
 
     fn test_db_path(name: &str) -> std::path::PathBuf {
         let suffix = SystemTime::now()
@@ -288,7 +300,7 @@ mod tests {
         insert_user(&mut store, 101, "player@example.com");
         insert_user(&mut store, 102, "opponent@example.com");
         let created = store
-            .create_shared_match(None)
+            .create_shared_match(None, SharedMatchFormat::Duel)
             .expect("shared match should create");
         let starter = starter_deck_snapshot();
         store

@@ -97,7 +97,7 @@ fn replayable_shared_matches_are_filtered_to_joined_accounts() {
     let mut store = SqliteMatchStore::new(&path).expect("store should open");
 
     let created = store
-        .create_shared_match(Some(99))
+        .create_shared_match(Some(99), SharedMatchFormat::Duel)
         .expect("shared match should be created");
     store
         .join_shared_match(
@@ -141,6 +141,69 @@ fn replayable_shared_matches_are_filtered_to_joined_accounts() {
     assert_eq!(player_matches[0].id, created.match_id);
     assert!(unrelated_matches.is_empty());
     assert!(creator_matches.is_empty());
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn two_v_two_shared_match_starts_after_all_four_seats_join() {
+    let path = test_db_path("shared-two-v-two");
+    let mut store = SqliteMatchStore::new(&path).expect("store should open");
+
+    let created = store
+        .create_shared_match(Some(99), SharedMatchFormat::TwoVTwo)
+        .expect("2v2 shared match should be created");
+    let player_two_token = created
+        .player_two_token
+        .clone()
+        .expect("2v2 should include player two token");
+    let opponent_two_token = created
+        .opponent_two_token
+        .clone()
+        .expect("2v2 should include opponent two token");
+    let starter = deck_library::starter_deck_snapshot();
+
+    for (token, hero_type) in [
+        (&created.player_token, HeroType::Runekeeper),
+        (&created.opponent_token, HeroType::Pyromancer),
+        (&player_two_token, HeroType::Warden),
+    ] {
+        let shared = store
+            .join_shared_match(
+                &created.match_id,
+                token,
+                hero_type,
+                starter.clone(),
+                MatchProgressionLoadout::default(),
+                None,
+            )
+            .expect("seat should join")
+            .expect("shared match should load");
+        assert_eq!(shared.status, SharedMatchStatus::Setup);
+        assert!(shared.state.is_none());
+    }
+
+    let shared = store
+        .join_shared_match(
+            &created.match_id,
+            &opponent_two_token,
+            HeroType::Barbarian,
+            starter,
+            MatchProgressionLoadout::default(),
+            None,
+        )
+        .expect("final seat should join")
+        .expect("shared match should load");
+
+    assert_eq!(shared.status, SharedMatchStatus::Active);
+    assert_eq!(shared.format, SharedMatchFormat::TwoVTwo);
+    assert_eq!(shared.seats.len(), 4);
+    let state = shared.state.expect("2v2 state should be created");
+    assert_eq!(state.format(), "twoVTwo");
+    assert_eq!(state.board.radius, 4);
+    assert!(state.player_two.is_some());
+    assert!(state.opponent_two.is_some());
+    assert_eq!(state.active_side, Side::Player);
 
     let _ = fs::remove_file(path);
 }

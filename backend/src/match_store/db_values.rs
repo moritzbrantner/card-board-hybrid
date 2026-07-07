@@ -1,6 +1,6 @@
 use crate::match_session::{HeroType, Side};
 
-use super::SharedMatchStatus;
+use super::{SharedMatchFormat, SharedMatchStatus};
 
 impl SharedMatchStatus {
     pub fn as_str(self) -> &'static str {
@@ -23,11 +23,29 @@ impl SharedMatchStatus {
     }
 }
 
+impl SharedMatchFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Duel => "duel",
+            Self::TwoVTwo => "twoVTwo",
+        }
+    }
+
+    pub(super) fn from_db(value: &str) -> Self {
+        match value {
+            "twoVTwo" => Self::TwoVTwo,
+            _ => Self::Duel,
+        }
+    }
+}
+
 impl Side {
     pub(super) fn to_db(self) -> &'static str {
         match self {
             Self::Player => "player",
             Self::Opponent => "opponent",
+            Self::PlayerTwo => "playerTwo",
+            Self::OpponentTwo => "opponentTwo",
         }
     }
 }
@@ -51,6 +69,8 @@ pub(super) fn side_from_db(value: &str) -> Option<Side> {
     match value {
         "player" => Some(Side::Player),
         "opponent" => Some(Side::Opponent),
+        "playerTwo" => Some(Side::PlayerTwo),
+        "opponentTwo" => Some(Side::OpponentTwo),
         _ => None,
     }
 }

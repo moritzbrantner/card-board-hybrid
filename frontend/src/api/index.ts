@@ -237,6 +237,13 @@ export function createSharedMatch(heroType: HeroType) {
   });
 }
 
+export function createSharedTwoVTwoMatch(heroType: HeroType) {
+  return request<CreateSharedMatchResponse>("/api/shared-matches", {
+    method: "POST",
+    body: JSON.stringify({ heroType, format: "twoVTwo" }),
+  });
+}
+
 export function loadSharedMatch(matchId: string, seatToken: string) {
   return request<SharedMatchResponse>(
     `/api/shared-matches/${encodeURIComponent(matchId)}/seats/${encodeURIComponent(seatToken)}`,

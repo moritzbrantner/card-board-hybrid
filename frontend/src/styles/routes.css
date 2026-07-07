@@ -1172,6 +1172,45 @@ button {
   font-size: 0.9rem;
 }
 
+.invite-link-list {
+  display: grid;
+  gap: 8px;
+}
+
+.invite-link-list p {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(88px, auto) minmax(0, 1fr) auto;
+  margin: 0;
+}
+
+.teammate-hand-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.teammate-hand-panel > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.teammate-hand {
+  display: flex;
+  gap: 8px;
+  min-height: 92px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.teammate-hand .card-button {
+  flex: 0 0 76px;
+  min-height: 92px;
+  transform: none;
+}
+
 .lobby-status-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1270,6 +1309,211 @@ button {
 
 .match-chrome-minimized .match-action-dock {
   top: 16px;
+}
+
+.match-ux-dock {
+  position: fixed;
+  top: 166px;
+  left: 18px;
+  z-index: 16;
+  display: grid;
+  gap: 10px;
+  width: min(430px, calc(100vw - 36px));
+  pointer-events: none;
+}
+
+.match-chrome-minimized .match-ux-dock {
+  top: 72px;
+}
+
+.match-ux-panel,
+.turn-checklist,
+.action-recap {
+  border: 1px solid rgba(247, 243, 234, 0.14);
+  border-radius: 8px;
+  background: rgba(21, 24, 23, 0.9);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(12px);
+}
+
+.match-ux-panel {
+  display: grid;
+  gap: 9px;
+  padding: 11px;
+}
+
+.match-ux-panel-header,
+.action-recap > div,
+.turn-checklist-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.match-ux-panel-header span,
+.action-recap span,
+.turn-checklist-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--gold);
+  font-size: 0.72rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.match-ux-panel-header strong,
+.action-recap strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #fffaf0;
+  font-size: 0.86rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.match-ux-panel p,
+.action-recap p,
+.availability-reason {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.match-ux-panel ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.match-ux-panel li {
+  min-height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 8px;
+  color: #fffaf0;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.action-preview-attack {
+  border-color: rgba(209, 102, 90, 0.36);
+}
+
+.action-preview-support {
+  border-color: rgba(88, 183, 161, 0.36);
+}
+
+.action-preview-blocked {
+  border-color: rgba(217, 184, 79, 0.34);
+}
+
+.action-tray-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.action-tray-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #fffaf0;
+  background: rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 900;
+  pointer-events: auto;
+}
+
+.action-tray-button.blocked {
+  color: var(--muted);
+  cursor: help;
+  filter: saturate(0.72);
+}
+
+.turn-checklist {
+  position: fixed;
+  top: 116px;
+  left: 18px;
+  z-index: 17;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: min(680px, calc(100vw - 36px));
+  min-height: 42px;
+  padding: 7px 9px;
+  pointer-events: none;
+}
+
+.match-chrome-minimized .turn-checklist {
+  top: 16px;
+  left: 72px;
+}
+
+.turn-checklist-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.turn-checklist-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  border: 1px solid rgba(247, 243, 234, 0.12);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.turn-checklist-item strong {
+  color: #fffaf0;
+}
+
+.turn-checklist-item.available {
+  border-color: rgba(88, 183, 161, 0.32);
+}
+
+.turn-checklist-item.waiting {
+  border-color: rgba(122, 167, 217, 0.32);
+}
+
+.action-recap {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+}
+
+.action-recap-attack {
+  border-color: rgba(209, 102, 90, 0.36);
+}
+
+.action-recap-support {
+  border-color: rgba(88, 183, 161, 0.36);
+}
+
+.availability-reason {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #ffd98a;
 }
 
 .catalog-header {
@@ -2558,6 +2802,18 @@ h1 {
 .card-button:disabled {
   filter: saturate(0.72) brightness(0.78);
   cursor: not-allowed;
+}
+
+.card-button.unavailable {
+  filter: saturate(0.76) brightness(0.82);
+}
+
+.card-button.unavailable:not(:disabled) {
+  cursor: help;
+}
+
+.card-button.unavailable:not(:disabled):hover {
+  filter: saturate(0.86) brightness(0.9);
 }
 
 .card-button.advanced {
@@ -4809,6 +5065,29 @@ h1 {
     top: 14px;
   }
 
+  .turn-checklist {
+    top: 236px;
+    right: 14px;
+    left: 14px;
+    max-width: calc(100vw - 28px);
+  }
+
+  .match-chrome-minimized .turn-checklist {
+    top: 64px;
+    left: 14px;
+  }
+
+  .match-ux-dock {
+    top: 292px;
+    right: 14px;
+    left: 14px;
+    width: auto;
+  }
+
+  .match-chrome-minimized .match-ux-dock {
+    top: 116px;
+  }
+
   .match-chrome-restore {
     top: 14px;
     left: 14px;
@@ -4871,7 +5150,7 @@ h1 {
 
   .board {
     justify-items: start;
-    padding: 152px 18px 138px;
+    padding: 248px 18px 138px;
   }
 
   .board-3d-shell,
@@ -4896,11 +5175,11 @@ h1 {
   }
 
   .battlefield-hud-phase {
-    top: 88px;
+    top: 136px;
   }
 
   .targeting-stack-overlay {
-    top: 136px;
+    top: 184px;
     right: 18px;
     left: 18px;
     width: auto;
@@ -5022,7 +5301,15 @@ h1 {
   }
 
   .board {
-    padding-top: 214px;
+    padding-top: 340px;
+  }
+
+  .turn-checklist {
+    top: 284px;
+  }
+
+  .match-ux-dock {
+    top: 340px;
   }
 
   .board-3d-shell,
@@ -5043,11 +5330,11 @@ h1 {
   }
 
   .battlefield-hud-phase {
-    top: 164px;
+    top: 214px;
   }
 
   .targeting-stack-overlay {
-    top: 210px;
+    top: 258px;
     right: 12px;
     left: 12px;
     width: auto;
@@ -5079,6 +5366,11 @@ h1 {
     flex-basis: 154px;
     margin-left: -48px;
     min-height: 228px;
+  }
+
+  .match-ux-panel {
+    max-height: 138px;
+    overflow: auto;
   }
 
   .card-button-art {

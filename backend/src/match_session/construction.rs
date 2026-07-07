@@ -6,6 +6,7 @@ use super::{
 impl PlayerState {
     pub(super) fn new(
         side: Side,
+        board_radius: i32,
         mut rng_seed: u64,
         hero_type: HeroType,
         mut deck: Vec<Card>,
@@ -16,9 +17,10 @@ impl PlayerState {
 
         Self {
             side,
+            knocked_out: false,
             mana,
             max_mana: mana,
-            hero: Hero::new(side, hero_type, &progression.effects),
+            hero: Hero::new(side, board_radius, hero_type, &progression.effects),
             progression,
             hand: Vec::new(),
             deck_count: deck.len(),
@@ -47,20 +49,39 @@ impl PlayerState {
     }
 }
 impl Hero {
-    pub(super) fn new(side: Side, hero_type: HeroType, effects: &MatchProgressionEffects) -> Self {
+    pub(super) fn new(
+        side: Side,
+        board_radius: i32,
+        hero_type: HeroType,
+        effects: &MatchProgressionEffects,
+    ) -> Self {
         let (id, position) = match side {
             Side::Player => (
                 "player-hero",
                 HexCoord {
-                    q: 0,
-                    r: BOARD_RADIUS,
+                    q: if board_radius > BOARD_RADIUS { -1 } else { 0 },
+                    r: board_radius,
                 },
             ),
             Side::Opponent => (
                 "opponent-hero",
                 HexCoord {
-                    q: 0,
-                    r: -BOARD_RADIUS,
+                    q: if board_radius > BOARD_RADIUS { 1 } else { 0 },
+                    r: -board_radius,
+                },
+            ),
+            Side::PlayerTwo => (
+                "player-two-hero",
+                HexCoord {
+                    q: 1,
+                    r: board_radius - 1,
+                },
+            ),
+            Side::OpponentTwo => (
+                "opponent-two-hero",
+                HexCoord {
+                    q: -1,
+                    r: 1 - board_radius,
                 },
             ),
         };
@@ -72,6 +93,7 @@ impl Hero {
         Self {
             id: id.to_string(),
             side,
+            knocked_out: false,
             hero_type,
             hp: max_hp,
             max_hp,

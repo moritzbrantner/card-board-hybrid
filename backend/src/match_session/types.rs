@@ -15,10 +15,13 @@ pub struct MatchState {
     pub priority_side: Option<Side>,
     pub player: PlayerState,
     pub opponent: PlayerState,
+    pub player_two: Option<PlayerState>,
+    pub opponent_two: Option<PlayerState>,
     pub board: HexBoard,
     pub action_stack: Vec<StackItem>,
     pub log: Vec<String>,
     pub winner: Option<Side>,
+    pub(super) priority_passes: Vec<Side>,
     pub(super) next_stack_item_id: u32,
     pub(super) next_unit_id: u32,
     pub(super) next_item_id: u32,
@@ -30,8 +33,9 @@ impl Serialize for MatchState {
     where
         S: serde::Serializer,
     {
-        let mut state = serializer.serialize_struct("MatchState", 11)?;
+        let mut state = serializer.serialize_struct("MatchState", 14)?;
         state.serialize_field("mode", &self.mode)?;
+        state.serialize_field("format", &self.format())?;
         state.serialize_field("round", &self.round)?;
         state.serialize_field("phase", &self.phase)?;
         state.serialize_field("activeSide", &self.active_side)?;
@@ -50,6 +54,25 @@ impl Serialize for MatchState {
                 expose_hand: false,
             },
         )?;
+        if let Some(player_two) = &self.player_two {
+            state.serialize_field(
+                "playerTwo",
+                &PublicPlayerState {
+                    player: player_two,
+                    expose_hand: false,
+                },
+            )?;
+        }
+        if let Some(opponent_two) = &self.opponent_two {
+            state.serialize_field(
+                "opponentTwo",
+                &PublicPlayerState {
+                    player: opponent_two,
+                    expose_hand: false,
+                },
+            )?;
+        }
+        state.serialize_field("participants", &self.public_participants_for_side(Side::Player))?;
         state.serialize_field("board", &self.public_board())?;
         state.serialize_field("actionStack", &self.action_stack)?;
         state.serialize_field("log", &self.log)?;
@@ -68,9 +91,11 @@ impl Serialize for PublicPlayerState<'_> {
     where
         S: serde::Serializer,
     {
-        let field_count = if self.expose_hand { 10 } else { 9 };
+        let field_count = if self.expose_hand { 11 } else { 10 };
         let mut state = serializer.serialize_struct("PlayerState", field_count)?;
         state.serialize_field("side", &self.player.side)?;
+        state.serialize_field("team", &self.player.side.team())?;
+        state.serialize_field("knockedOut", &self.player.knocked_out)?;
         state.serialize_field("mana", &self.player.mana)?;
         state.serialize_field("maxMana", &self.player.max_mana)?;
         state.serialize_field("hero", &self.player.hero)?;
@@ -97,12 +122,23 @@ pub enum Phase {
 pub enum Side {
     Player,
     Opponent,
+    PlayerTwo,
+    OpponentTwo,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Team {
+    Player,
+    Opponent,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerState {
     pub side: Side,
+    #[serde(default)]
+    pub knocked_out: bool,
     pub mana: u8,
     pub max_mana: u8,
     pub hero: Hero,
@@ -156,6 +192,8 @@ pub struct MatchProgressionEffects {
 pub struct Hero {
     pub id: String,
     pub side: Side,
+    #[serde(default)]
+    pub knocked_out: bool,
     #[serde(default)]
     pub hero_type: HeroType,
     pub hp: i32,

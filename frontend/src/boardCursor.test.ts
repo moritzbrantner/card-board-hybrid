@@ -81,15 +81,15 @@ describe("board cursor", () => {
   });
 });
 
-function matchWithHeroPositions(positions: Record<Side, { q: number; r: number }>): MatchState {
+function matchWithHeroPositions(positions: Partial<Record<Side, { q: number; r: number }>>): MatchState {
   return {
     mode: "solo",
     round: 1,
     phase: "planning",
     activeSide: "player",
     prioritySide: null,
-    player: participant("player", positions.player),
-    opponent: participant("opponent", positions.opponent),
+    player: participant("player", positions.player ?? { q: 0, r: 3 }),
+    opponent: participant("opponent", positions.opponent ?? { q: 0, r: -3 }),
     board: { radius: 3, tiles: [], manaSources: [], units: [], droppedItems: [] },
     actionStack: [],
     log: [],

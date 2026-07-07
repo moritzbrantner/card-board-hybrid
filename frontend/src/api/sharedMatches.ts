@@ -1,5 +1,6 @@
 export {
   createSharedMatch,
+  createSharedTwoVTwoMatch,
   joinSharedMatch,
   loadSharedMatch,
   loadSharedMatchSummary,

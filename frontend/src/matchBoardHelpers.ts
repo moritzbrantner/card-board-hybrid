@@ -10,6 +10,7 @@ import type {
   MatchState,
   ReplayFrame,
   Side,
+  Team,
 } from "./types";
 import type { AnimatedPieceSnapshot, BoardAnimationCue, PieceAnimation } from "./boardAnimations";
 import type { BoardPiece } from "./appTypes";
@@ -91,19 +92,14 @@ export function pieceAnimationFeedback(animation?: PieceAnimation) {
 }
 
 export function pieceAt(match: MatchState, coord: HexCoord): BoardPiece | null {
-  if (sameCoord(match.player.hero.position, coord)) {
-    return {
-      ...match.player.hero,
-      pieceType: "hero",
-      name: heroTypeLabel(match.player.hero.heroType),
-    };
-  }
-  if (sameCoord(match.opponent.hero.position, coord)) {
-    return {
-      ...match.opponent.hero,
-      pieceType: "hero",
-      name: heroTypeLabel(match.opponent.hero.heroType),
-    };
+  for (const participant of participantsInMatch(match)) {
+    if (!participant.knockedOut && sameCoord(participant.hero.position, coord)) {
+      return {
+        ...participant.hero,
+        pieceType: "hero",
+        name: heroTypeLabel(participant.hero.heroType),
+      };
+    }
   }
 
   const unit = match.board.units.find((candidate) => sameCoord(candidate.position, coord));
@@ -164,19 +160,14 @@ export function pieceStatLabel(piece: BoardPiece) {
 }
 
 export function pieceById(match: MatchState, pieceId: string): BoardPiece | null {
-  if (match.player.hero.id === pieceId) {
-    return {
-      ...match.player.hero,
-      pieceType: "hero",
-      name: heroTypeLabel(match.player.hero.heroType),
-    };
-  }
-  if (match.opponent.hero.id === pieceId) {
-    return {
-      ...match.opponent.hero,
-      pieceType: "hero",
-      name: heroTypeLabel(match.opponent.hero.heroType),
-    };
+  for (const participant of participantsInMatch(match)) {
+    if (!participant.knockedOut && participant.hero.id === pieceId) {
+      return {
+        ...participant.hero,
+        pieceType: "hero",
+        name: heroTypeLabel(participant.hero.heroType),
+      };
+    }
   }
 
   const unit = match.board.units.find((candidate) => candidate.id === pieceId);
@@ -184,11 +175,28 @@ export function pieceById(match: MatchState, pieceId: string): BoardPiece | null
 }
 
 export function participantBySide(match: MatchState, side: Side): MatchParticipantState {
-  return side === "player" ? match.player : match.opponent;
+  return participantsInMatch(match).find((participant) => participant.side === side) ?? match.player;
 }
 
 export function opponentSideOf(side: Side): Side {
-  return side === "player" ? "opponent" : "player";
+  return teamOfSide(side) === "player" ? "opponent" : "player";
+}
+
+export function teamOfSide(side: Side): Team {
+  return side === "player" || side === "playerTwo" ? "player" : "opponent";
+}
+
+export function sameTeam(a: Side, b: Side) {
+  return teamOfSide(a) === teamOfSide(b);
+}
+
+export function participantsInMatch(match: MatchState): MatchParticipantState[] {
+  if (match.participants?.length) {
+    return match.participants;
+  }
+  return [match.player, match.opponent, match.playerTwo, match.opponentTwo].filter(
+    (participant): participant is MatchParticipantState => Boolean(participant),
+  );
 }
 
 export function handForSide(match: MatchState, side: Side): Card[] {
@@ -216,16 +224,13 @@ export function cardFanStyle(index: number, total: number): CardFanStyle {
 
 export function piecesInMatch(match: MatchState): BoardPiece[] {
   return [
-    {
-      ...match.player.hero,
-      pieceType: "hero",
-      name: heroTypeLabel(match.player.hero.heroType),
-    },
-    {
-      ...match.opponent.hero,
-      pieceType: "hero",
-      name: heroTypeLabel(match.opponent.hero.heroType),
-    },
+    ...participantsInMatch(match)
+      .filter((participant) => !participant.knockedOut)
+      .map((participant) => ({
+        ...participant.hero,
+        pieceType: "hero" as const,
+        name: heroTypeLabel(participant.hero.heroType),
+      })),
     ...match.board.units.map((unit) => ({ ...unit, pieceType: "unit" as const })),
   ];
 }
@@ -297,7 +302,6 @@ export function isLegalCardTarget(
   piece: BoardPiece | null,
 ) {
   const participant = participantBySide(match, viewerSide);
-  const opponentSide = viewerSide === "player" ? "opponent" : "player";
   if (!isPlayableCard(match, viewerSide, card)) {
     return false;
   }
@@ -318,7 +322,7 @@ export function isLegalCardTarget(
     return (
       !!piece &&
       piece.pieceType === "unit" &&
-      piece.side === viewerSide &&
+      sameTeam(piece.side, viewerSide) &&
       distance(participant.hero.position, piece.position) <= card.kind.range
     );
   }
@@ -329,19 +333,19 @@ export function isLegalCardTarget(
 
   switch (card.kind.effect.type) {
     case "heal":
-      return piece.side === viewerSide;
+      return sameTeam(piece.side, viewerSide);
     case "buff":
-      return piece.side === viewerSide && piece.pieceType === "unit";
+      return sameTeam(piece.side, viewerSide) && piece.pieceType === "unit";
     case "statBuff":
-      return piece.side === viewerSide && targetPolicyAllows(card.kind.effect.targets, piece.pieceType === "hero");
+      return sameTeam(piece.side, viewerSide) && targetPolicyAllows(card.kind.effect.targets, piece.pieceType === "hero");
     case "damage":
     case "areaDamage":
-      return piece.side === opponentSide;
+      return !sameTeam(piece.side, viewerSide);
     case "draw":
       return piece.side === viewerSide && piece.pieceType === "hero";
     case "lineDamage":
       return (
-        piece.side === opponentSide &&
+        !sameTeam(piece.side, viewerSide) &&
         lineDirection(participant.hero.position, piece.position) !== null
       );
   }
@@ -379,7 +383,7 @@ export function isLegalAttack(
     match.actionStack.length === 0 &&
     match.activeSide === viewerSide &&
     attacker.side === viewerSide &&
-    target.side !== viewerSide &&
+    !sameTeam(target.side, viewerSide) &&
     attacker.apRemaining > 0 &&
     !attacker.hasAttacked &&
     distance(attacker.position, target.position) >= 1 &&

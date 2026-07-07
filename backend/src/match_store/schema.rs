@@ -39,7 +39,8 @@ pub(super) fn prepare_connection(connection: &Connection) -> Result<(), MatchSto
             creator_user_id INTEGER,
             created_at INTEGER NOT NULL DEFAULT (unixepoch()),
             updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-            forfeit_winner TEXT
+            forfeit_winner TEXT,
+            format TEXT NOT NULL DEFAULT 'duel'
         );
         CREATE TABLE IF NOT EXISTS match_seats (
             match_id TEXT NOT NULL,
@@ -74,6 +75,12 @@ pub(super) fn prepare_connection(connection: &Connection) -> Result<(), MatchSto
     )?;
     add_column_if_missing(connection, "matches", "owner_user_id", "INTEGER")?;
     add_column_if_missing(connection, "shared_matches", "creator_user_id", "INTEGER")?;
+    add_column_if_missing(
+        connection,
+        "shared_matches",
+        "format",
+        "TEXT NOT NULL DEFAULT 'duel'",
+    )?;
     let had_legacy_seat_hero = column_exists(connection, "match_seats", "wizard_type")?;
     add_column_if_missing(connection, "match_seats", "hero_type", "TEXT")?;
     add_column_if_missing(connection, "match_seats", "participant_user_id", "INTEGER")?;

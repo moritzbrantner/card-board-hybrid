@@ -93,17 +93,28 @@ pub struct StoredSharedSeat {
 #[derive(Clone, Debug)]
 pub struct StoredSharedMatch {
     pub match_id: String,
+    pub format: SharedMatchFormat,
     pub status: SharedMatchStatus,
     pub viewer_seat: StoredSharedSeat,
     pub opposing_seat: StoredSharedSeat,
+    pub seats: Vec<StoredSharedSeat>,
     pub state: Option<MatchState>,
 }
 
 #[derive(Clone, Debug)]
 pub struct CreatedSharedMatch {
     pub match_id: String,
+    pub format: SharedMatchFormat,
     pub player_token: String,
     pub opponent_token: String,
+    pub player_two_token: Option<String>,
+    pub opponent_two_token: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SharedMatchFormat {
+    Duel,
+    TwoVTwo,
 }
 
 pub struct SqliteMatchStore {
@@ -311,11 +322,14 @@ impl SqliteMatchStore {
     pub fn create_shared_match(
         &mut self,
         creator_user_id: Option<i64>,
+        format: SharedMatchFormat,
     ) -> Result<CreatedSharedMatch, MatchStoreError> {
         for attempt in 0..8 {
             let match_id = readable_match_id(attempt);
             let player_token = random_seat_token();
             let opponent_token = random_seat_token();
+            let player_two_token = (format == SharedMatchFormat::TwoVTwo).then(random_seat_token);
+            let opponent_two_token = (format == SharedMatchFormat::TwoVTwo).then(random_seat_token);
             let transaction = self.connection.transaction()?;
             let inserted = transaction.execute(
                 "
@@ -323,12 +337,13 @@ impl SqliteMatchStore {
                     match_id,
                     status,
                     creator_user_id,
+                    format,
                     created_at,
                     updated_at
                 )
-                VALUES (?1, 'setup', ?2, unixepoch(), unixepoch())
+                VALUES (?1, 'setup', ?2, ?3, unixepoch(), unixepoch())
                 ",
-                params![match_id, creator_user_id],
+                params![match_id, creator_user_id, format.as_str()],
             )?;
 
             if inserted == 1 {
@@ -348,11 +363,34 @@ impl SqliteMatchStore {
                     None,
                     false,
                 )?;
+                if let Some(player_two_token) = &player_two_token {
+                    insert_shared_seat(
+                        &transaction,
+                        &match_id,
+                        Side::PlayerTwo,
+                        player_two_token,
+                        None,
+                        false,
+                    )?;
+                }
+                if let Some(opponent_two_token) = &opponent_two_token {
+                    insert_shared_seat(
+                        &transaction,
+                        &match_id,
+                        Side::OpponentTwo,
+                        opponent_two_token,
+                        None,
+                        false,
+                    )?;
+                }
                 transaction.commit()?;
                 return Ok(CreatedSharedMatch {
                     match_id,
+                    format,
                     player_token,
                     opponent_token,
+                    player_two_token,
+                    opponent_two_token,
                 });
             }
 
@@ -412,19 +450,19 @@ impl SqliteMatchStore {
         id: &str,
         seat_token: &str,
     ) -> Result<Option<StoredSharedMatch>, MatchStoreError> {
-        let row: Option<(String, String)> = self
+        let row: Option<(String, String, String)> = self
             .connection
             .query_row(
                 "
-                SELECT match_id, status
+                SELECT match_id, status, format
                 FROM shared_matches
                 WHERE match_id = ?1
                 ",
                 params![id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
-        let Some((match_id, status)) = row else {
+        let Some((match_id, status, format)) = row else {
             return Ok(None);
         };
 
@@ -437,16 +475,19 @@ impl SqliteMatchStore {
             return Ok(None);
         };
         let opposing_seat = seats
-            .into_iter()
-            .find(|seat| seat.side != viewer_seat.side)
+            .iter()
+            .find(|seat| seat.side.team() != viewer_seat.side.team())
+            .cloned()
             .expect("shared match should have an opposing seat");
         let state = self.load_match(&match_id)?.map(|stored| stored.state);
 
         Ok(Some(StoredSharedMatch {
             match_id,
+            format: SharedMatchFormat::from_db(&format),
             status: SharedMatchStatus::from_db(&status),
             viewer_seat,
             opposing_seat,
+            seats,
             state,
         }))
     }
@@ -492,7 +533,67 @@ impl SqliteMatchStore {
             ],
         )?;
 
-        if let Some((
+        if shared.format == SharedMatchFormat::TwoVTwo {
+            if let Some(loadouts) = ready_shared_two_v_two_loadouts(&transaction, id)? {
+                let player_deck = deck_library::deck_from_snapshot(Side::Player, &loadouts.player.1)?;
+                let opponent_deck =
+                    deck_library::deck_from_snapshot(Side::Opponent, &loadouts.opponent.1)?;
+                let player_two_deck =
+                    deck_library::deck_from_snapshot(Side::PlayerTwo, &loadouts.player_two.1)?;
+                let opponent_two_deck =
+                    deck_library::deck_from_snapshot(Side::OpponentTwo, &loadouts.opponent_two.1)?;
+                let state = MatchState::new_shared_two_v_two_with_progression_loadouts(
+                    loadouts.player.0,
+                    loadouts.opponent.0,
+                    loadouts.player_two.0,
+                    loadouts.opponent_two.0,
+                    player_deck,
+                    opponent_deck,
+                    player_two_deck,
+                    opponent_two_deck,
+                    loadouts.player.2,
+                    loadouts.opponent.2,
+                    loadouts.player_two.2,
+                    loadouts.opponent_two.2,
+                );
+                let snapshot = state.to_snapshot_json()?;
+                let initial_frame = state.initial_replay_frame();
+                let event_json = serde_json::to_string(&initial_frame.event)?;
+                transaction.execute(
+                    "
+                    INSERT INTO matches (
+                        id,
+                        snapshot_json,
+                        initial_snapshot_json,
+                        mode,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?1, ?2, ?2, 'shared', unixepoch(), unixepoch())
+                    ",
+                    params![id, snapshot],
+                )?;
+                insert_replay_frame(&transaction, id, 0, &initial_frame, &event_json)?;
+                transaction.execute(
+                    "
+                    UPDATE shared_matches
+                    SET status = 'active',
+                        updated_at = unixepoch()
+                    WHERE match_id = ?1
+                    ",
+                    params![id],
+                )?;
+            } else {
+                transaction.execute(
+                    "
+                    UPDATE shared_matches
+                    SET updated_at = unixepoch()
+                    WHERE match_id = ?1
+                    ",
+                    params![id],
+                )?;
+            }
+        } else if let Some((
             player_hero_type,
             opponent_hero_type,
             player_recipe,
@@ -1163,6 +1264,7 @@ fn ready_shared_loadouts(
                 opponent_deck = Some(deck_snapshot);
                 opponent_progression = Some(progression_loadout);
             }
+            Some(Side::PlayerTwo) | Some(Side::OpponentTwo) => {}
             None => {}
         }
     }
@@ -1194,6 +1296,81 @@ fn ready_shared_loadouts(
             _ => None,
         },
     )
+}
+
+type ReadySeatLoadout = (HeroType, DeckRecipeSnapshot, MatchProgressionLoadout);
+
+struct ReadyTwoVTwoLoadouts {
+    player: ReadySeatLoadout,
+    opponent: ReadySeatLoadout,
+    player_two: ReadySeatLoadout,
+    opponent_two: ReadySeatLoadout,
+}
+
+fn ready_shared_two_v_two_loadouts(
+    transaction: &Transaction<'_>,
+    match_id: &str,
+) -> Result<Option<ReadyTwoVTwoLoadouts>, MatchStoreError> {
+    let mut statement = transaction.prepare(
+        "
+        SELECT side, hero_type, deck_recipe_snapshot_json, progression_loadout_json, joined_at
+        FROM match_seats
+        WHERE match_id = ?1
+        ",
+    )?;
+    let rows = statement.query_map(params![match_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<i64>>(4)?,
+        ))
+    })?;
+
+    let mut player = None;
+    let mut opponent = None;
+    let mut player_two = None;
+    let mut opponent_two = None;
+
+    for row in rows {
+        let (side, hero_type, deck_snapshot_json, progression_loadout_json, joined_at) = row?;
+        if joined_at.is_none() {
+            continue;
+        }
+        let Some(hero_type) = hero_type.as_deref().and_then(hero_type_from_db) else {
+            continue;
+        };
+        let Some(deck_snapshot_json) = deck_snapshot_json else {
+            continue;
+        };
+        let deck_snapshot = serde_json::from_str::<DeckRecipeSnapshot>(&deck_snapshot_json)?;
+        let progression_loadout = progression_loadout_json
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()?
+            .unwrap_or_default();
+        let loadout = (hero_type, deck_snapshot, progression_loadout);
+        match side_from_db(&side) {
+            Some(Side::Player) => player = Some(loadout),
+            Some(Side::Opponent) => opponent = Some(loadout),
+            Some(Side::PlayerTwo) => player_two = Some(loadout),
+            Some(Side::OpponentTwo) => opponent_two = Some(loadout),
+            None => {}
+        }
+    }
+
+    Ok(match (player, opponent, player_two, opponent_two) {
+        (Some(player), Some(opponent), Some(player_two), Some(opponent_two)) => {
+            Some(ReadyTwoVTwoLoadouts {
+                player,
+                opponent,
+                player_two,
+                opponent_two,
+            })
+        }
+        _ => None,
+    })
 }
 
 fn next_frame_index(transaction: &Transaction<'_>, id: &str) -> Result<u32, MatchStoreError> {

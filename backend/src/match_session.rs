@@ -31,6 +31,7 @@ pub(crate) use solo_ai_policy::{AiPolicyConfig, SoloAiPolicy, default_policy_con
 use solo_ai_policy::{SoloAiActionIntent, SoloAiDecision, SoloAiView};
 
 const BOARD_RADIUS: i32 = 3;
+const TWO_V_TWO_BOARD_RADIUS: i32 = 4;
 const HERO_MANA: u8 = 3;
 const OPENING_HAND_SIZE: usize = 4;
 
@@ -166,6 +167,40 @@ impl MatchState {
         )
     }
 
+    pub fn new_shared_two_v_two_with_progression_loadouts(
+        player_hero_type: HeroType,
+        opponent_hero_type: HeroType,
+        player_two_hero_type: HeroType,
+        opponent_two_hero_type: HeroType,
+        player_deck: Vec<Card>,
+        opponent_deck: Vec<Card>,
+        player_two_deck: Vec<Card>,
+        opponent_two_deck: Vec<Card>,
+        player_progression: MatchProgressionLoadout,
+        opponent_progression: MatchProgressionLoadout,
+        player_two_progression: MatchProgressionLoadout,
+        opponent_two_progression: MatchProgressionLoadout,
+    ) -> Self {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos() as u64)
+            .unwrap_or(1);
+
+        Self::new_with_seed_hero_types_mode_decks_radius_and_optional_teammates(
+            seed,
+            player_hero_type,
+            opponent_hero_type,
+            MatchMode::Shared,
+            TWO_V_TWO_BOARD_RADIUS,
+            player_deck,
+            opponent_deck,
+            player_progression,
+            opponent_progression,
+            Some((player_two_hero_type, player_two_deck, player_two_progression)),
+            Some((opponent_two_hero_type, opponent_two_deck, opponent_two_progression)),
+        )
+    }
+
     pub fn to_snapshot_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(&MatchSnapshot::from(self))
     }
@@ -185,19 +220,33 @@ impl MatchState {
     }
 
     pub fn replay_value(&self, visibility: ReplayVisibility) -> serde_json::Value {
-        json!({
+        let mut value = json!({
             "mode": self.mode,
+            "format": self.format(),
             "round": self.round,
             "phase": self.phase,
             "activeSide": self.active_side,
             "prioritySide": self.priority_side,
             "player": self.player.replay_value(true),
             "opponent": self.opponent.replay_value(visibility == ReplayVisibility::Revealed),
+            "playerTwo": self.player_two.as_ref().map(|player| player.replay_value(visibility == ReplayVisibility::Revealed)),
+            "opponentTwo": self.opponent_two.as_ref().map(|player| player.replay_value(visibility == ReplayVisibility::Revealed)),
+            "participants": self.replay_participants(visibility),
             "board": self.public_board(),
             "actionStack": self.action_stack,
             "log": self.log,
             "winner": self.winner,
-        })
+        });
+        if self.player_two.is_none() {
+            value.as_object_mut().expect("match value should be an object").remove("playerTwo");
+        }
+        if self.opponent_two.is_none() {
+            value
+                .as_object_mut()
+                .expect("match value should be an object")
+                .remove("opponentTwo");
+        }
+        value
     }
 
     #[allow(
@@ -259,6 +308,38 @@ impl MatchState {
         player_progression: MatchProgressionLoadout,
         opponent_progression: MatchProgressionLoadout,
     ) -> Self {
+        Self::new_with_seed_hero_types_mode_decks_radius_and_optional_teammates(
+            seed,
+            player_hero_type,
+            opponent_hero_type,
+            mode,
+            BOARD_RADIUS,
+            player_deck,
+            opponent_deck,
+            player_progression,
+            opponent_progression,
+            None,
+            None,
+        )
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "2v2 setup passes mirrored per-seat setup explicitly"
+    )]
+    fn new_with_seed_hero_types_mode_decks_radius_and_optional_teammates(
+        seed: u64,
+        player_hero_type: HeroType,
+        opponent_hero_type: HeroType,
+        mode: MatchMode,
+        board_radius: i32,
+        player_deck: Vec<Card>,
+        opponent_deck: Vec<Card>,
+        player_progression: MatchProgressionLoadout,
+        opponent_progression: MatchProgressionLoadout,
+        player_two: Option<(HeroType, Vec<Card>, MatchProgressionLoadout)>,
+        opponent_two: Option<(HeroType, Vec<Card>, MatchProgressionLoadout)>,
+    ) -> Self {
         let mut game = Self {
             mode,
             round: 1,
@@ -266,6 +347,7 @@ impl MatchState {
             active_side: Side::Player,
             player: PlayerState::new(
                 Side::Player,
+                board_radius,
                 seed ^ 0xA11C_E551_1234_5678,
                 player_hero_type,
                 player_deck,
@@ -273,16 +355,38 @@ impl MatchState {
             ),
             opponent: PlayerState::new(
                 Side::Opponent,
+                board_radius,
                 seed ^ 0x0B0E_1234_9876_5432,
                 opponent_hero_type,
                 opponent_deck,
                 opponent_progression,
             ),
-            board: HexBoard::new(BOARD_RADIUS),
+            player_two: player_two.map(|(hero_type, deck, progression)| {
+                PlayerState::new(
+                    Side::PlayerTwo,
+                    board_radius,
+                    seed ^ 0xA11C_E552_2234_5678,
+                    hero_type,
+                    deck,
+                    progression,
+                )
+            }),
+            opponent_two: opponent_two.map(|(hero_type, deck, progression)| {
+                PlayerState::new(
+                    Side::OpponentTwo,
+                    board_radius,
+                    seed ^ 0x0B0E_2234_9876_5432,
+                    hero_type,
+                    deck,
+                    progression,
+                )
+            }),
+            board: HexBoard::new(board_radius),
             action_stack: Vec::new(),
             priority_side: None,
             log: vec!["The heroes enter the hex arena.".to_string()],
             winner: None,
+            priority_passes: Vec::new(),
             next_stack_item_id: 1,
             next_unit_id: 1,
             next_item_id: 1,
@@ -294,6 +398,16 @@ impl MatchState {
         }
         for _ in 0..opening_hand_size(&game.opponent.progression) {
             game.opponent.draw();
+        }
+        if let Some(player_two) = &mut game.player_two {
+            for _ in 0..opening_hand_size(&player_two.progression) {
+                player_two.draw();
+            }
+        }
+        if let Some(opponent_two) = &mut game.opponent_two {
+            for _ in 0..opening_hand_size(&opponent_two.progression) {
+                opponent_two.draw();
+            }
         }
         let mut ignored_frames = Vec::new();
         game.start_turn(Side::Player, &mut ignored_frames, None);
@@ -367,19 +481,67 @@ impl MatchState {
     }
 
     pub fn public_value_for_side(&self, viewer_side: Side) -> serde_json::Value {
-        json!({
+        let mut value = json!({
             "mode": self.mode,
+            "format": self.format(),
             "round": self.round,
             "phase": self.phase,
             "activeSide": self.active_side,
             "prioritySide": self.priority_side,
             "player": self.player.replay_value(viewer_side == Side::Player),
             "opponent": self.opponent.replay_value(viewer_side == Side::Opponent),
+            "playerTwo": self.player_two.as_ref().map(|player| {
+                player.replay_value(viewer_side == Side::PlayerTwo || viewer_side.team() == player.side.team())
+            }),
+            "opponentTwo": self.opponent_two.as_ref().map(|player| {
+                player.replay_value(viewer_side == Side::OpponentTwo || viewer_side.team() == player.side.team())
+            }),
+            "participants": self.public_participants_for_side(viewer_side),
             "board": self.board,
             "actionStack": self.action_stack,
             "log": self.log,
             "winner": self.winner,
-        })
+        });
+        if self.player_two.is_none() {
+            value.as_object_mut().expect("match value should be an object").remove("playerTwo");
+        }
+        if self.opponent_two.is_none() {
+            value
+                .as_object_mut()
+                .expect("match value should be an object")
+                .remove("opponentTwo");
+        }
+        value
+    }
+
+    pub fn format(&self) -> &'static str {
+        if self.player_two.is_some() || self.opponent_two.is_some() {
+            "twoVTwo"
+        } else {
+            "duel"
+        }
+    }
+
+    fn public_participants_for_side(&self, viewer_side: Side) -> Vec<serde_json::Value> {
+        self.participants()
+            .into_iter()
+            .map(|participant| {
+                participant.replay_value(
+                    participant.side == viewer_side || participant.side.team() == viewer_side.team(),
+                )
+            })
+            .collect()
+    }
+
+    fn replay_participants(&self, visibility: ReplayVisibility) -> Vec<serde_json::Value> {
+        self.participants()
+            .into_iter()
+            .map(|participant| {
+                participant.replay_value(
+                    visibility == ReplayVisibility::Revealed || participant.side.team() == Team::Player,
+                )
+            })
+            .collect()
     }
 
     fn apply_action_internal(
@@ -438,6 +600,9 @@ impl MatchState {
     }
 
     fn require_turn_action_side(&self, side: Side) -> Result<(), MatchError> {
+        if self.player_ref(side).knocked_out {
+            return Err(MatchError::NotActiveSide);
+        }
         if !self.action_stack.is_empty() {
             return Err(MatchError::StackPending);
         }
@@ -497,7 +662,18 @@ impl MatchState {
             },
         );
 
-        if side == Side::Opponent {
+        let next_side = self.next_turn_side_after(side);
+        if self
+            .participant_sides()
+            .iter()
+            .position(|candidate| *candidate == next_side)
+            .unwrap_or_default()
+            <= self
+                .participant_sides()
+                .iter()
+                .position(|candidate| *candidate == side)
+                .unwrap_or_default()
+        {
             self.round += 1;
             self.log.insert(0, format!("Round {} begins.", self.round));
             self.truncate_log();
@@ -508,7 +684,7 @@ impl MatchState {
             );
         }
 
-        self.start_turn(side.opponent(), frames, action_index);
+        self.start_turn(next_side, frames, action_index);
         self.truncate_log();
     }
 
@@ -613,6 +789,9 @@ impl MatchState {
     ) -> Result<(), MatchError> {
         let stack_was_empty = self.action_stack.is_empty();
         let card = {
+            if self.player_ref(side).knocked_out {
+                return Err(MatchError::NotActiveSide);
+            }
             let player = self.player_ref(side);
             player
                 .hand
@@ -955,9 +1134,9 @@ impl MatchState {
                         ReplayEvent::CardDrawn {
                             side,
                             card: Some(CardSummary::from(&card)),
-                            hidden: side == Side::Opponent,
-                        },
-                    );
+                    hidden: side.team() == Team::Opponent,
+                },
+            );
                 }
                 self.log_spell_resolution(side, card_name, resolved_spell.log);
             }
@@ -1003,7 +1182,8 @@ impl MatchState {
         };
         self.next_stack_item_id += 1;
         self.action_stack.push(item.clone());
-        self.priority_side = Some(side.opponent());
+        self.priority_passes.clear();
+        self.priority_side = self.next_priority_side_for_team(side.opposing_team(), Some(side), &[]);
         item
     }
 
@@ -1018,6 +1198,18 @@ impl MatchState {
         }
         if self.priority_side != Some(side) {
             return Err(MatchError::NotPrioritySide);
+        }
+
+        if self.format() == "twoVTwo" {
+            self.priority_passes.push(side);
+            if let Some(next_priority_side) = self.next_priority_side_for_team(
+                side.team(),
+                Some(side),
+                &self.priority_passes,
+            ) {
+                self.priority_side = Some(next_priority_side);
+                return Ok(());
+            }
         }
 
         self.resolve_top_stack_item(frames, action_index);
@@ -1087,7 +1279,11 @@ impl MatchState {
             }
         }
 
-        self.priority_side = self.action_stack.last().map(|item| item.side.opponent());
+        self.priority_passes.clear();
+        self.priority_side = self
+            .action_stack
+            .last()
+            .and_then(|item| self.next_priority_side_for_team(item.side.opposing_team(), Some(item.side), &[]));
     }
 
     fn resolve_building_card(
@@ -1231,7 +1427,7 @@ impl MatchState {
             return;
         }
 
-        let enemy_pieces = self.pieces_for_side(side.opponent());
+        let enemy_pieces = self.pieces_for_opposing_team(side);
         let progression = self.player_ref(side).progression.clone();
         let Ok(resolved_spell) = card_interactions::resolve_spell(
             &card,
@@ -1263,7 +1459,7 @@ impl MatchState {
             .board
             .units
             .iter()
-            .position(|unit| unit.id == unit_id && unit.side == side)
+            .position(|unit| unit.id == unit_id && unit.side.team() == side.team())
         else {
             self.log
                 .insert(0, format!("{} had no legal carrier.", card.name));
@@ -1475,10 +1671,12 @@ impl MatchState {
             return Err(MatchError::OccupiedHex);
         }
 
-        if self.player.hero.id == piece_id {
-            self.player.hero.ap_remaining -= 1;
-        } else if self.opponent.hero.id == piece_id {
-            self.opponent.hero.ap_remaining -= 1;
+        if let Some(hero_side) = self
+            .participant_sides()
+            .into_iter()
+            .find(|candidate| self.player_ref(*candidate).hero.id == piece_id)
+        {
+            self.player_mut(hero_side).hero.ap_remaining -= 1;
         } else if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
             unit.ap_remaining -= 1;
         }
@@ -1530,10 +1728,12 @@ impl MatchState {
             return;
         }
 
-        if self.player.hero.id == piece_id {
-            self.player.hero.position = to;
-        } else if self.opponent.hero.id == piece_id {
-            self.opponent.hero.position = to;
+        if let Some(hero_side) = self
+            .participant_sides()
+            .into_iter()
+            .find(|candidate| self.player_ref(*candidate).hero.id == piece_id)
+        {
+            self.player_mut(hero_side).hero.position = to;
         } else if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
             unit.position = to;
         }
@@ -1571,7 +1771,7 @@ impl MatchState {
         if attacker.side != side {
             return Err(MatchError::NotYourPiece);
         }
-        if target.side == side {
+        if target.side.team() == side.team() {
             return Err(MatchError::InvalidTarget);
         }
         if attacker.ap_remaining == 0 {
@@ -1763,7 +1963,7 @@ impl MatchState {
             return;
         };
 
-        if attacker.side != side || target.side == side || !piece_can_attack(&attacker, &target) {
+        if attacker.side != side || target.side.team() == side.team() || !piece_can_attack(&attacker, &target) {
             self.log
                 .insert(0, format!("Attack by {} had no legal target.", attacker_id));
             return;
@@ -1999,7 +2199,7 @@ impl MatchState {
                     ReplayEvent::CardDrawn {
                         side,
                         card: Some(CardSummary::from(&card)),
-                        hidden: side == Side::Opponent,
+                        hidden: side.team() == Team::Opponent,
                     },
                 );
             }
@@ -2010,6 +2210,14 @@ impl MatchState {
         match side {
             Side::Player => &self.player,
             Side::Opponent => &self.opponent,
+            Side::PlayerTwo => self
+                .player_two
+                .as_ref()
+                .expect("player two should exist in a 2v2 match"),
+            Side::OpponentTwo => self
+                .opponent_two
+                .as_ref()
+                .expect("opponent two should exist in a 2v2 match"),
         }
     }
 
@@ -2017,11 +2225,93 @@ impl MatchState {
         match side {
             Side::Player => &mut self.player,
             Side::Opponent => &mut self.opponent,
+            Side::PlayerTwo => self
+                .player_two
+                .as_mut()
+                .expect("player two should exist in a 2v2 match"),
+            Side::OpponentTwo => self
+                .opponent_two
+                .as_mut()
+                .expect("opponent two should exist in a 2v2 match"),
         }
+    }
+
+    fn participants(&self) -> Vec<&PlayerState> {
+        let mut participants = vec![&self.player, &self.opponent];
+        if let Some(player_two) = &self.player_two {
+            participants.push(player_two);
+        }
+        if let Some(opponent_two) = &self.opponent_two {
+            participants.push(opponent_two);
+        }
+        participants
+    }
+
+    fn participant_sides(&self) -> Vec<Side> {
+        self.participants()
+            .into_iter()
+            .map(|participant| participant.side)
+            .collect()
+    }
+
+    fn active_participant_sides(&self) -> Vec<Side> {
+        self.participants()
+            .into_iter()
+            .filter(|participant| !participant.knocked_out)
+            .map(|participant| participant.side)
+            .collect()
+    }
+
+    fn next_turn_side_after(&self, side: Side) -> Side {
+        let order = self.participant_sides();
+        let Some(index) = order.iter().position(|candidate| *candidate == side) else {
+            return Side::Player;
+        };
+        for offset in 1..=order.len() {
+            let candidate = order[(index + offset) % order.len()];
+            if !self.player_ref(candidate).knocked_out {
+                return candidate;
+            }
+        }
+        side
+    }
+
+    fn next_priority_side_for_team(
+        &self,
+        team: Team,
+        after: Option<Side>,
+        passed: &[Side],
+    ) -> Option<Side> {
+        let order = self.participant_sides();
+        if order.is_empty() {
+            return None;
+        }
+        let start_index = after
+            .and_then(|side| order.iter().position(|candidate| *candidate == side))
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        for offset in 0..order.len() {
+            let candidate = order[(start_index + offset) % order.len()];
+            let participant = self.player_ref(candidate);
+            if participant.knocked_out || candidate.team() != team || passed.contains(&candidate) {
+                continue;
+            }
+            return Some(candidate);
+        }
+        None
     }
 
     pub(crate) fn player_mut_for_ai_lab(&mut self, side: Side) -> &mut PlayerState {
         self.player_mut(side)
+    }
+
+    pub(crate) fn participant_for_public(&self, side: Side) -> Option<&PlayerState> {
+        match side {
+            Side::Player => Some(&self.player),
+            Side::Opponent => Some(&self.opponent),
+            Side::PlayerTwo => self.player_two.as_ref(),
+            Side::OpponentTwo => self.opponent_two.as_ref(),
+        }
     }
 
     fn solo_ai_view_for_side(&self, side: Side) -> SoloAiView {
@@ -2086,8 +2376,12 @@ impl MatchState {
     }
 
     fn pieces_for_side(&self, side: Side) -> Vec<PieceView> {
-        let mut pieces =
-            vec![self.apply_aura_to_piece_view(PieceView::from(&self.player_ref(side).hero))];
+        let participant = self.player_ref(side);
+        let mut pieces = if participant.knocked_out {
+            Vec::new()
+        } else {
+            vec![self.apply_aura_to_piece_view(PieceView::from(&participant.hero))]
+        };
         pieces.extend(
             self.board
                 .units
@@ -2099,12 +2393,23 @@ impl MatchState {
         pieces
     }
 
+    fn pieces_for_team(&self, team: Team) -> Vec<PieceView> {
+        self.active_participant_sides()
+            .into_iter()
+            .filter(|side| side.team() == team)
+            .flat_map(|side| self.pieces_for_side(side))
+            .collect()
+    }
+
+    fn pieces_for_opposing_team(&self, side: Side) -> Vec<PieceView> {
+        self.pieces_for_team(side.opposing_team())
+    }
+
     fn piece_view_at(&self, coord: HexCoord) -> Option<PieceView> {
-        if self.player.hero.position == coord {
-            return Some(self.apply_aura_to_piece_view(PieceView::from(&self.player.hero)));
-        }
-        if self.opponent.hero.position == coord {
-            return Some(self.apply_aura_to_piece_view(PieceView::from(&self.opponent.hero)));
+        for participant in self.participants() {
+            if !participant.knocked_out && participant.hero.position == coord {
+                return Some(self.apply_aura_to_piece_view(PieceView::from(&participant.hero)));
+            }
         }
         self.board
             .units
@@ -2115,11 +2420,10 @@ impl MatchState {
     }
 
     fn piece_view(&self, piece_id: &str) -> Option<PieceView> {
-        if self.player.hero.id == piece_id {
-            return Some(self.apply_aura_to_piece_view(PieceView::from(&self.player.hero)));
-        }
-        if self.opponent.hero.id == piece_id {
-            return Some(self.apply_aura_to_piece_view(PieceView::from(&self.opponent.hero)));
+        for participant in self.participants() {
+            if !participant.knocked_out && participant.hero.id == piece_id {
+                return Some(self.apply_aura_to_piece_view(PieceView::from(&participant.hero)));
+            }
         }
         self.board
             .units
@@ -2171,11 +2475,10 @@ impl MatchState {
     }
 
     fn building_occupant_side(&self, position: HexCoord) -> Option<Side> {
-        if self.player.hero.position == position {
-            return Some(Side::Player);
-        }
-        if self.opponent.hero.position == position {
-            return Some(Side::Opponent);
+        for participant in self.participants() {
+            if !participant.knocked_out && participant.hero.position == position {
+                return Some(participant.side);
+            }
         }
         self.board
             .units
@@ -2188,7 +2491,7 @@ impl MatchState {
         HexCoord::directions()
             .into_iter()
             .map(|direction| {
-                self.pieces_for_side(side.opponent())
+                self.pieces_for_opposing_team(side)
                     .into_iter()
                     .filter(|piece| {
                         origin.distance(piece.position) <= i32::from(range)
@@ -2208,7 +2511,7 @@ impl MatchState {
         range: u8,
         targets: BuffTargetPolicy,
     ) -> Option<String> {
-        self.pieces_for_side(side)
+        self.pieces_for_team(side.team())
             .into_iter()
             .filter(|piece| origin.distance(piece.position) <= i32::from(range))
             .filter(|piece| card_interactions::target_policy_allows(targets, piece.is_hero))
@@ -2218,15 +2521,13 @@ impl MatchState {
     }
 
     fn mark_attacker_spent(&mut self, piece_id: &str) {
-        if self.player.hero.id == piece_id {
-            self.player.hero.ap_remaining -= 1;
-            self.player.hero.has_attacked = true;
-            return;
-        }
-        if self.opponent.hero.id == piece_id {
-            self.opponent.hero.ap_remaining -= 1;
-            self.opponent.hero.has_attacked = true;
-            return;
+        for side in self.participant_sides() {
+            if self.player_ref(side).hero.id == piece_id {
+                let hero = &mut self.player_mut(side).hero;
+                hero.ap_remaining -= 1;
+                hero.has_attacked = true;
+                return;
+            }
         }
         if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
             unit.ap_remaining -= 1;
@@ -2235,13 +2536,11 @@ impl MatchState {
     }
 
     fn damage_piece(&mut self, piece_id: &str, amount: i32) {
-        if self.player.hero.id == piece_id {
-            damage_hero(&mut self.player.hero, amount);
-            return;
-        }
-        if self.opponent.hero.id == piece_id {
-            damage_hero(&mut self.opponent.hero, amount);
-            return;
+        for side in self.participant_sides() {
+            if self.player_ref(side).hero.id == piece_id {
+                damage_hero(&mut self.player_mut(side).hero, amount);
+                return;
+            }
         }
         if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
             unit.armor -= amount;
@@ -2277,13 +2576,12 @@ impl MatchState {
     }
 
     fn heal_piece(&mut self, piece_id: &str, amount: i32) {
-        if self.player.hero.id == piece_id {
-            self.player.hero.hp = (self.player.hero.hp + amount).min(self.player.hero.max_hp);
-            return;
-        }
-        if self.opponent.hero.id == piece_id {
-            self.opponent.hero.hp = (self.opponent.hero.hp + amount).min(self.opponent.hero.max_hp);
-            return;
+        for side in self.participant_sides() {
+            if self.player_ref(side).hero.id == piece_id {
+                let hero = &mut self.player_mut(side).hero;
+                hero.hp = (hero.hp + amount).min(hero.max_hp);
+                return;
+            }
         }
         if let Some(unit) = self.board.units.iter_mut().find(|unit| unit.id == piece_id) {
             unit.armor = (unit.armor + amount).min(unit.max_armor);
@@ -2297,11 +2595,10 @@ impl MatchState {
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) -> bool {
-        if self.player.hero.id == piece_id {
-            return self.apply_stat_bonus_to_hero(Side::Player, bonus, frames, action_index);
-        }
-        if self.opponent.hero.id == piece_id {
-            return self.apply_stat_bonus_to_hero(Side::Opponent, bonus, frames, action_index);
+        for side in self.participant_sides() {
+            if self.player_ref(side).hero.id == piece_id {
+                return self.apply_stat_bonus_to_hero(side, bonus, frames, action_index);
+            }
         }
         if !card_interactions::target_policy_allows(bonus.targets, false) {
             return false;
@@ -2351,11 +2648,10 @@ impl MatchState {
     }
 
     fn piece_is_damaged(&self, piece_id: &str) -> bool {
-        if self.player.hero.id == piece_id {
-            return self.player.hero.hp < self.player.hero.max_hp;
-        }
-        if self.opponent.hero.id == piece_id {
-            return self.opponent.hero.hp < self.opponent.hero.max_hp;
+        for participant in self.participants() {
+            if participant.hero.id == piece_id {
+                return participant.hero.hp < participant.hero.max_hp;
+            }
         }
         self.board
             .units
@@ -2538,7 +2834,20 @@ impl MatchState {
             return;
         }
 
-        let winner = match (self.player.hero.hp <= 0, self.opponent.hero.hp <= 0) {
+        self.knock_out_defeated_heroes();
+
+        let player_team_out = self
+            .participants()
+            .into_iter()
+            .filter(|participant| participant.side.team() == Team::Player)
+            .all(|participant| participant.knocked_out);
+        let opponent_team_out = self
+            .participants()
+            .into_iter()
+            .filter(|participant| participant.side.team() == Team::Opponent)
+            .all(|participant| participant.knocked_out);
+
+        let winner = match (player_team_out, opponent_team_out) {
             (true, true) => Some(Side::Player),
             (false, true) => Some(Side::Player),
             (true, false) => Some(Side::Opponent),
@@ -2554,9 +2863,32 @@ impl MatchState {
         }
     }
 
+    fn knock_out_defeated_heroes(&mut self) {
+        let defeated_sides: Vec<_> = self
+            .participant_sides()
+            .into_iter()
+            .filter(|side| {
+                let participant = self.player_ref(*side);
+                !participant.knocked_out && participant.hero.hp <= 0
+            })
+            .collect();
+
+        for side in defeated_sides {
+            {
+                let participant = self.player_mut(side);
+                participant.knocked_out = true;
+                participant.hero.knocked_out = true;
+                participant.hero.ap_remaining = 0;
+            }
+            self.board.units.retain(|unit| unit.side != side);
+            self.log.insert(0, format!("{} was knocked out.", side.label()));
+        }
+    }
+
     fn is_occupied(&self, coord: HexCoord) -> bool {
-        self.player.hero.position == coord
-            || self.opponent.hero.position == coord
+        self.participants()
+            .into_iter()
+            .any(|participant| !participant.knocked_out && participant.hero.position == coord)
             || self.board.units.iter().any(|unit| unit.position == coord)
     }
 
@@ -2564,6 +2896,8 @@ impl MatchState {
         let prefix = match side {
             Side::Player => "P",
             Side::Opponent => "O",
+            Side::PlayerTwo => "P2",
+            Side::OpponentTwo => "O2",
         };
         let id = format!("{prefix}{}", self.next_unit_id);
         self.next_unit_id += 1;
@@ -2574,6 +2908,8 @@ impl MatchState {
         let prefix = match side {
             Side::Player => "PI",
             Side::Opponent => "OI",
+            Side::PlayerTwo => "P2I",
+            Side::OpponentTwo => "O2I",
         };
         let id = format!("{prefix}{}", self.next_item_id);
         self.next_item_id += 1;
@@ -2584,6 +2920,8 @@ impl MatchState {
         let prefix = match side {
             Side::Player => "PB",
             Side::Opponent => "OB",
+            Side::PlayerTwo => "P2B",
+            Side::OpponentTwo => "O2B",
         };
         let id = format!("{prefix}{}", self.next_building_id);
         self.next_building_id += 1;
@@ -2603,6 +2941,8 @@ impl PlayerState {
     fn replay_value(&self, expose_hand: bool) -> serde_json::Value {
         let mut value = json!({
             "side": self.side,
+            "team": self.side.team(),
+            "knockedOut": self.knocked_out,
             "mana": self.mana,
             "maxMana": self.max_mana,
             "hero": self.hero,
@@ -2689,8 +3029,10 @@ impl From<&Unit> for PieceView {
 impl Side {
     fn label(self) -> &'static str {
         match self {
-            Self::Player => "You",
+            Self::Player => "Player 1",
             Self::Opponent => "Opponent",
+            Self::PlayerTwo => "Player 2",
+            Self::OpponentTwo => "Opponent 2",
         }
     }
 
@@ -2698,6 +3040,22 @@ impl Side {
         match self {
             Self::Player => Self::Opponent,
             Self::Opponent => Self::Player,
+            Self::PlayerTwo => Self::OpponentTwo,
+            Self::OpponentTwo => Self::PlayerTwo,
+        }
+    }
+
+    pub(crate) fn team(self) -> Team {
+        match self {
+            Self::Player | Self::PlayerTwo => Team::Player,
+            Self::Opponent | Self::OpponentTwo => Team::Opponent,
+        }
+    }
+
+    pub(crate) fn opposing_team(self) -> Team {
+        match self.team() {
+            Team::Player => Team::Opponent,
+            Team::Opponent => Team::Player,
         }
     }
 }
@@ -2707,6 +3065,17 @@ impl Side {
         match self {
             Self::Player => "p",
             Self::Opponent => "o",
+            Self::PlayerTwo => "p2",
+            Self::OpponentTwo => "o2",
+        }
+    }
+
+    pub(crate) fn label_for_response(self) -> &'static str {
+        match self {
+            Self::Player => "Player 1",
+            Self::Opponent => "Opponent 1",
+            Self::PlayerTwo => "Player 2",
+            Self::OpponentTwo => "Opponent 2",
         }
     }
 }

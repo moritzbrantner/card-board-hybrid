@@ -793,7 +793,7 @@ fn award_completed_match_on_connection(
     };
 
     for participant in participants {
-        let won = participant.side == winner;
+        let won = participant.side.team() == winner.team();
         let xp = COMPLETION_XP + if won { WIN_BONUS_XP } else { 0 };
         let inserted = connection.execute(
             "
@@ -969,6 +969,16 @@ fn shared_participants(
         let hero_type = match side {
             Side::Player => match_state.player.hero.hero_type,
             Side::Opponent => match_state.opponent.hero.hero_type,
+            Side::PlayerTwo => match_state
+                .player_two
+                .as_ref()
+                .map(|participant| participant.hero.hero_type)
+                .unwrap_or(match_state.player.hero.hero_type),
+            Side::OpponentTwo => match_state
+                .opponent_two
+                .as_ref()
+                .map(|participant| participant.hero.hero_type)
+                .unwrap_or(match_state.opponent.hero.hero_type),
         };
         participants.push(AwardParticipant {
             user_id,

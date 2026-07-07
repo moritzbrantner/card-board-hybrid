@@ -174,14 +174,14 @@ pub(crate) fn validate_spell_target(
 ) -> Result<(), MatchError> {
     match effect {
         SpellEffect::Heal { .. } | SpellEffect::Buff { .. } | SpellEffect::StatBuff { .. }
-            if target.side != side =>
+            if target.side.team() != side.team() =>
         {
             Err(MatchError::InvalidTarget)
         }
         SpellEffect::Damage { .. }
         | SpellEffect::AreaDamage { .. }
         | SpellEffect::LineDamage { .. }
-            if target.side == side =>
+            if target.side.team() == side.team() =>
         {
             Err(MatchError::InvalidTarget)
         }
@@ -209,7 +209,7 @@ pub(crate) fn validate_item_target(
     range: u8,
     target: &Unit,
 ) -> Result<(), MatchError> {
-    if target.side != side || caster_position.distance(target.position) > i32::from(range) {
+    if target.side.team() != side.team() || caster_position.distance(target.position) > i32::from(range) {
         return Err(MatchError::InvalidTarget);
     }
 

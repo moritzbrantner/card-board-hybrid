@@ -476,6 +476,8 @@ fn default_hero_position(side: Side) -> HexCoord {
     match side {
         Side::Player => HexCoord { q: 0, r: 3 },
         Side::Opponent => HexCoord { q: 0, r: -3 },
+        Side::PlayerTwo => HexCoord { q: 1, r: 2 },
+        Side::OpponentTwo => HexCoord { q: -1, r: -2 },
     }
 }
 

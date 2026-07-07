@@ -11,7 +11,7 @@ use crate::loadout_resolution::*;
 use crate::match_access::{Actor, MatchAccess};
 use crate::match_commands::MatchCommands;
 use crate::match_session::{HeroType, MatchActionRequest, MatchMode, ReplayVisibility, Side};
-use crate::match_store::{SharedMatchStatus, SqliteMatchStore};
+use crate::match_store::{SharedMatchFormat, SharedMatchStatus, SqliteMatchStore};
 use crate::preferences::{PreferencesModule, UpdatePreferencesRequest};
 use crate::progression::{
     ProgressionError, ProgressionModule, ProgressionResponse, SaveRuneLoadoutRequest,
@@ -696,6 +696,7 @@ async fn create_match(
             player_deck_id: None,
             ai_opponent: None,
             rune_ids: None,
+            format: None,
         }
     } else {
         match serde_json::from_slice::<CreateMatchRequest>(&body) {
@@ -796,7 +797,7 @@ async fn create_match_scenario(
 async fn create_shared_match(
     State(state): State<SharedState>,
     headers: HeaderMap,
-    Json(_request): Json<CreateMatchRequest>,
+    Json(request): Json<CreateMatchRequest>,
 ) -> impl IntoResponse {
     let profile = match optional_profile_from_headers(&state, &headers) {
         Ok(profile) => profile,
@@ -807,7 +808,11 @@ async fn create_shared_match(
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        match store.create_shared_match(profile.as_ref().map(|profile| profile.id)) {
+        let format = match request.format {
+            Some(SharedMatchFormatRequest::TwoVTwo) => SharedMatchFormat::TwoVTwo,
+            _ => SharedMatchFormat::Duel,
+        };
+        match store.create_shared_match(profile.as_ref().map(|profile| profile.id), format) {
             Ok(created) => created,
             Err(error) => return store_error_response(error),
         }
@@ -1378,7 +1383,9 @@ fn replay_response(replay: crate::match_store::StoredReplay) -> axum::response::
 
 fn viewer_result(viewer_side: Option<Side>, winner: Option<Side>) -> ViewerResult {
     match (viewer_side, winner) {
-        (Some(viewer_side), Some(winner)) if viewer_side == winner => ViewerResult::Victory,
+        (Some(viewer_side), Some(winner)) if viewer_side.team() == winner.team() => {
+            ViewerResult::Victory
+        }
         (Some(_), Some(_)) => ViewerResult::Defeat,
         _ => ViewerResult::Spectator,
     }

@@ -738,7 +738,10 @@ export function CardButton({
   played = false,
   style,
   disabled,
+  unavailable = false,
+  availabilityReason = null,
   onClick,
+  onFocus,
   onDragStart,
   onDragEnd,
   tutorialTargetId,
@@ -751,7 +754,10 @@ export function CardButton({
   played?: boolean;
   style?: CSSProperties;
   disabled: boolean;
+  unavailable?: boolean;
+  availabilityReason?: string | null;
   onClick: () => void;
+  onFocus?: () => void;
   onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
   onDragEnd?: () => void;
   tutorialTargetId?: string;
@@ -759,14 +765,23 @@ export function CardButton({
 }) {
   return (
     <button
-      className={`card-button ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${played ? "played" : ""} ${tutorialHighlighted ? "tutorial-highlight tutorial-highlight-primary" : ""} ${card.rarity}`}
+      className={`card-button ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${played ? "played" : ""} ${unavailable ? "unavailable" : ""} ${tutorialHighlighted ? "tutorial-highlight tutorial-highlight-primary" : ""} ${card.rarity}`}
       type="button"
       disabled={disabled}
-      draggable={!disabled}
+      aria-disabled={disabled || unavailable}
+      draggable={!disabled && !unavailable}
       style={style}
       data-tutorial-target={tutorialTargetId}
+      title={availabilityReason ?? card.text}
       onClick={onClick}
-      onDragStart={onDragStart}
+      onFocus={onFocus}
+      onDragStart={(event) => {
+        if (disabled || unavailable || !onDragStart) {
+          event.preventDefault();
+          return;
+        }
+        onDragStart(event);
+      }}
       onDragEnd={onDragEnd}
     >
       {visualIdentity.artPath ? (

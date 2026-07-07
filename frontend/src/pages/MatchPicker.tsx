@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import {
   createMatch,
   createSharedMatch,
+  createSharedTwoVTwoMatch,
   loadDecks,
   loadProgression,
   loadSystemDecks,
@@ -161,6 +162,40 @@ export function PlayPage({
     }
   }
 
+  async function handleCreateSharedTwoVTwoMatch() {
+    if (!selectedLoadout) {
+      setNotice("Create a legal configured deck recipe before starting a match.");
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
+    try {
+      const created = await createSharedTwoVTwoMatch(selectedLoadout.heroType);
+      const seatUrls = created.seatUrls ?? [];
+      const playerSeat = seatUrls.find((seat) => seat.side === "player")?.url ?? created.playerSeatUrl;
+      sessionStorage.setItem(
+        `rune-lanes-invite:${created.matchId}`,
+        JSON.stringify(
+          seatUrls.map((seat) => ({
+            ...seat,
+            url: `${window.location.origin}${seat.url}`,
+          })),
+        ),
+      );
+      sessionStorage.setItem(`rune-lanes-hero:${created.matchId}`, selectedLoadout.heroType);
+      sessionStorage.setItem(`rune-lanes-runes:${created.matchId}`, JSON.stringify(selectedLoadout.runeIds));
+      sessionStorage.setItem(
+        `rune-lanes-deck-choice:${created.matchId}`,
+        JSON.stringify(selectedLoadout.deckChoice),
+      );
+      onNavigate(playerSeat);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not create 2v2 match");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function handleOpenMatch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const normalized = matchId.trim();
@@ -239,6 +274,15 @@ export function PlayPage({
             >
               <Users size={18} />
               New Multiplayer Match
+            </button>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void handleCreateSharedTwoVTwoMatch()}
+              disabled={busy || !canStartMatch}
+            >
+              <Users size={18} />
+              New 2v2 Match
             </button>
             <button
               className="secondary-link"

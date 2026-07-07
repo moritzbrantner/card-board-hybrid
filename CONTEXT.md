@@ -149,7 +149,7 @@ The CLI output containing aggregate metrics, Promotion gate results, promoted po
 _Avoid_: replay archive, match history
 
 **Shared match**:
-A human-vs-human match reached through two private seat links.
+A human-vs-human match reached through private Seat links. A Shared match may be a Duel with one Seat per Team or a 2v2 match with two Seats per Team.
 _Avoid_: online match, lobby match
 
 **Account**:
@@ -208,6 +208,26 @@ _Avoid_: skin, cosmetic data, asset lookup
 A presentation-only board visual that shows the source, primary target, and optional affected footprint of a selected or queued attack or Spell.
 _Avoid_: threat line, action marker, rules target
 
+**Action preview**:
+A presentation-only explanation of the currently selected or focused match action intent.
+_Avoid_: rules hint, client rule
+
+**Action availability reason**:
+A presentation-only explanation for why a Card or action cannot currently be used.
+_Avoid_: validation error, rules hint
+
+**Action tray**:
+A contextual presentation surface listing available actions for the selected Card, Hero, Unit, Item, or Building.
+_Avoid_: action marker, command palette
+
+**Turn checklist**:
+A compact presentation summary of useful actions or resources remaining in the current turn or priority window.
+_Avoid_: turn rules, todo list
+
+**Action recap**:
+A compact presentation summary of the latest visible accepted action or action sequence.
+_Avoid_: replay event, match log
+
 **Board visual mode**:
 A player presentation preference that chooses between the complete 2D board and the enhanced 3D board. It is stored on the account profile or locally for anonymous and seat-link play, and never changes match state, replay data, legality, or shared-match protocol semantics.
 _Avoid_: board state, match mode, rules mode
@@ -221,8 +241,16 @@ A code-generated 3D fallback representation for a Hero or Unit when no Board mod
 _Avoid_: marker, placeholder, token
 
 **Seat**:
-One side-specific player slot in a shared match, either Player or Opponent.
+One private player slot in a Shared match. A Seat controls one Participant and grants access through one Seat link.
 _Avoid_: account, user
+
+**Team**:
+One of the two sides competing in a match, Player or Opponent. In 2v2, each Team has two Participants.
+_Avoid_: seat, account
+
+**Participant**:
+One independent match actor with a Hero, deck, hand, Mana, turn, and owned Units.
+_Avoid_: team, account
 
 **Seat link**:
 A private URL that grants access to exactly one seat in a shared match.
@@ -235,6 +263,10 @@ _Avoid_: lobby
 **Active side**:
 The side whose turn may submit match actions.
 _Avoid_: current user
+
+**Knockout**:
+The state where a Participant's Hero has been defeated before the match ends. A knocked-out Participant no longer takes turns or controls pieces.
+_Avoid_: death, elimination
 
 **Forfeit**:
 A match-ending claim available after the opposing seat has been disconnected for at least two minutes.

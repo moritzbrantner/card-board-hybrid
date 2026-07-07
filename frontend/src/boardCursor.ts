@@ -1,4 +1,5 @@
 import type { HexCoord, HotkeyCommandId, MatchState, Side } from "./types";
+import { participantBySide } from "./matchBoardHelpers";
 
 export type BoardCursorDirectionCommand =
   | "cursorNorthwest"
@@ -44,7 +45,7 @@ export function isBoardCursorDirectionCommand(
 }
 
 export function initialBoardCursorCoord(match: MatchState, viewerSide: Side): HexCoord {
-  return participantForSide(match, viewerSide).hero.position;
+  return participantBySide(match, viewerSide).hero.position;
 }
 
 export function moveBoardCursorCoord(
@@ -85,10 +86,6 @@ export function boardCursorConfirmIntent({
 
 export function hideBoardCursor(state: BoardCursorState): BoardCursorState {
   return { ...state, visible: false };
-}
-
-function participantForSide(match: MatchState, side: Side) {
-  return side === "player" ? match.player : match.opponent;
 }
 
 function hexDistance(a: HexCoord, b: HexCoord) {

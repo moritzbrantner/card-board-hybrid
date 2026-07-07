@@ -318,19 +318,34 @@ export function avatarSymbolLabel(symbol: string) {
 }
 
 export function sideLabel(side: Side | null) {
-  if (side === "player") {
-    return "You";
+  switch (side) {
+    case "player":
+      return "You";
+    case "opponent":
+      return "Opponent";
+    case "playerTwo":
+      return "Ally";
+    case "opponentTwo":
+      return "Opponent 2";
+    default:
+      return "Nobody";
   }
-  if (side === "opponent") {
-    return "Opponent";
-  }
-  return "Nobody";
 }
 
 export function viewerSideLabel(side: Side, viewerSide: Side) {
-  return side === viewerSide ? "your" : "the opponent's";
+  if (side === viewerSide) {
+    return "your";
+  }
+  return sideTeam(side) === sideTeam(viewerSide) ? "your ally's" : "the opponent's";
 }
 
 export function viewerSideShortLabel(side: Side, viewerSide: Side) {
-  return side === viewerSide ? "YOU" : "OPP";
+  if (side === viewerSide) {
+    return "YOU";
+  }
+  return sideTeam(side) === sideTeam(viewerSide) ? "ALLY" : "OPP";
+}
+
+function sideTeam(side: Side) {
+  return side === "player" || side === "playerTwo" ? "player" : "opponent";
 }

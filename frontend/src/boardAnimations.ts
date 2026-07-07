@@ -1,4 +1,5 @@
 import type { HexCoord, MatchState, ReplayEvent, Side, Unit, Hero } from "./types";
+import { participantsInMatch } from "./matchBoardHelpers";
 
 export const BOARD_ANIMATION_DURATION_MS = 520;
 
@@ -73,16 +74,13 @@ export function createBoardAnimationCue({
 
 export function piecesInState(match: MatchState): AnimatedPieceSnapshot[] {
   return [
-    {
-      ...match.player.hero,
-      pieceType: "hero",
-      name: `${sideLabel(match.player.side)} Hero`,
-    },
-    {
-      ...match.opponent.hero,
-      pieceType: "hero",
-      name: `${sideLabel(match.opponent.side)} Hero`,
-    },
+    ...participantsInMatch(match)
+      .filter((participant) => !participant.knockedOut)
+      .map((participant) => ({
+        ...participant.hero,
+        pieceType: "hero" as const,
+        name: `${sideLabel(participant.side)} Hero`,
+      })),
     ...match.board.units.map((unit) => ({ ...unit, pieceType: "unit" as const })),
   ];
 }
