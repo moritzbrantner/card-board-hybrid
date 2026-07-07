@@ -71,6 +71,14 @@ async fn advance_solo_match_to_player_turn(app: Router, match_id: &str) -> serde
     panic!("AI did not return control to the player");
 }
 
+async fn end_turn_from_card_play(app: Router, match_id: &str) -> serde_json::Value {
+    let (status, _) = post_match_action(app.clone(), match_id, r#"{"type":"startCardPlay"}"#).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, acted) = post_match_action(app, match_id, r#"{"type":"endTurn"}"#).await;
+    assert_eq!(status, StatusCode::OK);
+    acted
+}
+
 fn seat_token_from_url(url: &str) -> &str {
     url.rsplit('/')
         .next()

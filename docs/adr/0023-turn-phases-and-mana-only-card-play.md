@@ -1,0 +1,3 @@
+# Turn Phases and Mana-Only Card Play
+
+Rune Lanes previously used Hero action points as a shared budget for card play, movement, and attacks, as recorded in ADR 0001. We now separate board tempo from card tempo: turns move through Movement Phase, Attack Phase, and a public Card Play step; Cards spend Mana only; and priority responses stay on the stack because removing them would invalidate the existing reaction-card design. Card Play is exposed as a public match state even though Movement Phase and Attack Phase remain the two main named phases, so clients can gate End Turn and card availability without inferring hidden turn state.

@@ -20,7 +20,7 @@ import type { Card, MatchState } from "./types";
 
 describe("match UX model", () => {
   it("explains unavailable cards by priority", () => {
-    const match = storyMatch({ hand: [expensiveCard()] });
+    const match = storyMatch({ hand: [expensiveCard()], phase: "cardPlay" });
     match.player.mana = 1;
     match.player.hero.apRemaining = 0;
 
@@ -28,7 +28,7 @@ describe("match UX model", () => {
 
     expect(availability.playable).toBe(false);
     expect(availability.primaryReason?.code).toBe("insufficientMana");
-    expect(availability.reasons.map((reason) => reason.code)).toContain("heroApEmpty");
+    expect(availability.reasons.map((reason) => reason.code)).not.toContain("pieceApEmpty");
   });
 
   it("explains wrong-turn and stack response restrictions", () => {
@@ -55,7 +55,7 @@ describe("match UX model", () => {
   });
 
   it("explains cards with no legal targets", () => {
-    const match = storyMatch({ hand: [sparkJoltCard], opponentHero: { q: 3, r: -3 } });
+    const match = storyMatch({ hand: [sparkJoltCard], opponentHero: { q: 3, r: -3 }, phase: "cardPlay" });
     match.board.units = [];
 
     expect(cardAvailability(match, "player", sparkJoltCard).primaryReason?.code).toBe(
@@ -64,16 +64,16 @@ describe("match UX model", () => {
   });
 
   it("creates intent previews for card kinds", () => {
-    const unitPreview = actionPreviewForCard(storyMatch({ hand: [emberSquireCard] }), "player", emberSquireCard);
+    const unitPreview = actionPreviewForCard(storyMatch({ hand: [emberSquireCard], phase: "cardPlay" }), "player", emberSquireCard);
     expect(unitPreview.details).toContain("Adjacent empty hex");
     expect(unitPreview.body).toContain("Summons");
 
-    const spellPreview = actionPreviewForCard(storyMatch({ hand: [sparkJoltCard] }), "player", sparkJoltCard);
+    const spellPreview = actionPreviewForCard(storyMatch({ hand: [sparkJoltCard], phase: "cardPlay" }), "player", sparkJoltCard);
     expect(spellPreview.tone).toBe("attack");
     expect(spellPreview.body).toContain("Deals 1 damage");
 
     const itemPreview = actionPreviewForCard(
-      storyMatch({ hand: [emberFlaskCard], units: [storyUnit({ q: -1, r: 1 })] }),
+      storyMatch({ hand: [emberFlaskCard], units: [storyUnit({ q: -1, r: 1 })], phase: "cardPlay" }),
       "player",
       emberFlaskCard,
     );
@@ -123,6 +123,7 @@ describe("match UX model", () => {
     const match = storyMatch({
       hand: [emberSquireCard, sparkJoltCard],
       units: [storyUnit({ q: -1, r: 1 })],
+      phase: "cardPlay",
     });
 
     const checklist = turnChecklistForMatch(match, "player", true);

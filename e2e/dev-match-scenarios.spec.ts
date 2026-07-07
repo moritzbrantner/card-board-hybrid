@@ -74,7 +74,7 @@ function playableMatch() {
   return {
     mode: "solo",
     round: 1,
-    phase: "planning",
+    phase: "movement",
     activeSide: "player",
     prioritySide: null,
     player: {

@@ -73,7 +73,7 @@ export function TutorialPage({
       : hasPendingStack
         ? `${sideLabel(match.prioritySide)} priority`
         : match.activeSide === viewerSide
-          ? "Your turn"
+          ? phaseLabelFor(match.phase)
           : "Opponent turn";
 
   useEffect(() => {
@@ -189,7 +189,7 @@ export function TutorialPage({
             className={`primary-button ${tutorialTargetClass("tutorial-end-turn")}`}
             type="button"
             onClick={() => dispatch({ type: "interact", interaction: { type: "endTurn" } })}
-            disabled={inputPaused || match.activeSide !== viewerSide || hasPendingStack}
+            disabled={inputPaused || match.activeSide !== viewerSide || hasPendingStack || match.phase !== "cardPlay"}
             data-tutorial-target="tutorial-end-turn"
           >
             <Play size={18} />
@@ -289,6 +289,19 @@ export function TutorialPage({
       ) : null}
     </main>
   );
+}
+
+function phaseLabelFor(phase: MatchState["phase"]) {
+  switch (phase) {
+    case "movement":
+      return "Movement Phase";
+    case "attack":
+      return "Attack Phase";
+    case "cardPlay":
+      return "Card Play";
+    case "matchOver":
+      return "Match over";
+  }
 }
 
 function isBoardHighlight(highlight: TutorialHighlight): highlight is BoardTutorialHighlight {

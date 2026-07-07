@@ -41,12 +41,24 @@ A visible persistent counter on a Carrier that modifies combat stats.
 _Avoid_: hidden buff, invisible stat mutation
 
 **Card interaction**:
-Playing a Card and resolving its card-created effect through the match rules, including target legality, stack entry, and Unit, Spell, or Item effect logic.
+Playing a Card by spending Mana and resolving its card-created effect through the match rules, including target legality, stack entry, and Unit, Spell, or Item effect logic.
 _Avoid_: card handler, play-card plumbing
 
 **Mana**:
 The resource spent to play cards. A side refreshes Mana from its Hero and occupied Mana sources at the beginning of that side's turn, while unspent Mana remains available for reactions until that side's next turn begins.
 _Avoid_: energy
+
+**Movement Phase**:
+The first step of an active side's turn, when that side may move Heroes and Units before committing to attacks or card play.
+_Avoid_: planning phase
+
+**Attack Phase**:
+The turn step after Movement Phase, when the active side may attack with Heroes and Units until choosing to finish attacks or no legal attacks remain.
+_Avoid_: combat phase
+
+**Card Play step**:
+The post-attack turn step when the active side may play Cards and then end the turn.
+_Avoid_: main phase, planning phase
 
 **Mana source**:
 A board hex marker that grants Mana to the side occupying it at the beginning of that side's turn.
@@ -73,12 +85,16 @@ A persistent damage buffer on a Hero, created by shield-granting buffs and consu
 _Avoid_: hero armor, temporary health
 
 **Hero action points**:
-The hero's per-turn action budget for moving, attacking, and playing cards.
+The Hero's per-turn action budget for Hero movement, Hero attacks, and Hero-based activations.
 _Avoid_: hero movement counter
 
 **Unit action points**:
 A unit's per-turn action budget for moving and attacking.
 _Avoid_: movement counter
+
+**Melee advance**:
+The movement of a surviving adjacent attacker into a destroyed Unit's hex after combat resolution.
+_Avoid_: charge, push forward
 
 **Hex**:
 One tile on the arena, addressed by its position on the hex grid.

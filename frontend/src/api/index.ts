@@ -347,6 +347,14 @@ export function activateBuilding(matchId: string, buildingId: string) {
   return matchAction(matchId, { type: "activateBuilding", buildingId });
 }
 
+export function startAttackPhase(matchId: string) {
+  return matchAction(matchId, { type: "startAttackPhase" });
+}
+
+export function startCardPlay(matchId: string) {
+  return matchAction(matchId, { type: "startCardPlay" });
+}
+
 export function endTurn(matchId: string) {
   return matchAction(matchId, { type: "endTurn" });
 }

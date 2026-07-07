@@ -319,9 +319,9 @@ export const WIKI_SCENES = [
       },
       {
         title: "Play a Card",
-        instruction: "Playing Ember Squire spends one Hero action point, while Unit action points are unchanged.",
+        instruction: "Playing Ember Squire spends Mana, while Hero and Unit action points are unchanged.",
         match: matchState({
-          player: { hero: hero("player", { q: -1, r: 1 }, { apRemaining: 2, maxAp: 3 }) },
+          player: { hero: hero("player", { q: -1, r: 1 }, { apRemaining: 3, maxAp: 3 }) },
           hand: [wikiEmberSquireCard],
           units: [unit("player", { q: 0, r: 0 }, { apRemaining: 2, maxAp: 2 })],
         }),
@@ -694,7 +694,7 @@ function matchState(options: {
   return {
     mode: "solo",
     round: options.round ?? 1,
-    phase: "planning",
+    phase: "movement",
     activeSide: options.activeSide ?? "player",
     prioritySide: options.prioritySide ?? null,
     player: {

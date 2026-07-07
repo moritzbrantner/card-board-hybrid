@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{ActionTarget, Card, CardKind, HexCoord, Rarity, Side, StackItem};
+use super::{ActionTarget, Card, CardKind, HexCoord, Phase, Rarity, Side, StackItem};
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ReplayVisibility {
@@ -43,6 +43,10 @@ pub enum ReplayEvent {
     },
     RoundStarted {
         round: u32,
+    },
+    PhaseChanged {
+        side: Side,
+        phase: Phase,
     },
     CardDrawn {
         side: Side,

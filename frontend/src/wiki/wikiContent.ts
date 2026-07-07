@@ -31,9 +31,10 @@ export const WIKI_TOPICS = [
       "The active side spends actions during its turn.",
       "Starting a turn refreshes Mana from the Hero and occupied Mana sources.",
       "Starting a turn refreshes Hero action points and Unit action points.",
+      "The active side moves first, then attacks or skips attacks, then plays cards.",
       "Damaged surviving Units refresh Unit armor at the beginning of their owner's turn.",
       "A side draws at the start of later turns, not on its very first turn.",
-      "Ending a turn passes control to the opposing side.",
+      "Ending a turn is available after reaching Card Play.",
     ],
     example:
       "You spend actions, end turn, the opponent acts, then the next round begins when control returns to you.",
@@ -52,7 +53,6 @@ export const WIKI_TOPICS = [
       "Mana pays for cards and refreshes at the start of your turn from your Hero plus occupied Mana sources.",
     keyRules: [
       "Mana pays for cards.",
-      "Playing a card also costs one Hero action point.",
       "At the start of your turn, Mana is replaced by a fresh amount.",
       "Base Mana comes from the Hero, and the current base value is 3 Mana.",
       "Occupied Mana sources add to turn-start Mana.",
@@ -73,19 +73,19 @@ export const WIKI_TOPICS = [
     id: "action-points",
     title: "Action Points",
     summary:
-      "Hero action points and Unit action points are separate per-turn budgets for movement, attacks, cards, and Building activations.",
+      "Hero action points and Unit action points are separate per-turn budgets for movement, attacks, and activations.",
     keyRules: [
-      "Hero action points pay for Hero movement, Hero attacks, and playing cards.",
+      "Hero action points pay for Hero movement and Hero attacks.",
       "Unit action points pay for Unit movement and Unit attacks.",
       "Moving one adjacent Hex costs one action point from the moving piece.",
-      "Playing any card costs one Hero action point.",
+      "Playing cards costs Mana, not action points.",
       "Activating a Building costs one action point from the occupying Hero or Unit.",
       "A piece with no action points cannot take action.",
       "Attack is limited to once per piece per turn, even if action points remain.",
       "Newly summoned Units enter with partial current Unit action points rather than a full turn's budget.",
     ],
     example:
-      "A Hero with 3 action points can play a card, move once, and attack once if all three actions are legal.",
+      "A Hero with 3 action points can move and attack while still saving Mana for card play after attacks.",
     commonMistakes: [
       "Spending Unit action points to play cards.",
       "Expecting a Unit to attack twice in one turn.",
@@ -98,9 +98,9 @@ export const WIKI_TOPICS = [
     id: "cards-and-priority",
     title: "Cards and Priority",
     summary:
-      "Cards spend Mana and a Hero action point, then enter the stack so priority can decide whether responses happen first.",
+      "Cards spend Mana, then enter the stack so priority can decide whether responses happen first.",
     keyRules: [
-      "Playing a card spends Mana and one Hero action point.",
+      "Playing a card spends Mana and no action points.",
       "Unit cards create Units on adjacent empty Hexes.",
       "Spell cards create immediate effects from the caster Hero when they resolve.",
       "Item cards equip friendly Units.",

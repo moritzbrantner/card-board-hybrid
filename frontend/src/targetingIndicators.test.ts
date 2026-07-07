@@ -7,6 +7,7 @@ import { selectedTargetingIndicators, stackTargetingIndicators } from "./targeti
 describe("targeting indicators", () => {
   it("derives selected attack indicators only for legal attack targets", () => {
     const match = storyMatch({
+      phase: "attack",
       units: [
         storyUnit({ q: 0, r: 0 }),
         storyUnit({ q: 1, r: 0 }, { id: "enemy-adjacent", side: "opponent" }),
@@ -35,6 +36,7 @@ describe("targeting indicators", () => {
 
   it("derives selected spell indicators for legal primary targets", () => {
     const match = storyMatch({
+      phase: "cardPlay",
       hand: [sparkJolt()],
       units: [
         storyUnit({ q: 1, r: 0 }, { id: "enemy-unit", side: "opponent" }),
@@ -61,6 +63,7 @@ describe("targeting indicators", () => {
 
   it("adds selected area spell footprint only for the hovered or focused target", () => {
     const match = storyMatch({
+      phase: "cardPlay",
       hand: [cinderRing()],
       units: [storyUnit({ q: 1, r: 0 }, { id: "enemy-unit", side: "opponent" })],
     });

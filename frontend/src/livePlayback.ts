@@ -6,6 +6,10 @@ export function liveAiPlaybackFrames(frames: ReplayFrame[]) {
   return frames.filter((frame) => isOpponentVisibleEvent(frame.event));
 }
 
+export function suppressLiveAiFallbackAnimation(event: ReplayEvent | null | undefined) {
+  return event?.type === "unitArmorRefreshed" && event.side === "opponent";
+}
+
 function isOpponentVisibleEvent(event: ReplayEvent) {
   if (event.type === "matchEnded") {
     return true;
@@ -21,7 +25,6 @@ function isOpponentVisibleEvent(event: ReplayEvent) {
     event.type === "pieceMoved" ||
     event.type === "pieceAttacked" ||
     event.type === "pieceHealed" ||
-    event.type === "unitArmorRefreshed" ||
     event.type === "pieceBuffed" ||
     event.type === "pieceDamaged" ||
     event.type === "unitDestroyed" ||

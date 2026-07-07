@@ -379,7 +379,7 @@ export function SharedMatchPage({
     () => ({
       ...cursorHotkeyHandlers,
       endTurn: () => {
-        if (!match || busy || match.phase === "matchOver" || !isActiveViewer || hasPendingStack) {
+        if (!match || busy || match.phase !== "cardPlay" || !isActiveViewer || hasPendingStack) {
           return false;
         }
 
@@ -690,7 +690,7 @@ export function SharedMatchPage({
       : hasPendingStack
         ? `${sideLabel(match.prioritySide)} priority`
         : isActiveViewer
-          ? "Your turn"
+          ? phaseLabelFor(match.phase)
           : "Waiting";
 
   return (
@@ -745,15 +745,50 @@ export function SharedMatchPage({
               Claim Forfeit
             </button>
           ) : null}
-          <button
-            className="primary-button"
-            type="button"
-            onClick={() => sendSharedAction({ type: "endTurn" })}
-            disabled={busy || match.phase === "matchOver" || !isActiveViewer || hasPendingStack}
-          >
-            <Play size={18} />
-            End Turn
-          </button>
+          {!hasPendingStack && match.phase === "movement" ? (
+            <>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => sendSharedAction({ type: "startAttackPhase" })}
+                disabled={busy || !isActiveViewer}
+              >
+                <Sword size={18} />
+                Start Attack
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => sendSharedAction({ type: "startCardPlay" })}
+                disabled={busy || !isActiveViewer}
+              >
+                <Layers size={18} />
+                Play Cards
+              </button>
+            </>
+          ) : null}
+          {!hasPendingStack && match.phase === "attack" ? (
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => sendSharedAction({ type: "startCardPlay" })}
+              disabled={busy || !isActiveViewer}
+            >
+              <Play size={18} />
+              Finish Attacks
+            </button>
+          ) : null}
+          {!hasPendingStack && match.phase === "cardPlay" ? (
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => sendSharedAction({ type: "endTurn" })}
+              disabled={busy || !isActiveViewer}
+            >
+              <Play size={18} />
+              End Turn
+            </button>
+          ) : null}
           {hasPendingStack ? (
             <button
               className="primary-button"
@@ -952,5 +987,18 @@ function parseStoredInviteLinks(stored: string | null): SharedSeatUrl[] {
         url: stored,
       },
     ];
+  }
+}
+
+function phaseLabelFor(phase: MatchState["phase"]) {
+  switch (phase) {
+    case "movement":
+      return "Movement Phase";
+    case "attack":
+      return "Attack Phase";
+    case "cardPlay":
+      return "Card Play";
+    case "matchOver":
+      return "Match over";
   }
 }

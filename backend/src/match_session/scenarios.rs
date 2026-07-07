@@ -72,7 +72,7 @@ fn base_match() -> MatchState {
     let mut game = MatchState::new_with_seed(7);
     game.mode = MatchMode::Solo;
     game.round = 1;
-    game.phase = Phase::Planning;
+    game.phase = Phase::Movement;
     game.active_side = Side::Player;
     game.priority_side = None;
     game.action_stack.clear();
@@ -297,6 +297,7 @@ mod tests {
     #[test]
     fn play_unit_card_scenario_accepts_unit_play() {
         let mut game = build_match_scenario("play-unit-card").expect("scenario should build");
+        game.phase = Phase::CardPlay;
 
         game.apply_action(MatchActionRequest::PlayCard {
             card_id: "scenario-ember-squire".to_string(),
@@ -336,6 +337,7 @@ mod tests {
     #[test]
     fn adjacent_attack_scenario_accepts_attack() {
         let mut game = build_match_scenario("adjacent-attack").expect("scenario should build");
+        game.phase = Phase::Attack;
 
         game.apply_action(MatchActionRequest::Attack {
             attacker_id: "player-unit".to_string(),
@@ -354,6 +356,7 @@ mod tests {
     #[test]
     fn draw_spell_scenario_accepts_draw_spell() {
         let mut game = build_match_scenario("draw-spell").expect("scenario should build");
+        game.phase = Phase::CardPlay;
 
         game.apply_action(MatchActionRequest::PlayCard {
             card_id: "scenario-runic-insight".to_string(),

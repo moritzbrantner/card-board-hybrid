@@ -12,4 +12,6 @@ export {
   movePiece,
   passPriority,
   playCard,
+  startAttackPhase,
+  startCardPlay,
 } from "./index";

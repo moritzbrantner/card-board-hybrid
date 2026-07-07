@@ -3,6 +3,7 @@ use super::*;
 #[test]
 fn ending_turn_starts_paced_ai_turn() {
     let mut game = MatchState::new_with_seed(7);
+    enter_card_play(&mut game);
 
     game.apply_action(MatchActionRequest::EndTurn)
         .expect("ending turn should work");
@@ -15,6 +16,7 @@ fn ending_turn_starts_paced_ai_turn() {
 #[test]
 fn advancing_ai_eventually_advances_round() {
     let mut game = MatchState::new_with_seed(7);
+    enter_card_play(&mut game);
 
     game.apply_action(MatchActionRequest::EndTurn)
         .expect("ending turn should work");
@@ -41,8 +43,11 @@ fn solo_ai_actions_wait_for_player_priority_response() {
         .expect("priority response spell exists");
     let salve_id = put_card_in_side_hand(&mut game, Side::Player, salve);
 
+    enter_card_play(&mut game);
     game.apply_action(MatchActionRequest::EndTurn)
         .expect("ending turn should start AI turn");
+    game.apply_action(MatchActionRequest::AdvanceAi)
+        .expect("AI should enter the attack phase");
     game.apply_action(MatchActionRequest::AdvanceAi)
         .expect("AI should queue an attack");
 
@@ -65,6 +70,147 @@ fn solo_ai_actions_wait_for_player_priority_response() {
         .expect("AI should pass priority to resolve the response");
     assert_eq!(game.player.hero.hp, 20);
     assert_eq!(game.priority_side, Some(Side::Player));
+}
+
+#[test]
+fn turn_phase_actions_gate_movement_attack_card_play_and_end_turn() {
+    let mut game = MatchState::new_with_seed(7);
+    let card = player_unit_card(&game, "ember-squire");
+    let card_id = put_card_in_hand(&mut game, card);
+    game.phase = Phase::Movement;
+
+    assert_eq!(
+        game.apply_action(MatchActionRequest::Attack {
+            attacker_id: "player-hero".to_string(),
+            target_id: "opponent-hero".to_string(),
+        }),
+        Err(MatchError::WrongPhase)
+    );
+    assert_eq!(
+        game.apply_action(MatchActionRequest::PlayCard {
+            card_id: card_id.clone(),
+            target: ActionTarget::Hex { coord: hex(0, 2) },
+        }),
+        Err(MatchError::WrongPhase)
+    );
+    assert_eq!(
+        game.apply_action(MatchActionRequest::EndTurn),
+        Err(MatchError::WrongPhase)
+    );
+
+    game.apply_action(MatchActionRequest::StartAttackPhase)
+        .expect("movement phase can advance to attack");
+    assert_eq!(game.phase, Phase::Attack);
+    assert_eq!(
+        game.apply_action(MatchActionRequest::MovePiece {
+            piece_id: "player-hero".to_string(),
+            to: hex(0, 2),
+        }),
+        Err(MatchError::WrongPhase)
+    );
+
+    game.apply_action(MatchActionRequest::StartCardPlay)
+        .expect("attack phase can finish into card play");
+    assert_eq!(game.phase, Phase::CardPlay);
+    game.apply_action(MatchActionRequest::PlayCard {
+        card_id,
+        target: ActionTarget::Hex { coord: hex(0, 2) },
+    })
+    .expect("card play phase can play cards");
+}
+
+#[test]
+fn movement_phase_can_skip_attacks_and_start_card_play() {
+    let mut game = MatchState::new_with_seed(7);
+
+    game.apply_action(MatchActionRequest::StartCardPlay)
+        .expect("movement phase can skip directly to cards");
+
+    assert_eq!(game.phase, Phase::CardPlay);
+}
+
+#[test]
+fn attack_phase_auto_enters_card_play_when_no_legal_attacks_remain() {
+    let mut game = MatchState::new_with_seed(7);
+    enter_attack_phase(&mut game);
+    game.board.units.push(board_unit(
+        "opponent-unit",
+        Side::Opponent,
+        hex(0, 2),
+        0,
+        1,
+        1,
+    ));
+
+    let frames = game
+        .apply_action_recording(
+            MatchActionRequest::Attack {
+                attacker_id: "player-hero".to_string(),
+                target_id: "opponent-unit".to_string(),
+            },
+            10,
+        )
+        .expect("only legal attack should resolve");
+
+    assert_eq!(game.phase, Phase::CardPlay);
+    assert!(frames.iter().any(|frame| matches!(
+        frame.event,
+        ReplayEvent::PhaseChanged {
+            side: Side::Player,
+            phase: Phase::CardPlay,
+        }
+    )));
+}
+
+#[test]
+fn active_turn_card_play_ignores_hero_action_points() {
+    let mut game = MatchState::new_with_seed(7);
+    game.player.hero.ap_remaining = 0;
+    let card = player_unit_card(&game, "ember-squire");
+    let card_id = put_card_in_hand(&mut game, card);
+    game.player.hero.ap_remaining = 0;
+
+    game.apply_action(MatchActionRequest::PlayCard {
+        card_id,
+        target: ActionTarget::Hex { coord: hex(0, 2) },
+    })
+    .expect("card play should spend mana only");
+
+    assert_eq!(game.player.hero.ap_remaining, 0);
+    assert_eq!(game.player.mana, 2);
+}
+
+#[test]
+fn priority_response_spell_ignores_hero_action_points() {
+    let mut game = MatchState::new_with_seed(7);
+    game.player.mana = 8;
+    game.player.hero.ap_remaining = 0;
+    game.priority_side = Some(Side::Player);
+    game.action_stack.push(StackItem {
+        id: "pending-attack".to_string(),
+        side: Side::Opponent,
+        priority: 1,
+        action: StackAction::Attack {
+            attacker_id: "opponent-hero".to_string(),
+            target_id: "player-hero".to_string(),
+        },
+    });
+    let salve = starter_card_templates()
+        .into_iter()
+        .find(|card| card.template_id == "quick-salve")
+        .expect("priority response spell exists");
+    let salve_id = put_card_in_side_hand(&mut game, Side::Player, salve);
+
+    game.apply_action(MatchActionRequest::PlayCard {
+        card_id: salve_id,
+        target: ActionTarget::Piece {
+            piece_id: "player-hero".to_string(),
+        },
+    })
+    .expect("priority spell should not require hero action points");
+
+    assert_eq!(game.player.hero.ap_remaining, 0);
+    assert_eq!(game.action_stack.len(), 2);
 }
 
 #[test]
@@ -121,6 +267,7 @@ fn unspent_mana_remains_for_reactions_until_next_own_turn_refresh() {
     );
     game.player.mana = 5;
     game.player.max_mana = 5;
+    enter_card_play(&mut game);
 
     game.apply_action_recording_for_side(Side::Player, MatchActionRequest::EndTurn, 0)
         .expect("player can end their active turn");
@@ -129,6 +276,7 @@ fn unspent_mana_remains_for_reactions_until_next_own_turn_refresh() {
     assert_eq!(game.player.mana, 5);
     assert_eq!(game.player.max_mana, 5);
 
+    enter_card_play(&mut game);
     game.apply_action_recording_for_side(Side::Opponent, MatchActionRequest::EndTurn, 1)
         .expect("opponent can end their active turn");
 
@@ -156,6 +304,7 @@ fn solo_turn_start_refreshes_only_active_side_unit_armor() {
         6,
     ));
 
+    enter_card_play(&mut game);
     game.apply_action(MatchActionRequest::EndTurn)
         .expect("ending turn should start the opponent turn");
 

@@ -54,7 +54,7 @@ describe("board stories", () => {
   });
 
   it("renders 2d targeting indicators for selected attacks", async () => {
-    const match = storyMatch();
+    const match = storyMatch({ phase: "attack" });
 
     render(
       <Board
@@ -74,7 +74,7 @@ describe("board stories", () => {
   });
 
   it("shows selected spell footprints only after target hover", async () => {
-    const match = storyMatch({ hand: [cinderRingCard] });
+    const match = storyMatch({ hand: [cinderRingCard], phase: "cardPlay" });
 
     render(
       <Board

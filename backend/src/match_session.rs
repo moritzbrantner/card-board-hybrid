@@ -354,7 +354,7 @@ impl MatchState {
         let mut game = Self {
             mode,
             round: 1,
-            phase: Phase::Planning,
+            phase: Phase::Movement,
             active_side: Side::Player,
             player: PlayerState::new(
                 Side::Player,
@@ -577,6 +577,7 @@ impl MatchState {
             }
             MatchActionRequest::MovePiece { piece_id, to } => {
                 self.require_turn_action_side(side)?;
+                self.require_phase(Phase::Movement)?;
                 self.move_piece_for_side(side, &piece_id, to, &mut frames, action_index)
             }
             MatchActionRequest::Attack {
@@ -584,6 +585,7 @@ impl MatchState {
                 target_id,
             } => {
                 self.require_turn_action_side(side)?;
+                self.require_phase(Phase::Attack)?;
                 self.attack_for_side(side, &attacker_id, &target_id, &mut frames, action_index)
             }
             MatchActionRequest::ActivateItem {
@@ -602,8 +604,17 @@ impl MatchState {
                 self.require_turn_action_side(side)?;
                 self.activate_building_for_side(side, &building_id, &mut frames, action_index)
             }
+            MatchActionRequest::StartAttackPhase => {
+                self.require_turn_action_side(side)?;
+                self.start_attack_phase_for_side(side, &mut frames, action_index)
+            }
+            MatchActionRequest::StartCardPlay => {
+                self.require_turn_action_side(side)?;
+                self.start_card_play_for_side(side, &mut frames, action_index)
+            }
             MatchActionRequest::EndTurn => {
                 self.require_turn_action_side(side)?;
+                self.require_phase(Phase::CardPlay)?;
                 if !self.action_stack.is_empty() {
                     return Err(MatchError::StackPending);
                 }
@@ -632,6 +643,13 @@ impl MatchState {
         }
         if side != self.active_side {
             return Err(MatchError::NotActiveSide);
+        }
+        Ok(())
+    }
+
+    fn require_phase(&self, phase: Phase) -> Result<(), MatchError> {
+        if self.phase != phase {
+            return Err(MatchError::WrongPhase);
         }
         Ok(())
     }
@@ -710,6 +728,68 @@ impl MatchState {
 
         self.start_turn(next_side, frames, action_index);
         self.truncate_log();
+    }
+
+    fn start_attack_phase_for_side(
+        &mut self,
+        side: Side,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) -> Result<(), MatchError> {
+        self.require_phase(Phase::Movement)?;
+        self.transition_to_phase(side, Phase::Attack, frames, action_index);
+        Ok(())
+    }
+
+    fn start_card_play_for_side(
+        &mut self,
+        side: Side,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) -> Result<(), MatchError> {
+        if self.phase != Phase::Movement && self.phase != Phase::Attack {
+            return Err(MatchError::WrongPhase);
+        }
+        self.transition_to_phase(side, Phase::CardPlay, frames, action_index);
+        Ok(())
+    }
+
+    fn transition_to_phase(
+        &mut self,
+        side: Side,
+        phase: Phase,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        if self.phase == phase || self.phase == Phase::MatchOver {
+            return;
+        }
+        self.phase = phase.clone();
+        self.record_replay_frame(frames, action_index, ReplayEvent::PhaseChanged { side, phase });
+    }
+
+    fn auto_start_card_play_if_attacks_exhausted(
+        &mut self,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        if self.phase != Phase::Attack || !self.action_stack.is_empty() {
+            return;
+        }
+        if !self.side_has_legal_attack(self.active_side) {
+            self.transition_to_phase(self.active_side, Phase::CardPlay, frames, action_index);
+        }
+    }
+
+    fn side_has_legal_attack(&self, side: Side) -> bool {
+        let targets = self.pieces_for_opposing_team(side);
+        self.pieces_for_side(side).into_iter().any(|attacker| {
+            attacker.ap_remaining > 0
+                && !attacker.has_attacked
+                && targets
+                    .iter()
+                    .any(|target| piece_can_attack(&attacker, target))
+        })
     }
 
     fn refresh_unit_armor_for_turn(
@@ -830,15 +910,13 @@ impl MatchState {
             if player.mana < card.cost {
                 return Err(MatchError::NotEnoughMana);
             }
-            if player.hero.ap_remaining == 0 {
-                return Err(MatchError::NoActionPoints);
-            }
         }
 
         if stack_was_empty {
             if side != self.active_side {
                 return Err(MatchError::NotActiveSide);
             }
+            self.require_phase(Phase::CardPlay)?;
         } else {
             if self.priority_side != Some(side) {
                 return Err(MatchError::NotPrioritySide);
@@ -1076,12 +1154,8 @@ impl MatchState {
         if player.mana < card.cost {
             return Err(MatchError::NotEnoughMana);
         }
-        if player.hero.ap_remaining == 0 {
-            return Err(MatchError::NoActionPoints);
-        }
 
         player.mana -= card.cost;
-        player.hero.ap_remaining -= 1;
         let card = player.hand.remove(hand_index);
         player.discard.push(card);
         player.discard_count = player.discard.len();
@@ -1239,6 +1313,7 @@ impl MatchState {
 
         self.resolve_top_stack_item(frames, action_index);
         self.check_winner(frames, action_index);
+        self.auto_start_card_play_if_attacks_exhausted(frames, action_index);
         self.truncate_log();
         Ok(())
     }
@@ -1251,6 +1326,7 @@ impl MatchState {
         while !self.action_stack.is_empty() && self.phase != Phase::MatchOver {
             self.resolve_top_stack_item(frames, action_index);
             self.check_winner(frames, action_index);
+            self.auto_start_card_play_if_attacks_exhausted(frames, action_index);
         }
     }
 
@@ -1943,6 +2019,8 @@ impl MatchState {
             }
         } else if side != self.active_side {
             return Err(MatchError::NotActiveSide);
+        } else if self.phase == Phase::MatchOver {
+            return Err(MatchError::MatchOver);
         }
 
         let target_piece = target.as_ref().and_then(|target| match target {
@@ -2116,6 +2194,15 @@ impl MatchState {
             },
         );
         let destroyed = self.remove_dead_units(frames, action_index);
+        self.advance_surviving_melee_attacker_after_kill(
+            side,
+            attacker_id,
+            &attacker,
+            &target,
+            &destroyed,
+            frames,
+            action_index,
+        );
         self.apply_barbarian_combat_mana(
             &attacker,
             &target,
@@ -2135,6 +2222,64 @@ impl MatchState {
                 attacker_id
             ),
         );
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "melee advance depends on the resolved attack context"
+    )]
+    fn advance_surviving_melee_attacker_after_kill(
+        &mut self,
+        side: Side,
+        attacker_id: &str,
+        attacker: &PieceView,
+        target: &PieceView,
+        destroyed: &[DestroyedUnit],
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) {
+        if target.is_hero || attacker.position.distance(target.position) != 1 {
+            return;
+        }
+        if !destroyed
+            .iter()
+            .any(|destroyed_unit| destroyed_unit.unit_id == target.id)
+        {
+            return;
+        }
+        let Some(surviving_attacker) = self.piece_view(attacker_id) else {
+            return;
+        };
+        if self.is_occupied(target.position) {
+            return;
+        }
+
+        if let Some(hero_side) = self
+            .participant_sides()
+            .into_iter()
+            .find(|candidate| self.player_ref(*candidate).hero.id == attacker_id)
+        {
+            self.player_mut(hero_side).hero.position = target.position;
+        } else if let Some(unit) = self
+            .board
+            .units
+            .iter_mut()
+            .find(|unit| unit.id == attacker_id)
+        {
+            unit.position = target.position;
+        }
+
+        self.record_replay_frame(
+            frames,
+            action_index,
+            ReplayEvent::PieceMoved {
+                side,
+                piece_id: attacker_id.to_string(),
+                from: surviving_attacker.position,
+                to: target.position,
+            },
+        );
+        self.pick_up_dropped_items_at(side, attacker_id, target.position, frames, action_index);
     }
 
     fn advance_solo_ai(
@@ -2191,7 +2336,10 @@ impl MatchState {
             return Err(MatchError::AiUnavailable);
         }
 
-        let decision = policy.decide(&self.solo_ai_view_for_side(side));
+        let decision = match self.ai_phase_decision(side, policy, frames, action_index)? {
+            Some(outcome) => return Ok(outcome),
+            None => policy.decide(&self.solo_ai_view_for_side(side)),
+        };
         let outcome = match self.apply_ai_decision_for_side(side, decision, frames, action_index) {
             AiDecisionApplication::Applied => {
                 self.check_winner(frames, action_index);
@@ -2212,6 +2360,65 @@ impl MatchState {
 
         self.truncate_log();
         Ok(outcome)
+    }
+
+    fn ai_phase_decision(
+        &mut self,
+        side: Side,
+        policy: &SoloAiPolicy,
+        frames: &mut Vec<RecordedReplayFrame>,
+        action_index: Option<u32>,
+    ) -> Result<Option<AiAdvanceOutcome>, MatchError> {
+        match self.phase {
+            Phase::Movement => {
+                if self.side_has_legal_attack(side) {
+                    self.start_attack_phase_for_side(side, frames, action_index)?;
+                    return Ok(Some(AiAdvanceOutcome::ActionApplied));
+                }
+                let decision = policy.decide(&self.solo_ai_view_for_side(side));
+                match decision {
+                    SoloAiDecision::TakeAction(SoloAiActionIntent::MovePiece { .. })
+                    | SoloAiDecision::TakeAction(SoloAiActionIntent::ActivateItem { .. }) => {
+                        Ok(None)
+                    }
+                    SoloAiDecision::TakeAction(SoloAiActionIntent::Attack { .. }) => {
+                        self.start_attack_phase_for_side(side, frames, action_index)?;
+                        Ok(Some(AiAdvanceOutcome::ActionApplied))
+                    }
+                    _ => {
+                        self.start_card_play_for_side(side, frames, action_index)?;
+                        Ok(Some(AiAdvanceOutcome::ActionApplied))
+                    }
+                }
+            }
+            Phase::Attack => {
+                let decision = policy.decide(&self.solo_ai_view_for_side(side));
+                match decision {
+                    SoloAiDecision::TakeAction(SoloAiActionIntent::Attack { .. })
+                    | SoloAiDecision::TakeAction(SoloAiActionIntent::ActivateItem { .. }) => {
+                        Ok(None)
+                    }
+                    _ => {
+                        self.start_card_play_for_side(side, frames, action_index)?;
+                        Ok(Some(AiAdvanceOutcome::ActionApplied))
+                    }
+                }
+            }
+            Phase::CardPlay => {
+                let decision = policy.decide(&self.solo_ai_view_for_side(side));
+                match decision {
+                    SoloAiDecision::TakeAction(SoloAiActionIntent::PlayCard { .. })
+                    | SoloAiDecision::TakeAction(SoloAiActionIntent::ActivateItem { .. }) => {
+                        Ok(None)
+                    }
+                    _ => {
+                        self.finish_ai_turn(side, frames, action_index);
+                        Ok(Some(AiAdvanceOutcome::FinishedTurn))
+                    }
+                }
+            }
+            Phase::MatchOver => Err(MatchError::MatchOver),
+        }
     }
 
     fn apply_ai_decision_for_side(
@@ -2272,7 +2479,7 @@ impl MatchState {
             },
         );
 
-        if self.phase == Phase::Planning {
+        if self.phase != Phase::MatchOver {
             if side == Side::Opponent {
                 self.round += 1;
             }
@@ -2296,6 +2503,7 @@ impl MatchState {
         action_index: Option<u32>,
     ) {
         self.active_side = side;
+        self.phase = Phase::Movement;
         self.refresh_mana_from_sources(side);
         let should_draw = self.player_ref(side).has_started_first_turn;
         {

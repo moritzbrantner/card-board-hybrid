@@ -33,7 +33,7 @@ export type ActionAvailabilityReason = {
     | "notAResponse"
     | "priorityTooLow"
     | "insufficientMana"
-    | "heroApEmpty"
+    | "wrongPhase"
     | "noLegalTargets"
     | "pieceApEmpty"
     | "alreadyAttacked"
@@ -158,14 +158,12 @@ function cardAvailabilityReasons(
     }
   } else if (match.activeSide !== viewerSide) {
     reasons.push(reason("waitingForTurn", "Waiting for your turn."));
+  } else if (match.phase !== "cardPlay") {
+    reasons.push(reason("wrongPhase", "Cards can be played after attacks are finished."));
   }
 
   if (participant.mana < card.cost) {
     reasons.push(reason("insufficientMana", `Need ${card.cost} mana; you have ${participant.mana}.`));
-  }
-
-  if (participant.hero.apRemaining <= 0) {
-    reasons.push(reason("heroApEmpty", "Your Hero has no action points left."));
   }
 
   const hasLegalTarget = match.board.tiles.some((tile) =>
@@ -192,7 +190,7 @@ function baseCardChecksPass(
   }
   const participant = participantBySide(match, viewerSide);
   const pending = topStackItem(match);
-  if (participant.mana < card.cost || participant.hero.apRemaining <= 0) {
+  if (participant.mana < card.cost) {
     return false;
   }
   if (pending) {
@@ -202,7 +200,7 @@ function baseCardChecksPass(
       card.kind.priority > pending.priority
     );
   }
-  return match.activeSide === viewerSide;
+  return match.activeSide === viewerSide && match.phase === "cardPlay";
 }
 
 export function actionPreviewForCard(
@@ -215,7 +213,6 @@ export function actionPreviewForCard(
   const pending = topStackItem(match);
   const details = [
     `${card.cost} mana`,
-    "1 Hero AP",
     cardTargetSummary(card.kind),
     pending && card.kind.type === "spell"
       ? `Priority ${card.kind.priority}; current stack priority ${pending.priority}`
@@ -315,7 +312,16 @@ export function actionTrayEntriesForSelection({
       label: moveCount > 0 ? `Move (${moveCount})` : "Move",
       icon: "move",
       enabled: canAct && moveCount > 0,
-      reason: !canAct ? turnReason : piece.apRemaining <= 0 ? apReason : match.actionStack.length > 0 ? stackReason : undefined,
+      reason:
+        !canAct
+          ? turnReason
+          : match.phase !== "movement"
+            ? reason("wrongPhase", "Pieces move during the Movement Phase.")
+            : piece.apRemaining <= 0
+              ? apReason
+              : match.actionStack.length > 0
+                ? stackReason
+                : undefined,
       preview: actionPreviewForPiece(match, viewerSide, piece),
     },
     {
@@ -647,6 +653,9 @@ function attackReason(match: MatchState, viewerSide: Side, piece: BoardPiece, ca
   if (match.actionStack.length > 0) {
     return reason("stackPending", "Resolve the stack before attacking.");
   }
+  if (match.phase !== "attack") {
+    return reason("wrongPhase", "Attacks happen during the Attack Phase.");
+  }
   if (piece.apRemaining <= 0) {
     return reason("pieceApEmpty", `${piece.name} has no action points left.`);
   }
@@ -796,7 +805,7 @@ function prioritizedReasons(reasons: ActionAvailabilityReason[]) {
     "notAResponse",
     "priorityTooLow",
     "insufficientMana",
-    "heroApEmpty",
+    "wrongPhase",
     "noLegalTargets",
     "pieceApEmpty",
     "alreadyAttacked",

@@ -16,7 +16,7 @@ describe("match UX panels", () => {
         preview={{
           title: "Spark Jolt",
           body: "Deals 1 damage.",
-          details: ["1 mana", "1 Hero AP"],
+          details: ["1 mana"],
           tone: "attack",
         }}
         reason={{ code: "insufficientMana", message: "Need 1 mana; you have 0." }}

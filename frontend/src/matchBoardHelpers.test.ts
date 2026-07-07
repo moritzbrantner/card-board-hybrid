@@ -8,6 +8,7 @@ type BoardHero = Extract<BoardPiece, { pieceType: "hero" }>;
 describe("match board helpers", () => {
   it("accepts range-2 attacks and rejects range-2 melee attacks", () => {
     const match = baseMatch();
+    match.phase = "attack";
     const target = unit("opponent-unit", "opponent", { q: 0, r: 1 }, 1);
 
     expect(isLegalAttack(match, "player", hero("archer", "player", { q: 0, r: 3 }, 2), target)).toBe(
@@ -25,6 +26,7 @@ describe("match board helpers", () => {
 
   it("allows mana source cards on adjacent empty non-source hexes only", () => {
     const match = baseMatch();
+    match.phase = "cardPlay";
     match.board.manaSources = [{ q: 1, r: 2 }];
     const blocker = unit("blocker", "player", { q: 0, r: 2 }, 1);
     match.board.units = [blocker];
@@ -46,7 +48,7 @@ function baseMatch(): MatchState {
   return {
     mode: "solo",
     round: 1,
-    phase: "planning",
+    phase: "movement",
     activeSide: "player",
     prioritySide: null,
     player: participant("player"),

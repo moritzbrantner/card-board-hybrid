@@ -118,6 +118,7 @@ export function baseTutorialMatch(options: {
   hand?: Card[];
   units?: Unit[];
   activeSide?: "player" | "opponent";
+  phase?: MatchState["phase"];
   prioritySide?: "player" | "opponent" | null;
   actionStack?: StackItem[];
   log?: string[];
@@ -126,7 +127,7 @@ export function baseTutorialMatch(options: {
   return {
     mode: "solo",
     round: 1,
-    phase: "planning",
+    phase: options.phase ?? "movement",
     activeSide: options.activeSide ?? "player",
     prioritySide: options.prioritySide ?? null,
     player: {

@@ -41,7 +41,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: "mana-ap",
     title: "Mana and Action Points",
-    intro: "Mana pays for cards. Hero action points pay for moving, attacking, and playing cards during your turn.",
+    intro: "Mana pays for cards. Hero action points pay for moving and attacking during your turn.",
     objective: "Inspect the highlighted card cost.",
     highlights: [
       { kind: "ui", targetId: "tutorial-player-badge", tone: "primary" },
@@ -277,12 +277,20 @@ function sceneForStep(stepIndex: number): TutorialState {
 }
 
 function matchForStep(stepIndex: number): MatchState {
-  if (stepIndex <= 2) {
+  if (stepIndex === 0) {
     return initialTutorialMatch();
+  }
+
+  if (stepIndex <= 2) {
+    return {
+      ...initialTutorialMatch(),
+      phase: "cardPlay",
+    };
   }
 
   if (stepIndex === 3) {
     return withUnits({
+      phase: "movement",
       units: [tutorialUnit(TUTORIAL_SUMMON_COORD)],
       hand: [tutorialSparkJoltCard],
       log: ["Ember Squire joins the board."],
@@ -293,6 +301,7 @@ function matchForStep(stepIndex: number): MatchState {
 
   if (stepIndex === 4) {
     return withUnits({
+      phase: "attack",
       units: [
         tutorialUnit(TUTORIAL_MOVE_COORD, { apRemaining: 1 }),
         tutorialUnit(
@@ -317,6 +326,7 @@ function matchForStep(stepIndex: number): MatchState {
 
   if (stepIndex === 5) {
     return withUnits({
+      phase: "cardPlay",
       units: [
         tutorialUnit(TUTORIAL_MOVE_COORD, { apRemaining: 1, hasAttacked: true }),
         tutorialUnit(
@@ -341,6 +351,7 @@ function matchForStep(stepIndex: number): MatchState {
 
   if (stepIndex === 6) {
     return withUnits({
+      phase: "attack",
       units: stackUnits(),
       hand: [tutorialSparkJoltCard],
       activeSide: "opponent",
@@ -353,6 +364,7 @@ function matchForStep(stepIndex: number): MatchState {
   }
 
   return withUnits({
+    phase: "attack",
     units: stackUnits(),
     hand: [],
     activeSide: "opponent",
@@ -371,12 +383,14 @@ function withUnits(options: {
   mana: number;
   heroAp: number;
   activeSide?: "player" | "opponent";
+  phase?: MatchState["phase"];
   prioritySide?: "player" | "opponent" | null;
   actionStack?: MatchState["actionStack"];
 }): MatchState {
   const match = initialTutorialMatch();
   return {
     ...match,
+    phase: options.phase ?? "movement",
     activeSide: options.activeSide ?? "player",
     prioritySide: options.prioritySide ?? null,
     actionStack: options.actionStack ?? [],

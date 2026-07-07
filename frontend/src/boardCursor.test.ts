@@ -85,7 +85,7 @@ function matchWithHeroPositions(positions: Partial<Record<Side, { q: number; r: 
   return {
     mode: "solo",
     round: 1,
-    phase: "planning",
+    phase: "movement",
     activeSide: "player",
     prioritySide: null,
     player: participant("player", positions.player ?? { q: 0, r: 3 }),

@@ -24,6 +24,7 @@ fn movement_costs_action_points_and_requires_empty_adjacency() {
 #[test]
 fn adjacent_attacks_apply_counterdamage_once_per_piece() {
     let mut game = MatchState::new_with_seed(7);
+    enter_attack_phase(&mut game);
     game.board.units.push(Unit {
         id: "player-unit".to_string(),
         side: Side::Player,
@@ -79,6 +80,7 @@ fn adjacent_attacks_apply_counterdamage_once_per_piece() {
     assert_eq!(opponent.armor, 2);
     assert!(player.has_attacked);
 
+    enter_attack_phase(&mut game);
     let result = game.apply_action(MatchActionRequest::Attack {
         attacker_id: "player-unit".to_string(),
         target_id: "opponent-unit".to_string(),
@@ -90,6 +92,7 @@ fn adjacent_attacks_apply_counterdamage_once_per_piece() {
 #[test]
 fn archer_attacks_at_range_two_without_melee_counterdamage() {
     let mut game = MatchState::new_with_seed_and_player_hero_type(7, HeroType::Archer);
+    enter_attack_phase(&mut game);
     game.board.units.push(board_unit(
         "opponent-unit",
         Side::Opponent,
@@ -123,6 +126,7 @@ fn archer_attacks_at_range_two_without_melee_counterdamage() {
 #[test]
 fn melee_pieces_cannot_attack_at_range_two() {
     let mut game = MatchState::new_with_seed(7);
+    enter_attack_phase(&mut game);
     game.board.units.push(board_unit(
         "opponent-unit",
         Side::Opponent,
@@ -143,6 +147,7 @@ fn melee_pieces_cannot_attack_at_range_two() {
 #[test]
 fn range_two_targets_counterdamage_at_range_two() {
     let mut game = MatchState::new_with_seed_and_player_hero_type(7, HeroType::Archer);
+    enter_attack_phase(&mut game);
     game.board.units.push(board_unit(
         "opponent-unit",
         Side::Opponent,
@@ -164,6 +169,7 @@ fn range_two_targets_counterdamage_at_range_two() {
 #[test]
 fn barbarian_hero_gains_mana_over_cap_when_attack_kills_unit() {
     let mut game = MatchState::new_with_seed_and_player_hero_type(7, HeroType::Barbarian);
+    enter_attack_phase(&mut game);
     game.player.mana = 8;
     game.player.max_mana = 8;
     game.board.units.push(board_unit(
@@ -214,6 +220,7 @@ fn barbarian_hero_gains_mana_when_counterdamage_kills_unit() {
         HeroType::Barbarian,
         MatchMode::Solo,
     );
+    enter_attack_phase(&mut game);
     game.board
         .units
         .push(board_unit("player-unit", Side::Player, hex(0, -2), 0, 1, 3));
@@ -243,6 +250,7 @@ fn barbarian_hero_gains_mana_when_counterdamage_kills_unit() {
 #[test]
 fn barbarian_controlled_unit_kill_does_not_gain_mana() {
     let mut game = MatchState::new_with_seed_and_player_hero_type(7, HeroType::Barbarian);
+    enter_attack_phase(&mut game);
     game.player.mana = 4;
     game.board
         .units
@@ -513,6 +521,7 @@ fn line_damage_rejects_non_straight_targets() {
 #[test]
 fn hero_death_ends_the_match() {
     let mut game = MatchState::new_with_seed(7);
+    enter_attack_phase(&mut game);
     game.board.units.push(Unit {
         id: "player-unit".to_string(),
         side: Side::Player,
@@ -538,4 +547,145 @@ fn hero_death_ends_the_match() {
 
     assert_eq!(game.phase, Phase::MatchOver);
     assert_eq!(game.winner, Some(Side::Player));
+}
+
+#[test]
+fn surviving_melee_attacker_advances_after_destroying_unit() {
+    let mut game = MatchState::new_with_seed(7);
+    enter_attack_phase(&mut game);
+    game.board.units.push(board_unit(
+        "player-unit",
+        Side::Player,
+        hex(0, 1),
+        3,
+        1,
+        4,
+    ));
+    game.board.units.push(board_unit(
+        "opponent-unit",
+        Side::Opponent,
+        hex(0, 0),
+        1,
+        1,
+        2,
+    ));
+
+    let frames = game
+        .apply_action_recording(
+            MatchActionRequest::Attack {
+                attacker_id: "player-unit".to_string(),
+                target_id: "opponent-unit".to_string(),
+            },
+            90,
+        )
+        .expect("melee kill should resolve");
+
+    let attacker = game
+        .board
+        .units
+        .iter()
+        .find(|unit| unit.id == "player-unit")
+        .expect("attacker should survive");
+    assert_eq!(attacker.position, hex(0, 0));
+    assert!(frames.iter().any(|frame| matches!(
+        &frame.event,
+        ReplayEvent::PieceMoved {
+            piece_id,
+            from,
+            to,
+            ..
+        } if piece_id == "player-unit" && *from == hex(0, 1) && *to == hex(0, 0)
+    )));
+}
+
+#[test]
+fn ranged_kill_does_not_advance_attacker() {
+    let mut game = MatchState::new_with_seed(7);
+    enter_attack_phase(&mut game);
+    game.board.units.push(board_unit(
+        "player-unit",
+        Side::Player,
+        hex(0, 2),
+        3,
+        2,
+        4,
+    ));
+    game.board.units.push(board_unit(
+        "opponent-unit",
+        Side::Opponent,
+        hex(0, 0),
+        0,
+        1,
+        2,
+    ));
+
+    game.apply_action(MatchActionRequest::Attack {
+        attacker_id: "player-unit".to_string(),
+        target_id: "opponent-unit".to_string(),
+    })
+    .expect("ranged kill should resolve");
+
+    let attacker = game
+        .board
+        .units
+        .iter()
+        .find(|unit| unit.id == "player-unit")
+        .expect("attacker should survive");
+    assert_eq!(attacker.position, hex(0, 2));
+}
+
+#[test]
+fn simultaneous_melee_death_does_not_advance_attacker() {
+    let mut game = MatchState::new_with_seed(7);
+    enter_attack_phase(&mut game);
+    game.board.units.push(board_unit(
+        "player-unit",
+        Side::Player,
+        hex(0, 1),
+        2,
+        1,
+        2,
+    ));
+    game.board.units.push(board_unit(
+        "opponent-unit",
+        Side::Opponent,
+        hex(0, 0),
+        2,
+        1,
+        2,
+    ));
+
+    game.apply_action(MatchActionRequest::Attack {
+        attacker_id: "player-unit".to_string(),
+        target_id: "opponent-unit".to_string(),
+    })
+    .expect("simultaneous death should resolve");
+
+    assert!(!game
+        .board
+        .units
+        .iter()
+        .any(|unit| unit.id == "player-unit"));
+    assert!(!game
+        .board
+        .units
+        .iter()
+        .any(|unit| unit.position == hex(0, 0)));
+}
+
+#[test]
+fn hero_knockout_does_not_advance_attacker() {
+    let mut game = MatchState::new_with_seed(7);
+    enter_attack_phase(&mut game);
+    game.opponent.hero.hp = 1;
+    game.opponent.hero.position = hex(0, 2);
+
+    game.apply_action(MatchActionRequest::Attack {
+        attacker_id: "player-hero".to_string(),
+        target_id: "opponent-hero".to_string(),
+    })
+    .expect("hero knockout should resolve");
+
+    assert_eq!(game.player.hero.position, hex(0, 3));
+    assert_eq!(game.phase, Phase::MatchOver);
 }

@@ -1315,7 +1315,7 @@ mod tests {
             result.outcome,
             GameOutcome::IllegalAction(ref reason) if reason.contains("piece not found")
         ));
-        assert_eq!(result.action_count, 0);
+        assert_eq!(result.action_count, 1);
     }
 
     #[test]
@@ -1331,6 +1331,14 @@ mod tests {
                 &mut forgiving_frames,
                 Some(0),
             )
+            .expect("forgiving live path should start attack phase");
+        forgiving_game
+            .advance_ai_for_side_with_policy(
+                Side::Player,
+                &invalid_policy,
+                &mut forgiving_frames,
+                Some(1),
+            )
             .expect("forgiving live path should not error");
 
         assert_eq!(forgiving_game.active_side, Side::Opponent);
@@ -1344,6 +1352,16 @@ mod tests {
                 &mut strict_frames,
                 Some(0),
             )
+            .expect("strict path should start attack phase");
+        assert!(matches!(strict_outcome, AiAdvanceOutcome::ActionApplied));
+
+        let strict_outcome = strict_game
+            .advance_ai_for_side_with_policy_strict(
+                Side::Player,
+                &invalid_policy,
+                &mut strict_frames,
+                Some(1),
+            )
             .expect("strict path should return an outcome");
 
         assert!(matches!(
@@ -1351,7 +1369,7 @@ mod tests {
             AiAdvanceOutcome::IllegalIntent { reason } if reason.contains("piece not found")
         ));
         assert_eq!(strict_game.active_side, Side::Player);
-        assert!(strict_frames.is_empty());
+        assert_eq!(strict_frames.len(), 1);
     }
 
     #[test]

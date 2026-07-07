@@ -8,6 +8,7 @@ import { AccountActions, ShellMessage } from "../components/common";
 import { useMatchChromeMinimized } from "../appHooks";
 import { eventDetail, eventSideLabel, eventTitle, sideLabel } from "../labels";
 import { protectedLoginRoute } from "../routes";
+import type { Phase } from "../types";
 import { shouldOfferCompletedMatchLogin } from "./privateMatchAccess";
 
 export function ReplayPage({
@@ -163,7 +164,7 @@ export function ReplayPage({
           <div className="battlefield-hud battlefield-hud-phase">
             <div className="phase-pill">
               {replay.visibility === "revealed" ? <Eye size={16} /> : <EyeOff size={16} />}
-              {match.phase === "matchOver" ? `${sideLabel(match.winner)} wins` : "Planning"}
+              {match.phase === "matchOver" ? `${sideLabel(match.winner)} wins` : phaseLabelFor(match.phase)}
             </div>
           </div>
           <div className="battlefield-hud battlefield-hud-opponent">
@@ -224,4 +225,17 @@ export function ReplayPage({
       </section>
     </main>
   );
+}
+
+function phaseLabelFor(phase: Phase) {
+  switch (phase) {
+    case "movement":
+      return "Movement Phase";
+    case "attack":
+      return "Attack Phase";
+    case "cardPlay":
+      return "Card Play";
+    case "matchOver":
+      return "Match over";
+  }
 }

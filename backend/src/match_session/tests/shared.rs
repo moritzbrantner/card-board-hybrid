@@ -12,6 +12,7 @@ fn shared_turn_start_refreshes_only_the_active_side_mana() {
     game.player.max_mana = 4;
     game.opponent.mana = 2;
     game.opponent.max_mana = 4;
+    enter_card_play(&mut game);
 
     game.apply_action_recording_for_side(Side::Player, MatchActionRequest::EndTurn, 0)
         .expect("player can end their active turn");
@@ -47,6 +48,7 @@ fn shared_turns_pass_between_humans_without_running_ai() {
         HeroType::Pyromancer,
         MatchMode::Shared,
     );
+    enter_card_play(&mut game);
 
     game.apply_action_recording_for_side(Side::Player, MatchActionRequest::EndTurn, 0)
         .expect("player can end their active turn");
@@ -55,6 +57,7 @@ fn shared_turns_pass_between_humans_without_running_ai() {
     assert_eq!(game.round, 1);
     assert_eq!(game.opponent.hero.hero_type, HeroType::Pyromancer);
 
+    enter_card_play(&mut game);
     game.apply_action_recording_for_side(Side::Opponent, MatchActionRequest::EndTurn, 1)
         .expect("opponent can end their active turn");
 
@@ -100,6 +103,7 @@ fn shared_turn_start_refreshes_only_active_side_unit_armor() {
         4,
     ));
 
+    enter_card_play(&mut game);
     let opponent_turn_frames = game
         .apply_action_recording_for_side(Side::Player, MatchActionRequest::EndTurn, 0)
         .expect("player can end their active turn");
@@ -144,6 +148,7 @@ fn shared_turn_start_refreshes_only_active_side_unit_armor() {
         1
     );
 
+    enter_card_play(&mut game);
     let player_turn_frames = game
         .apply_action_recording_for_side(Side::Opponent, MatchActionRequest::EndTurn, 1)
         .expect("opponent can end their active turn");
@@ -234,6 +239,7 @@ fn shared_spell_responses_require_higher_priority_and_resolve_lifo() {
     let bolt_id = put_card_in_side_hand(&mut game, Side::Player, bolt);
     let parry_id = put_card_in_side_hand(&mut game, Side::Opponent, parry);
 
+    enter_card_play(&mut game);
     game.apply_action_recording_for_side(
         Side::Player,
         MatchActionRequest::PlayCard {
@@ -337,6 +343,7 @@ fn lower_priority_spells_cannot_answer_pending_actions() {
     let bolt_id = put_card_in_side_hand(&mut game, Side::Player, bolt);
     let chant_id = put_card_in_side_hand(&mut game, Side::Opponent, chant);
 
+    enter_card_play(&mut game);
     game.apply_action_recording_for_side(
         Side::Player,
         MatchActionRequest::PlayCard {

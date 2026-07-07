@@ -3,12 +3,14 @@ use super::*;
 #[test]
 fn public_replay_redacts_hidden_opponent_draws() {
     let mut game = MatchState::new_with_seed(7);
+    enter_card_play(&mut game);
     game.apply_action_recording(MatchActionRequest::EndTurn, 40)
         .expect("ending turn should start the opponent turn");
     advance_solo_ai_until_player_turn(&mut game);
     let initial_hand = game.opponent.hand.len();
     let initial_deck = game.opponent.deck_count;
 
+    enter_card_play(&mut game);
     let frames = game
         .apply_action_recording(MatchActionRequest::EndTurn, 41)
         .expect("ending turn should start the opponent turn again");

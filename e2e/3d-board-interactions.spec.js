@@ -117,6 +117,14 @@ test("moves and attacks through the 3D board", async ({ page }) => {
       });
     }
 
+    if (action.type === "startAttackPhase") {
+      match = playableMatch({
+        phase: "attack",
+        playerHero: { q: 0, r: 1 },
+        opponentHero: { q: 1, r: 1 },
+      });
+    }
+
     if (action.type === "attack") {
       match = playableMatch({
         playerHero: { q: 0, r: 1 },
@@ -149,6 +157,8 @@ test("moves and attacks through the 3D board", async ({ page }) => {
     opponentHero: { q: 1, r: 1 },
   });
   await page.reload();
+  await page.getByRole("button", { name: "Start Attack" }).click();
+  await expect.poll(() => actions).toContainEqual({ type: "startAttackPhase" });
   await tile(page, "q 0, r 1, occupied by your hero").click();
   await expect(tile(page, "q 1, r 1, occupied by the opponent's hero")).toHaveAttribute(
     "data-legal",
@@ -170,6 +180,7 @@ test("moves and attacks through the 3D board", async ({ page }) => {
 test("plays unit and spell card targets through the 3D board", async ({ page }) => {
   await useStoredBoardVisualMode(page, "3d");
   let match = playableMatch({
+    phase: "cardPlay",
     playerHero: { q: 0, r: 1 },
     opponentHero: { q: 1, r: 1 },
     hand: [emberSquire(), sparkJolt()],
@@ -180,6 +191,7 @@ test("plays unit and spell card targets through the 3D board", async ({ page }) 
     actions.push(action);
     if (action.type === "playCard" && action.cardId === "ember-squire-card") {
       match = playableMatch({
+        phase: "cardPlay",
         playerHero: { q: 0, r: 1 },
         opponentHero: { q: 1, r: 1 },
         hand: [sparkJolt()],
@@ -290,6 +302,7 @@ test("shows queued stack targeting indicators and filters them from the board ov
 test("shows selected spell targeting indicators in 2D mode", async ({ page }) => {
   await useStoredBoardVisualMode(page, "2d");
   const match = playableMatch({
+    phase: "cardPlay",
     playerHero: { q: 0, r: 1 },
     opponentHero: { q: 1, r: 1 },
     hand: [sparkJolt()],
@@ -308,6 +321,7 @@ test("keeps projected 3D hit targets usable after viewport resize", async ({ pag
   await page.setViewportSize({ width: 1280, height: 720 });
   await useStoredBoardVisualMode(page, "3d");
   let match = playableMatch({
+    phase: "cardPlay",
     playerHero: { q: 0, r: 1 },
     opponentHero: { q: 1, r: 1 },
     hand: [emberSquire()],
@@ -318,6 +332,7 @@ test("keeps projected 3D hit targets usable after viewport resize", async ({ pag
     actions.push(action);
     if (action.type === "playCard") {
       match = playableMatch({
+        phase: "cardPlay",
         playerHero: { q: 0, r: 1 },
         opponentHero: { q: 1, r: 1 },
         hand: [],
@@ -808,7 +823,7 @@ async function mockReplayApi(page, match) {
             createdAt: 0,
             updatedAt: 0,
             round: 1,
-            phase: "planning",
+            phase: "movement",
             winner: null,
             frameCount: 1,
           },
@@ -832,7 +847,7 @@ function matchResponse(matchState) {
 
 function playableMatch({
   activeSide = "player",
-  phase = "planning",
+  phase = "movement",
   playerHero,
   opponentHero,
   playerHeroType = "runekeeper",

@@ -246,8 +246,7 @@ async fn match_actions_persist_and_reload_by_match_id() {
     assert_eq!(status, StatusCode::OK);
     let match_id = created["matchId"].as_str().expect("match id should exist");
 
-    let (status, acted) = post_match_action(app.clone(), match_id, r#"{"type":"endTurn"}"#).await;
-    assert_eq!(status, StatusCode::OK);
+    let acted = end_turn_from_card_play(app.clone(), match_id).await;
     assert_eq!(acted["matchId"], match_id);
     assert_eq!(acted["matchState"]["round"], 1);
     assert_eq!(acted["matchState"]["activeSide"], "opponent");
@@ -297,8 +296,7 @@ async fn accepted_actions_append_action_record_and_internal_replay_frames() {
     .await;
     let match_id = created["matchId"].as_str().expect("match id should exist");
 
-    let (status, _) = post_match_action(app.clone(), match_id, r#"{"type":"endTurn"}"#).await;
-    assert_eq!(status, StatusCode::OK);
+    end_turn_from_card_play(app.clone(), match_id).await;
     advance_solo_match_to_player_turn(app.clone(), match_id).await;
 
     let (status, replay) = json_request(
@@ -348,7 +346,8 @@ async fn match_action_response_includes_replay_frames_for_live_playback() {
     .await;
     let match_id = created["matchId"].as_str().expect("match id should exist");
 
-    let (status, _) = post_match_action(app.clone(), match_id, r#"{"type":"endTurn"}"#).await;
+    end_turn_from_card_play(app.clone(), match_id).await;
+    let (status, _) = post_match_action(app.clone(), match_id, r#"{"type":"advanceAi"}"#).await;
     assert_eq!(status, StatusCode::OK);
     let (status, advanced) =
         post_match_action(app.clone(), match_id, r#"{"type":"advanceAi"}"#).await;
@@ -429,8 +428,7 @@ async fn active_replay_redacts_opponent_hidden_draws() {
     let match_id = created["matchId"].as_str().expect("match id should exist");
 
     for _ in 0..2 {
-        let (status, _) = post_match_action(app.clone(), match_id, r#"{"type":"endTurn"}"#).await;
-        assert_eq!(status, StatusCode::OK);
+        end_turn_from_card_play(app.clone(), match_id).await;
         advance_solo_match_to_player_turn(app.clone(), match_id).await;
     }
 

@@ -2,7 +2,7 @@ export type Side = "player" | "opponent" | "playerTwo" | "opponentTwo";
 export type Team = "player" | "opponent";
 export type MatchFormat = "duel" | "twoVTwo";
 
-export type Phase = "planning" | "matchOver";
+export type Phase = "movement" | "attack" | "cardPlay" | "matchOver";
 
 export type MatchMode = "solo" | "shared";
 
@@ -796,6 +796,12 @@ export type MatchActionRequest =
       buildingId: string;
     }
   | {
+      type: "startAttackPhase";
+    }
+  | {
+      type: "startCardPlay";
+    }
+  | {
       type: "endTurn";
     }
   | {
@@ -868,6 +874,11 @@ export type ReplayEvent =
   | {
       type: "roundStarted";
       round: number;
+    }
+  | {
+      type: "phaseChanged";
+      side: Side;
+      phase: Phase;
     }
   | {
       type: "cardDrawn";

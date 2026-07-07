@@ -118,7 +118,10 @@ impl Serialize for PublicPlayerState<'_> {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Phase {
-    Planning,
+    #[serde(alias = "planning")]
+    Movement,
+    Attack,
+    CardPlay,
     MatchOver,
 }
 
@@ -580,6 +583,8 @@ pub enum MatchActionRequest {
     ActivateBuilding {
         building_id: String,
     },
+    StartAttackPhase,
+    StartCardPlay,
     EndTurn,
     PassPriority,
     AdvanceAi,
@@ -626,6 +631,7 @@ pub enum MatchError {
     StackPending,
     EmptyStack,
     PriorityTooLow,
+    WrongPhase,
     AiUnavailable,
 }
 
@@ -737,6 +743,7 @@ impl fmt::Display for MatchError {
             Self::StackPending => "resolve the stack before taking that action",
             Self::EmptyStack => "there are no pending actions to resolve",
             Self::PriorityTooLow => "spell priority must be greater than the pending action",
+            Self::WrongPhase => "that action is not available in this phase",
             Self::AiUnavailable => "the AI is not ready to act",
         };
 

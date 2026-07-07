@@ -95,12 +95,13 @@ export function storyMatch(options: {
   opponentHero?: HexCoord;
   actionStack?: StackItem[];
   prioritySide?: "player" | "opponent" | null;
+  phase?: MatchState["phase"];
 } = {}): MatchState {
   const hand = options.hand ?? [emberSquireCard, sparkJoltCard];
   return {
     mode: "solo",
     round: 1,
-    phase: "planning",
+    phase: options.phase ?? "movement",
     activeSide: "player",
     prioritySide: options.prioritySide ?? null,
     player: {

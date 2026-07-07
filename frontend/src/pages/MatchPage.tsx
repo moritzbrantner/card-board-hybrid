@@ -1,4 +1,4 @@
-import { Activity, Archive, Eye, EyeOff, Layers, Play, Plus, RotateCcw, Zap } from "lucide-react";
+import { Activity, Archive, Eye, EyeOff, Layers, Play, Plus, RotateCcw, Sword, Zap } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
 import {
@@ -13,6 +13,8 @@ import {
   movePiece,
   passPriority,
   playCard,
+  startAttackPhase,
+  startCardPlay,
 } from "../api";
 import type { AccountPreferenceProps, LoadState } from "../appTypes";
 import { createBoardAnimationCue, type BoardAnimationCue } from "../boardAnimations";
@@ -35,7 +37,7 @@ import {
   TurnChecklist,
 } from "../components/match";
 import { sideLabel } from "../labels";
-import { liveAiPlaybackFrames } from "../livePlayback";
+import { liveAiPlaybackFrames, suppressLiveAiFallbackAnimation } from "../livePlayback";
 import {
   cardFanStyle,
   buildingAt,
@@ -195,28 +197,35 @@ export function MatchPage({
     const playbackFrames = liveAiPlaybackFrames(response.replayFrames ?? []);
     let previousMatch = loadState.status === "ready" ? loadState.match : null;
 
-    function acceptMatch(nextMatch: MatchState, event?: ReplayEvent | null) {
+    function acceptMatch(
+      nextMatch: MatchState,
+      event?: ReplayEvent | null,
+      options: { suppressAnimation?: boolean } = {},
+    ) {
       setLoadState({
         status: "ready",
         match: nextMatch,
         heroAppearances: response.heroAppearances,
       });
-      setBoardAnimation(
-        createBoardAnimationCue({
-          previous: previousMatch,
-          next: nextMatch,
-          event,
-          sequence: ++animationSequenceRef.current,
-          reducedMotion,
-        }),
-      );
+      setBoardAnimation(options.suppressAnimation
+        ? null
+        : createBoardAnimationCue({
+            previous: previousMatch,
+            next: nextMatch,
+            event,
+            sequence: ++animationSequenceRef.current,
+            reducedMotion,
+          }));
       previousMatch = nextMatch;
     }
 
     if (playbackFrames.length === 0) {
       const event = latestReplayEvent(response.replayFrames);
-      acceptMatch(response.matchState, event);
-      updateActionRecap(event);
+      const suppressAnimation = suppressLiveAiFallbackAnimation(event);
+      acceptMatch(response.matchState, event, { suppressAnimation });
+      if (!suppressAnimation) {
+        updateActionRecap(event);
+      }
       return;
     }
 
@@ -280,6 +289,7 @@ export function MatchPage({
           !readyMatch ||
           busy ||
           readyMatch.phase === "matchOver" ||
+          readyMatch.phase !== "cardPlay" ||
           readyMatch.activeSide !== viewerSide ||
           readyMatch.actionStack.length > 0
         ) {
@@ -361,7 +371,7 @@ export function MatchPage({
       : hasPendingStack
         ? `${sideLabel(match.prioritySide)} priority`
         : match.activeSide === viewerSide
-          ? "Your turn"
+          ? phaseLabelFor(match.phase)
           : "AI thinking";
   const enemySide = opponentSideOf(viewerSide);
   const viewerHand = handForSide(match, viewerSide);
@@ -446,20 +456,50 @@ export function MatchPage({
           <Eye size={18} />
         </button>
         <div className="match-action-dock" aria-label="Match actions">
-          <button
-            className="primary-button"
-            type="button"
-            onClick={() => void runAction(() => endTurn(matchId))}
-            disabled={
-              busy ||
-              match.phase === "matchOver" ||
-              match.activeSide !== viewerSide ||
-              hasPendingStack
-            }
-          >
-            <Play size={18} />
-            End Turn
-          </button>
+          {!hasPendingStack && match.phase === "movement" ? (
+            <>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => void runAction(() => startAttackPhase(matchId))}
+                disabled={busy || match.activeSide !== viewerSide}
+              >
+                <Sword size={18} />
+                Start Attack
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => void runAction(() => startCardPlay(matchId))}
+                disabled={busy || match.activeSide !== viewerSide}
+              >
+                <Layers size={18} />
+                Play Cards
+              </button>
+            </>
+          ) : null}
+          {!hasPendingStack && match.phase === "attack" ? (
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void runAction(() => startCardPlay(matchId))}
+              disabled={busy || match.activeSide !== viewerSide}
+            >
+              <Play size={18} />
+              Finish Attacks
+            </button>
+          ) : null}
+          {!hasPendingStack && match.phase === "cardPlay" ? (
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void runAction(() => endTurn(matchId))}
+              disabled={busy || match.activeSide !== viewerSide}
+            >
+              <Play size={18} />
+              End Turn
+            </button>
+          ) : null}
           {hasPendingStack ? (
             <button
               className="primary-button"
@@ -625,11 +665,28 @@ function soloActionRequest(matchId: string, action: MatchActionRequest) {
       return activateItem(matchId, action.carrierId ?? action.unitId, action.itemId, action.target ?? null);
     case "activateBuilding":
       return activateBuilding(matchId, action.buildingId);
+    case "startAttackPhase":
+      return startAttackPhase(matchId);
+    case "startCardPlay":
+      return startCardPlay(matchId);
     case "endTurn":
       return endTurn(matchId);
     case "passPriority":
       return passPriority(matchId);
     case "advanceAi":
       return advanceAi(matchId);
+  }
+}
+
+function phaseLabelFor(phase: MatchState["phase"]) {
+  switch (phase) {
+    case "movement":
+      return "Movement Phase";
+    case "attack":
+      return "Attack Phase";
+    case "cardPlay":
+      return "Card Play";
+    case "matchOver":
+      return "Match over";
   }
 }

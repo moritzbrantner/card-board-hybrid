@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("plays replay frames from one AI action one at a time", async ({ page }) => {
-  let match = matchAt({ q: 0, r: -3 }, "player");
+  let match = matchAt({ q: 0, r: -3 }, "player", "cardPlay");
 
   await mockMatchApi(page, async (action) => {
     if (action.type === "endTurn") {
@@ -69,7 +69,7 @@ test("plays replay frames from one AI action one at a time", async ({ page }) =>
 });
 
 test("does not start the next AI action until current playback finishes", async ({ page }) => {
-  let match = matchAt({ q: 0, r: -3 }, "player");
+  let match = matchAt({ q: 0, r: -3 }, "player", "cardPlay");
   let advanceCount = 0;
   let secondAdvanceRequested = false;
 
@@ -192,11 +192,11 @@ function opponentHeroAt(page, coord) {
   });
 }
 
-function matchAt(opponentPosition, activeSide) {
+function matchAt(opponentPosition, activeSide, phase = "movement") {
   return {
     mode: "solo",
     round: 1,
-    phase: "planning",
+    phase,
     activeSide,
     prioritySide: null,
     player: {

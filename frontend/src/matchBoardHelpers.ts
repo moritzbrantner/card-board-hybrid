@@ -270,16 +270,14 @@ export function isPlayableCard(match: MatchState, viewerSide: Side, card: Card) 
       match.prioritySide === viewerSide &&
       card.kind.type === "spell" &&
       participant.mana >= card.cost &&
-      participant.hero.apRemaining > 0 &&
       card.kind.priority > pending.priority
     );
   }
 
   return (
-    match.phase !== "matchOver" &&
+    match.phase === "cardPlay" &&
     match.activeSide === viewerSide &&
-    participant.mana >= card.cost &&
-    participant.hero.apRemaining > 0
+    participant.mana >= card.cost
   );
 }
 
@@ -376,6 +374,7 @@ function targetPolicyAllows(policy: BuffTargetPolicy, isHero: boolean) {
 export function isLegalMove(match: MatchState, viewerSide: Side, piece: BoardPiece, coord: HexCoord) {
   return (
     match.actionStack.length === 0 &&
+    match.phase === "movement" &&
     match.activeSide === viewerSide &&
     piece.side === viewerSide &&
     piece.apRemaining > 0 &&
@@ -392,6 +391,7 @@ export function isLegalAttack(
 ) {
   return (
     match.actionStack.length === 0 &&
+    match.phase === "attack" &&
     match.activeSide === viewerSide &&
     attacker.side === viewerSide &&
     !sameTeam(target.side, viewerSide) &&

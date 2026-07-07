@@ -50,7 +50,7 @@ test("saved navigation hotkeys use account preferences and ignore editable focus
 });
 
 test("saved action hotkeys submit only when the viewer may act", async ({ page }) => {
-  let match = playableMatch({ activeSide: "player" });
+  let match = playableMatch({ activeSide: "player", phase: "cardPlay" });
   const actions = [];
   await mockHotkeyApi(page, async (action) => {
     actions.push(action);
@@ -264,6 +264,7 @@ function matchResponse(matchState) {
 
 function playableMatch({
   activeSide,
+  phase = "movement",
   actionStack = [],
   prioritySide = null,
   hand = [],
@@ -273,7 +274,7 @@ function playableMatch({
   return {
     mode: "solo",
     round: 1,
-    phase: "planning",
+    phase,
     activeSide,
     prioritySide,
     player: participant("player", activeSide, playerPosition, hand),

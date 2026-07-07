@@ -115,6 +115,14 @@ fn match_action_payloads_accept_camel_case_api_fields() {
             target_id
         } if attacker_id == "player-hero" && target_id == "opponent-hero"
     ));
+
+    let action: MatchActionRequest = serde_json::from_str(r#"{"type":"startAttackPhase"}"#)
+        .expect("frontend start-attack payload should deserialize");
+    assert!(matches!(action, MatchActionRequest::StartAttackPhase));
+
+    let action: MatchActionRequest = serde_json::from_str(r#"{"type":"startCardPlay"}"#)
+        .expect("frontend start-card-play payload should deserialize");
+    assert!(matches!(action, MatchActionRequest::StartCardPlay));
 }
 
 #[test]
@@ -150,6 +158,31 @@ fn terminal_match_phase_serializes_as_match_over() {
 
     assert_eq!(value["phase"], "matchOver");
     assert_ne!(value["phase"], "gameOver");
+}
+
+#[test]
+fn new_match_phase_serializes_as_movement() {
+    let game = MatchState::new_with_seed(7);
+
+    let value = serde_json::to_value(&game).expect("match should serialize");
+
+    assert_eq!(value["phase"], "movement");
+}
+
+#[test]
+fn legacy_planning_snapshots_restore_as_movement_phase() {
+    let mut snapshot = serde_json::from_str::<serde_json::Value>(
+        &MatchState::new_with_seed(7)
+            .to_snapshot_json()
+            .expect("snapshot should serialize"),
+    )
+    .expect("snapshot should parse");
+    snapshot["phase"] = serde_json::Value::String("planning".to_string());
+
+    let restored = MatchState::from_snapshot_json(&snapshot.to_string())
+        .expect("legacy snapshot should deserialize");
+
+    assert_eq!(restored.phase, Phase::Movement);
 }
 
 #[test]

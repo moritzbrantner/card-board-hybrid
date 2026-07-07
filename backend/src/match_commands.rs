@@ -220,6 +220,14 @@ mod tests {
             .create_match_for_user(HeroType::Pyromancer, None)
             .expect("match should create");
 
+        MatchCommands::new(&mut store)
+            .apply_solo_action(
+                Actor::Anonymous,
+                &created.id,
+                MatchActionRequest::StartCardPlay,
+            )
+            .expect("ownerless phase action should apply");
+
         let applied = MatchCommands::new(&mut store)
             .apply_solo_action(Actor::Anonymous, &created.id, MatchActionRequest::EndTurn)
             .expect("ownerless solo action should apply");
@@ -230,7 +238,7 @@ mod tests {
             store
                 .next_action_index(&created.id)
                 .expect("action index should load"),
-            1
+            2
         );
         let replay = store
             .load_replay(&created.id)

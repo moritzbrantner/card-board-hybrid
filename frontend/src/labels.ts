@@ -125,7 +125,20 @@ export function formatMatchStatus(match: MatchSummary) {
     return `${sideLabel(match.winner)} wins`;
   }
 
-  return "Planning";
+  return phaseName(match.phase);
+}
+
+export function phaseName(phase: MatchSummary["phase"]) {
+  switch (phase) {
+    case "movement":
+      return "Movement Phase";
+    case "attack":
+      return "Attack Phase";
+    case "cardPlay":
+      return "Card Play";
+    case "matchOver":
+      return "Match over";
+  }
 }
 
 export function formatUnixTime(value: number) {
@@ -158,6 +171,8 @@ export function eventTitle(event: ReplayEvent) {
       return "Turn ended";
     case "roundStarted":
       return `Round ${event.round}`;
+    case "phaseChanged":
+      return phaseName(event.phase);
     case "cardDrawn":
       return event.card ? `${event.card.name} drawn` : "Hidden card drawn";
     case "cardPlayed":
@@ -211,6 +226,8 @@ export function eventDetail(event: ReplayEvent) {
       return `Round ${event.round} ${sideLabel(event.side).toLocaleLowerCase()} turn ended.`;
     case "roundStarted":
       return `Round ${event.round} begins.`;
+    case "phaseChanged":
+      return `${sideLabel(event.side)} entered ${phaseName(event.phase)}.`;
     case "cardDrawn":
       return event.card
         ? `${sideLabel(event.side)} drew ${event.card.name}.`

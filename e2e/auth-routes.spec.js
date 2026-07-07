@@ -446,7 +446,7 @@ async function mockAuthApi(page, authRequests = []) {
               createdAt: 20,
               updatedAt: 40,
               round: 3,
-              phase: "planning",
+              phase: "movement",
               winner: null,
               frameCount: 7,
             },
@@ -683,7 +683,7 @@ function playableMatch() {
   return {
     mode: "solo",
     round: 1,
-    phase: "planning",
+    phase: "movement",
     activeSide: "player",
     prioritySide: null,
     player: participant("player"),

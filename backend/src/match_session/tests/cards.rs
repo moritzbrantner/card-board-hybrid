@@ -38,7 +38,7 @@ fn starter_deck_has_the_expected_rarity_counts() {
 }
 
 #[test]
-fn playing_a_unit_spends_mana_and_hero_ap_and_summons_adjacent() {
+fn playing_a_unit_spends_mana_only_and_summons_adjacent() {
     let mut game = MatchState::new_with_seed(7);
     let card = player_unit_card(&game, "ember-squire");
     let card_id = put_card_in_hand(&mut game, card);
@@ -55,7 +55,7 @@ fn playing_a_unit_spends_mana_and_hero_ap_and_summons_adjacent() {
 
     let unit = game.board.units.first().expect("unit should be on board");
     assert_eq!(game.player.mana, 2);
-    assert_eq!(game.player.hero.ap_remaining, 2);
+    assert_eq!(game.player.hero.ap_remaining, 3);
     assert_eq!(unit.position, hex(0, 2));
     assert_eq!(unit.template_id.as_deref(), Some("ember-squire"));
     assert_eq!(unit.ap_remaining, 1);
@@ -417,10 +417,10 @@ fn units_pick_up_dropped_items_by_moving_onto_their_hex() {
         name: "Rune Bruiser".to_string(),
         template_id: Some("rune-bruiser".to_string()),
         attack: 3,
-        attack_range: 1,
+        attack_range: 2,
         armor: 3,
         max_armor: 3,
-        position: hex(1, 1),
+        position: hex(2, 0),
         ap_remaining: 2,
         max_ap: 2,
         has_attacked: false,
@@ -474,6 +474,7 @@ fn units_pick_up_dropped_items_by_moving_onto_their_hex() {
         stat_markers: Vec::new(),
     });
 
+    enter_attack_phase(&mut game);
     game.apply_action(MatchActionRequest::Attack {
         attacker_id: "attacker".to_string(),
         target_id: "carrier".to_string(),
@@ -482,6 +483,7 @@ fn units_pick_up_dropped_items_by_moving_onto_their_hex() {
     assert!(!game.board.units.iter().any(|unit| unit.id == "carrier"));
     assert_eq!(game.board.dropped_items.len(), 1);
 
+    game.phase = Phase::Movement;
     game.apply_action(MatchActionRequest::MovePiece {
         piece_id: "looter".to_string(),
         to: hex(0, 2),
@@ -576,7 +578,7 @@ fn mana_well_builds_a_permanent_mana_source() {
             .any(|building| building.position == hex(0, 2) && building.template_id == "mana-well")
     );
     assert_eq!(game.player.mana, 1);
-    assert_eq!(game.player.hero.ap_remaining, 2);
+    assert_eq!(game.player.hero.ap_remaining, 3);
     assert_eq!(
         card_play_event_names(&frames),
         vec![

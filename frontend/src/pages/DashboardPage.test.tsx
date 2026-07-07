@@ -239,7 +239,7 @@ function matchSummary(): MatchSummary {
     createdAt: 1_700_000_000,
     updatedAt: 1_700_000_400,
     round: 3,
-    phase: "planning",
+    phase: "movement",
     winner: null,
     frameCount: 12,
   };

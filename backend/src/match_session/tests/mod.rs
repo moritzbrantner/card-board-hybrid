@@ -18,6 +18,7 @@ fn player_unit_card(game: &MatchState, template_id: &str) -> Card {
 fn put_card_in_hand(game: &mut MatchState, card: Card) -> String {
     let id = card.id.clone();
     game.player.hand.push(card);
+    game.phase = Phase::CardPlay;
     id
 }
 
@@ -25,6 +26,14 @@ fn put_card_in_side_hand(game: &mut MatchState, side: Side, card: Card) -> Strin
     let id = card.id.clone();
     game.player_mut(side).hand.push(card);
     id
+}
+
+fn enter_attack_phase(game: &mut MatchState) {
+    game.phase = Phase::Attack;
+}
+
+fn enter_card_play(game: &mut MatchState) {
+    game.phase = Phase::CardPlay;
 }
 
 fn advance_solo_ai_until_player_turn(game: &mut MatchState) {

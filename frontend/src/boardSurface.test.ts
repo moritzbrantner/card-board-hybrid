@@ -15,7 +15,7 @@ import type { Building, DroppedItem } from "./types";
 
 describe("board surface", () => {
   it("marks selected card hex targets once for both renderers", () => {
-    const match = storyMatch({ hand: [emberSquireCard] });
+    const match = storyMatch({ hand: [emberSquireCard], phase: "cardPlay" });
     const surface = buildBoardSurface({
       match,
       viewerSide: "player",
@@ -36,8 +36,8 @@ describe("board surface", () => {
     );
   });
 
-  it("marks selected piece movement, attack, and selected states", () => {
-    const match = storyMatch();
+  it("marks selected piece movement and selected states", () => {
+    const match = storyMatch({ phase: "movement" });
     const selectedPiece = {
       ...match.player.hero,
       pieceType: "hero" as const,
@@ -55,6 +55,29 @@ describe("board surface", () => {
 
     expect(surface.tileByKey.get("0:1")?.isSelected).toBe(true);
     expect(surface.tileByKey.get("0:0")?.isLegal).toBe(true);
+    expect(surface.tileByKey.get("1:1")?.isLegal).toBe(false);
+    expect(surface.tileByKey.get("0:0")?.isFocused).toBe(true);
+  });
+
+  it("marks selected piece attack states", () => {
+    const match = storyMatch({ phase: "attack" });
+    const selectedPiece = {
+      ...match.player.hero,
+      pieceType: "hero" as const,
+      name: "Runekeeper",
+    };
+    const surface = buildBoardSurface({
+      match,
+      viewerSide: "player",
+      selectedCard: null,
+      selectedPiece,
+      focusedCoord: { q: 0, r: 0 },
+      hoveredCoord: null,
+      isInteractive: true,
+    });
+
+    expect(surface.tileByKey.get("0:1")?.isSelected).toBe(true);
+    expect(surface.tileByKey.get("0:0")?.isLegal).toBe(false);
     expect(surface.tileByKey.get("1:1")?.isLegal).toBe(true);
     expect(surface.tileByKey.get("0:0")?.isFocused).toBe(true);
   });
