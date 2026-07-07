@@ -74,4 +74,15 @@ describe("BoardCameraControls", () => {
 
     expect(fiber.camera.lookAt).toHaveBeenCalledWith(0, 0, 0);
   });
+
+  it("allows zooming out to the board camera maximum distance", () => {
+    render(<BoardCameraControls controlElement={null} />);
+
+    const canvas = (fiber.state.gl as { domElement: HTMLElement }).domElement;
+    canvas.dispatchEvent(new WheelEvent("wheel", { deltaY: 3000, cancelable: true }));
+    fiber.frameCallbacks.at(-1)?.();
+
+    expect(fiber.camera.position.length()).toBeCloseTo(16);
+    expect(canvas.dataset.boardCameraDistance).toBe("16.000");
+  });
 });

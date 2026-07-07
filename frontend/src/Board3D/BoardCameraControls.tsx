@@ -4,7 +4,7 @@ import type { Vector3 } from "three";
 import { clamp } from "./geometry";
 
 const BOARD_CAMERA_MIN_DISTANCE = 5.8;
-const BOARD_CAMERA_MAX_DISTANCE = 14.5;
+const BOARD_CAMERA_MAX_DISTANCE = 16;
 const BOARD_CAMERA_MIN_POLAR_ANGLE = Math.PI * 0.22;
 const BOARD_CAMERA_MAX_POLAR_ANGLE = Math.PI * 0.43;
 
