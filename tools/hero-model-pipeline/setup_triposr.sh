@@ -61,6 +61,27 @@ else
   git -C "$TRIPOSR_DIR" pull --ff-only origin main
 fi
 
+python3 - "$TRIPOSR_DIR/tsr/bake_texture.py" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+text = text.replace(
+    "    positions = torch.tensor(positions_texture.reshape(-1, 4)[:, :-1])\n",
+    "    positions = torch.tensor(\n"
+    "        positions_texture.reshape(-1, 4)[:, :-1],\n"
+    "        device=scene_code.device,\n"
+    "        dtype=scene_code.dtype,\n"
+    "    )\n",
+)
+text = text.replace(
+    '    rgb_f = queried_grid["color"].numpy().reshape(-1, 3)\n',
+    '    rgb_f = queried_grid["color"].detach().cpu().numpy().reshape(-1, 3)\n',
+)
+path.write_text(text, encoding="utf-8")
+PY
+
 "$PYTHON_BIN" -m venv "$VENV_DIR"
 # shellcheck source=/dev/null
 source "$VENV_DIR/bin/activate"

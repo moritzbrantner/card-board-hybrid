@@ -66,6 +66,7 @@ def process_hero(hero: dict, budgets: dict) -> None:
     if not meshes:
         raise SystemExit(f"No mesh objects found in {raw_model}")
 
+    apply_sibling_texture(meshes, raw_model)
     normalize_scene(meshes, float(hero["targetHeight"]), float(hero.get("rotationZDegrees", 0)))
     decimate_to_budget(meshes, int(budgets["maxTriangles"]))
 
@@ -119,6 +120,24 @@ def import_model(path: Path) -> None:
         bpy.ops.import_mesh.ply(filepath=str(path))
     else:
         raise SystemExit(f"Unsupported raw model format: {path}")
+
+
+def apply_sibling_texture(meshes: list, raw_model: Path) -> None:
+    texture_path = raw_model.parent / "texture.png"
+    if not texture_path.exists():
+        return
+
+    material = bpy.data.materials.new(f"{raw_model.stem}_texture")
+    material.use_nodes = True
+    nodes = material.node_tree.nodes
+    principled = nodes.get("Principled BSDF")
+    texture = nodes.new(type="ShaderNodeTexImage")
+    texture.image = bpy.data.images.load(str(texture_path))
+    material.node_tree.links.new(texture.outputs["Color"], principled.inputs["Base Color"])
+
+    for obj in meshes:
+        obj.data.materials.clear()
+        obj.data.materials.append(material)
 
 
 def normalize_scene(meshes: list, target_height: float, rotation_z_degrees: float) -> None:
