@@ -163,8 +163,8 @@ async fn create_deck(
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        if let Err(response) = validate_deck_configuration(&mut store, profile.id, &request) {
-            return response;
+        if let Err(error) = validate_deck_configuration(&mut store, profile.id, &request) {
+            return progression_error_response(error);
         }
         let mut decks = DeckLibrary::new(store.connection_mut());
         match decks.create_for_user(profile.id, request) {
@@ -262,8 +262,8 @@ async fn update_deck(
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        if let Err(response) = validate_deck_configuration(&mut store, profile.id, &request) {
-            return response;
+        if let Err(error) = validate_deck_configuration(&mut store, profile.id, &request) {
+            return progression_error_response(error);
         }
         let mut decks = DeckLibrary::new(store.connection_mut());
         match decks.update_for_user(profile.id, deck_id, request) {
@@ -708,58 +708,31 @@ async fn create_match(
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        let (player_hero_type, player_snapshot, requested_rune_ids) =
-            match resolve_player_loadout_choice(
-                &mut store,
-                profile.as_ref().map(|profile| profile.id),
-                profile
+        let loadouts = match resolve_solo_match_loadouts(
+            &mut store,
+            SoloMatchLoadoutRequest {
+                user_id: profile.as_ref().map(|profile| profile.id),
+                preferred_hero_type: profile
                     .as_ref()
                     .map(|profile| profile.preferred_hero_type)
                     .unwrap_or_default(),
-                request.hero_type,
-                request.player_deck,
-                request.player_deck_id,
-                request.rune_ids,
-            ) {
-                Ok(loadouts) => loadouts,
-                Err(response) => return response,
-            };
-        let (opponent_hero_type, opponent_snapshot) = match resolve_solo_ai_choice(
-            &mut store,
-            profile.as_ref().map(|profile| profile.id),
-            request.ai_opponent,
+                requested_hero_type: request.hero_type,
+                player_deck: request.player_deck,
+                legacy_player_deck_id: request.player_deck_id,
+                ai_opponent: request.ai_opponent,
+                requested_rune_ids: request.rune_ids,
+            },
         ) {
-            Ok(loadout) => loadout,
-            Err(response) => return response,
-        };
-        let player_deck =
-            match crate::deck_library::deck_from_snapshot(Side::Player, &player_snapshot) {
-                Ok(deck) => deck,
-                Err(error) => return deck_error_response(error),
-            };
-        let opponent_deck =
-            match crate::deck_library::deck_from_snapshot(Side::Opponent, &opponent_snapshot) {
-                Ok(deck) => deck,
-                Err(error) => return deck_error_response(error),
-            };
-        let player_progression = {
-            let mut progression = ProgressionModule::new(store.connection_mut());
-            match progression.match_loadout(
-                profile.as_ref().map(|profile| profile.id),
-                player_hero_type,
-                requested_rune_ids,
-            ) {
-                Ok(loadout) => loadout,
-                Err(error) => return progression_error_response(error),
-            }
+            Ok(loadouts) => loadouts,
+            Err(error) => return loadout_resolution_error_response(error),
         };
         let result = store.create_match_for_user_with_decks(
-            player_hero_type,
-            opponent_hero_type,
-            player_deck,
-            opponent_deck,
-            player_progression,
-            Default::default(),
+            loadouts.player.hero_type,
+            loadouts.opponent.hero_type,
+            loadouts.player.cards,
+            loadouts.opponent.cards,
+            loadouts.player.progression,
+            loadouts.opponent.progression,
             profile.as_ref().map(|profile| profile.id),
         );
         match result {
@@ -871,32 +844,27 @@ async fn join_shared_match(
             .store
             .lock()
             .expect("store lock should not be poisoned");
-        let deck_recipe = match resolve_shared_deck_choice(
+        let loadout = match resolve_shared_seat_loadout(
             &mut store,
-            profile.as_ref().map(|profile| profile.id),
-            request.deck_choice,
-            request.deck_recipe_id,
+            SharedSeatLoadoutRequest {
+                match_id: &match_id,
+                seat_token: &seat_token,
+                user_id: profile.as_ref().map(|profile| profile.id),
+                hero_type: request.hero_type,
+                deck_choice: request.deck_choice,
+                legacy_deck_id: request.deck_recipe_id,
+                requested_rune_ids: request.rune_ids,
+            },
         ) {
-            Ok(deck_recipe) => deck_recipe,
-            Err(response) => return response,
-        };
-        let progression_loadout = {
-            let mut progression = ProgressionModule::new(store.connection_mut());
-            match progression.match_loadout(
-                profile.as_ref().map(|profile| profile.id),
-                request.hero_type,
-                request.rune_ids,
-            ) {
-                Ok(loadout) => loadout,
-                Err(error) => return progression_error_response(error),
-            }
+            Ok(loadout) => loadout,
+            Err(error) => return loadout_resolution_error_response(error),
         };
         match store.join_shared_match(
             &match_id,
             &seat_token,
-            request.hero_type,
-            deck_recipe,
-            progression_loadout,
+            loadout.hero_type,
+            loadout.deck_recipe,
+            loadout.progression,
             profile.as_ref().map(|profile| profile.id),
         ) {
             Ok(Some(shared)) => shared,
