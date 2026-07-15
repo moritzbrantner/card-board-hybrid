@@ -1,5 +1,6 @@
 use crate::deck_library::DeckLibraryError;
 use crate::identity::IdentityError;
+use crate::loadout_resolution::LoadoutResolutionError;
 use crate::match_commands::MatchCommandError;
 use crate::match_store::MatchStoreError;
 use crate::preferences::PreferencesError;
@@ -104,6 +105,19 @@ pub(crate) fn progression_error_response(error: ProgressionError) -> axum::respo
         }),
     )
         .into_response()
+}
+
+pub(crate) fn loadout_resolution_error_response(
+    error: LoadoutResolutionError,
+) -> axum::response::Response {
+    match error {
+        LoadoutResolutionError::UnauthorizedAccountDeck => unauthorized_response(),
+        LoadoutResolutionError::DeckNotFound => deck_not_found_response(),
+        LoadoutResolutionError::SharedSeatNotFound => shared_not_found_response(),
+        LoadoutResolutionError::Deck(error) => deck_error_response(error),
+        LoadoutResolutionError::Progression(error) => progression_error_response(error),
+        LoadoutResolutionError::Store(error) => store_error_response(error),
+    }
 }
 
 pub(crate) fn identity_error_response(error: IdentityError) -> axum::response::Response {
