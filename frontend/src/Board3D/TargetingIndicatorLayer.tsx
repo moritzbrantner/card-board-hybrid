@@ -1,1 +1,1 @@
-export { TargetingIndicatorLayer } from "./Board3DRenderer";
+export { TargetingOverlay as TargetingIndicatorLayer } from "../targetingOverlay";
