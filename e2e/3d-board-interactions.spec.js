@@ -826,10 +826,22 @@ async function hasPainted3dCanvas(page) {
       return false;
     }
 
-    const blankCanvas = document.createElement("canvas");
-    blankCanvas.width = canvas.width;
-    blankCanvas.height = canvas.height;
-    return canvas.toDataURL("image/png") !== blankCanvas.toDataURL("image/png");
+    const context = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
+    if (!context) {
+      return false;
+    }
+
+    const pixel = new Uint8Array(4);
+    context.readPixels(
+      Math.floor(canvas.width / 2),
+      Math.floor(canvas.height / 2),
+      1,
+      1,
+      context.RGBA,
+      context.UNSIGNED_BYTE,
+      pixel,
+    );
+    return pixel[3] !== 0;
   });
 }
 
