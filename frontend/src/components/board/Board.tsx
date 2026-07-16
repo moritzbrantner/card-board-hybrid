@@ -19,12 +19,7 @@ import type {
 import { Board3DRenderer } from "../../Board3D";
 import type { BoardAnimationCue, PieceAnimation } from "../../boardAnimations";
 import { deriveBoardSurface } from "../../boardSurface";
-import {
-  boardRendererFallbackMessage,
-  canCreateWebGLContext,
-  selectBoardRenderer,
-  type BoardRendererFallbackReason,
-} from "../../boardRenderer";
+import { useBoardRendererDegradation } from "../../boardRendererDegradation";
 import { createMatchVisualCatalog, type CardVisualIdentity, type MatchVisualCatalog, type UnitVisualIdentity, type HeroVisualIdentity } from "../../matchVisualIdentity";
 import type { BoardPiece, BoardUnit, UnitContextMenu } from "../../appTypes";
 import type {
@@ -428,21 +423,13 @@ export function Board({
   onFocusedUnitChange?: (pieceId: string | null) => void;
   tutorialHighlights?: BoardTutorialHighlight[];
 }) {
-  const [webglFailed, setWebglFailed] = useState(
-    () => boardVisualMode === "3d" && !canCreateWebGLContext(),
-  );
-  const [rendererFallbackReason, setRendererFallbackReason] =
-    useState<BoardRendererFallbackReason | null>(() =>
-      boardVisualMode === "3d" && !canCreateWebGLContext() ? "webgl-unavailable" : null,
-    );
-  const [assetFailureCount, setAssetFailureCount] = useState(0);
-  const [hoveredCoord, setHoveredCoord] = useState<HexCoord | null>(null);
-  const [activeStackItemId, setActiveStackItemId] = useState<string | null>(null);
-  const renderer = selectBoardRenderer({
+  const rendererDegradation = useBoardRendererDegradation({
     requestedMode: boardVisualMode,
-    webglFailed,
     readOnly,
   });
+  const [hoveredCoord, setHoveredCoord] = useState<HexCoord | null>(null);
+  const [activeStackItemId, setActiveStackItemId] = useState<string | null>(null);
+  const { renderer } = rendererDegradation;
   const boardCoords = useMemo(
     () => match.board.tiles.map((tile) => tile.coord),
     [match.board.tiles],
@@ -484,24 +471,6 @@ export function Board({
   );
 
   useEffect(() => {
-    if (boardVisualMode === "2d") {
-      setWebglFailed(false);
-      setRendererFallbackReason(null);
-      setAssetFailureCount(0);
-      return;
-    }
-
-    if (!canCreateWebGLContext()) {
-      setWebglFailed(true);
-      setRendererFallbackReason("webgl-unavailable");
-      return;
-    }
-
-    setWebglFailed(false);
-    setRendererFallbackReason(null);
-  }, [boardVisualMode]);
-
-  useEffect(() => {
     setVisibleAnimation(animation ?? null);
     if (!animation) {
       return;
@@ -533,12 +502,12 @@ export function Board({
         className={`board board-visual-mode-${boardVisualMode} ${readOnly ? "read-only" : ""}`}
         data-board-visual-mode={boardVisualMode}
         data-board-renderer="3d"
-        data-board-asset-failures={assetFailureCount}
+        data-board-asset-failures={rendererDegradation.assetFailureCount}
         aria-label="Hex board"
       >
-        {assetFailureCount > 0 ? (
+        {rendererDegradation.notice ? (
           <div className="board-renderer-notice" role="status">
-            Some 3D models are unavailable, so procedural miniatures are shown.
+            {rendererDegradation.notice}
           </div>
         ) : null}
         <TargetingStackOverlay
@@ -564,11 +533,8 @@ export function Board({
             onUnitContextMenu(piece, { x: event.clientX, y: event.clientY });
           }}
           onTileHoverChange={setHoveredCoord}
-          onFatalRenderError={() => {
-            setWebglFailed(true);
-            setRendererFallbackReason("render-failed");
-          }}
-          onAssetFailure={() => setAssetFailureCount((count) => count + 1)}
+          onFatalRenderError={rendererDegradation.reportFatalRenderFailure}
+          onAssetFailure={rendererDegradation.reportAssetFailure}
         />
       </section>
     );
@@ -581,9 +547,9 @@ export function Board({
       data-board-renderer="2d"
       aria-label="Hex board"
     >
-      {rendererFallbackReason ? (
+      {rendererDegradation.notice ? (
         <div className="board-renderer-notice" role="status">
-          {boardRendererFallbackMessage(rendererFallbackReason)}
+          {rendererDegradation.notice}
         </div>
       ) : null}
       <TargetingStackOverlay
