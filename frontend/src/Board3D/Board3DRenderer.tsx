@@ -29,9 +29,10 @@ import {
   type ProceduralMiniatureRecipe,
 } from "../board3dModelManifest";
 import type { MatchVisualCatalog, UnitVisualIdentity, HeroVisualIdentity } from "../matchVisualIdentity";
-import type { HexCoord, HexTile, Side, Unit, HeroType } from "../types";
+import type { HexCoord, HexTile, Side } from "../types";
 import { BOARD_ANIMATION_DURATION_MS, type BoardAnimationCue, type PieceAnimation } from "../boardAnimations";
-import type { TutorialHighlightTone } from "../tutorial/tutorialHighlights";
+import type { BoardPiece } from "../appTypes";
+import type { BoardSurface, BoardSurfaceTile } from "../boardSurface";
 import type { TargetingIndicator } from "../targetingIndicators";
 
 const BOARD_CAMERA_MIN_DISTANCE = 5.8;
@@ -41,67 +42,14 @@ const BOARD_CAMERA_MAX_POLAR_ANGLE = Math.PI * 0.43;
 const CAMERA_DRAG_CLICK_THRESHOLD_PX = 6;
 const gltfSceneCache = new Map<string, Promise<Object3D>>();
 
-export type Board3DHero = {
-  pieceType: "hero";
-  id: string;
-  side: Side;
-  name: string;
-  heroType: HeroType;
-  hp: number;
-  maxHp: number;
-  attack: number;
-  attackRange: number;
-  position: HexCoord;
-  apRemaining: number;
-  maxAp: number;
-  hasAttacked: boolean;
-};
-
-export type Board3DUnit = {
-  pieceType: "unit";
-  id: string;
-  side: Side;
-  name: string;
-  templateId?: string;
-  attack: number;
-  attackRange: number;
-  armor: number;
-  maxArmor: number;
-  position: HexCoord;
-  apRemaining: number;
-  maxAp: number;
-  hasAttacked: boolean;
-  items: Unit["items"];
-};
-
-export type Board3DPiece = Board3DHero | Board3DUnit;
-
-export type Board3DTileInteraction = {
-  coord: HexCoord;
-  title: string;
-  disabled: boolean;
-  isLegal: boolean;
-  isSelected: boolean;
-  isFocused?: boolean;
-  tutorialHighlightTone?: TutorialHighlightTone;
-  hasManaSource?: boolean;
-  hasBuilding?: boolean;
-  hasPiece: boolean;
-  pieceSide?: Side;
-  pieceType?: Board3DPiece["pieceType"];
-  pieceLabel?: string;
-  pieceStatLabel?: string;
-  droppedItemCount?: number;
-};
+export type Board3DHero = Extract<BoardPiece, { pieceType: "hero" }>;
+export type Board3DUnit = Extract<BoardPiece, { pieceType: "unit" }>;
+export type Board3DPiece = BoardPiece;
+export type Board3DTileInteraction = BoardSurfaceTile;
 
 type Board3DProps = {
-  tiles: HexTile[];
-  pieces: Board3DPiece[];
+  surface: BoardSurface;
   visualCatalog: MatchVisualCatalog;
-  readOnly: boolean;
-  disabled: boolean;
-  tileInteractions: Board3DTileInteraction[];
-  targetingIndicators: TargetingIndicator[];
   animation?: BoardAnimationCue | null;
   onTileClick?: (tile: HexTile) => void;
   onTileDrop?: (tile: HexTile, cardId: string) => void;
@@ -142,13 +90,8 @@ class Board3DErrorBoundary extends Component<
 }
 
 export function Board3DRenderer({
-  tiles,
-  pieces,
+  surface,
   visualCatalog,
-  readOnly,
-  disabled,
-  tileInteractions,
-  targetingIndicators,
   animation,
   onTileClick,
   onTileDrop,
@@ -158,6 +101,17 @@ export function Board3DRenderer({
   onAssetFailure,
   manifest = BOARD_PIECE_VISUAL_MANIFEST,
 }: Board3DProps) {
+  const {
+    readOnly,
+    disabled,
+    tiles: tileInteractions,
+    pieces,
+    targetingIndicators,
+  } = surface;
+  const tiles = useMemo(
+    () => tileInteractions.map((interaction) => interaction.tile),
+    [tileInteractions],
+  );
   const tileInteractionByKey = useMemo(
     () => new Map(tileInteractions.map((interaction) => [coordKey(interaction.coord), interaction])),
     [tileInteractions],
