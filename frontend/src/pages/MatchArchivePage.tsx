@@ -1,9 +1,9 @@
-import { History, House, Play, Plus } from "lucide-react";
+import { History, Play, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createMatch, loadMatches } from "../api";
 import type { AccountProps, MatchArchiveLoadState } from "../appTypes";
-import { AccountActions, ShellMessage } from "../components/common";
-import { formatMatchStatus, formatUnixTime } from "../labels";
+import { ShellMessage, TopNav } from "../components/common";
+import { formatMatchStatus, formatUnixTime, heroOptionByType } from "../labels";
 
 export function MatchArchivePage({
   onNavigate,
@@ -59,7 +59,8 @@ export function MatchArchivePage({
   }
 
   return (
-    <main className="app-shell archive-shell">
+    <main className="app-shell dashboard-shell">
+      <TopNav currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} activePath="/matches" />
       <section className="archive-layout" aria-label="Match archive">
         <header className="top-bar">
           <div>
@@ -67,10 +68,6 @@ export function MatchArchivePage({
             <h1>Match Archive</h1>
           </div>
           <div className="actions">
-            <AccountActions currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
-            <button className="icon-button" type="button" onClick={() => onNavigate("/")} title="Dashboard">
-              <House size={18} />
-            </button>
             <button
               className="primary-button"
               type="button"
@@ -100,9 +97,9 @@ export function MatchArchivePage({
           <div className="match-list" role="list" aria-label="Replayable matches">
             {loadState.matches.map((match) => (
               <article className="match-row" role="listitem" key={match.matchId}>
-                <div>
-                  <strong>{match.matchId}</strong>
-                  <span>{formatMatchStatus(match)}</span>
+                  <div>
+                    <strong>{matchupLabel(match)}</strong>
+                    <span>{match.viewerDeckName ? `${match.viewerDeckName} · ` : ""}{formatMatchStatus(match)} · {match.matchId}</span>
                 </div>
                 <div className="match-row-stat">
                   <span>Round</span>
@@ -144,4 +141,10 @@ export function MatchArchivePage({
       </section>
     </main>
   );
+}
+
+function matchupLabel(match: import("../types").MatchSummary) {
+  const viewer = (match.viewerHeroTypes ?? []).map((hero) => heroOptionByType(hero).name).join(" + ");
+  const opponent = (match.opposingHeroTypes ?? []).map((hero) => heroOptionByType(hero).name).join(" + ");
+  return viewer && opponent ? `${viewer} vs ${opponent}` : match.matchId;
 }

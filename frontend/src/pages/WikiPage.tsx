@@ -15,7 +15,7 @@ export function WikiPage({ topicSlug, currentUser, onNavigate, onSignOut }: Wiki
   if (topicSlug && !topic) {
     return (
       <main className="app-shell wiki-shell">
-        <TopNav currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+        <TopNav currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} activePath="/wiki" />
         <section className="shell-message wiki-not-found" aria-label="Rules topic not found">
           <p className="eyebrow">Rules Wiki</p>
           <h1>Rules topic not found</h1>
@@ -36,7 +36,7 @@ export function WikiPage({ topicSlug, currentUser, onNavigate, onSignOut }: Wiki
 
   return (
     <main className="app-shell wiki-shell">
-      <TopNav currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+      <TopNav currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} activePath="/wiki" />
       {topic ? <WikiTopicPage topic={topic} onNavigate={onNavigate} /> : <WikiOverview onNavigate={onNavigate} />}
     </main>
   );

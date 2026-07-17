@@ -675,6 +675,11 @@ export type MatchSummary = {
   phase: Phase;
   winner: Side | null;
   frameCount: number;
+  viewerTeam?: Team;
+  viewerHeroTypes?: HeroType[];
+  opposingHeroTypes?: HeroType[];
+  viewerDeckName?: string | null;
+  viewerResult?: ViewerResult | null;
 };
 
 export type MatchArchiveResponse = {

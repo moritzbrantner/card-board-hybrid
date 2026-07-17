@@ -14,6 +14,7 @@ pub(super) fn prepare_connection(connection: &Connection) -> Result<(), MatchSto
             completed_at INTEGER,
             mode TEXT NOT NULL DEFAULT 'solo',
             owner_user_id INTEGER,
+            player_deck_name TEXT,
             created_at INTEGER NOT NULL DEFAULT (unixepoch()),
             updated_at INTEGER NOT NULL DEFAULT (unixepoch())
         );
@@ -74,6 +75,7 @@ pub(super) fn prepare_connection(connection: &Connection) -> Result<(), MatchSto
         "TEXT NOT NULL DEFAULT 'solo'",
     )?;
     add_column_if_missing(connection, "matches", "owner_user_id", "INTEGER")?;
+    add_column_if_missing(connection, "matches", "player_deck_name", "TEXT")?;
     add_column_if_missing(connection, "shared_matches", "creator_user_id", "INTEGER")?;
     add_column_if_missing(
         connection,

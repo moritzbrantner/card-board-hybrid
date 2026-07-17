@@ -149,7 +149,7 @@ The pre-match choice for one side, combining a Hero, a deck recipe or system dec
 _Avoid_: build, preset
 
 **Player dashboard**:
-The root account-oriented surface that summarizes player status and routes into play, deck, profile, and match-history workflows.
+The root account-oriented surface that summarizes player status and routes into play, Heroes, account progression, deck, profile, and match-history workflows.
 _Avoid_: match picker, landing page
 
 **Solo match**:
@@ -201,7 +201,7 @@ Account-synced controls and presentation preferences such as theme, motion, anim
 _Avoid_: profile settings, hero settings, match settings
 
 **Profile**:
-The player-facing account presentation, including display name, generated avatar, and owned match history.
+The player-facing account identity, including display name, public handle, and generated avatar.
 _Avoid_: public player page
 
 **Account experience**:

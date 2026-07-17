@@ -57,11 +57,11 @@ test("selects and replaces default rune loadout within slot limit", async ({ pag
 });
 
 async function signInExperiencedAccount(page) {
-  await page.goto("/profile");
+  await page.goto("/heroes");
   await page.getByLabel("Email").fill(EXPERIENCED_EMAIL);
   await page.getByLabel("Password").fill(EXPERIENCED_PASSWORD);
   await page.getByRole("button", { name: /Sign In/ }).click();
-  await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Heroes" })).toBeVisible();
   await expect(page.getByLabel("Hero skill tree")).toBeVisible();
 }
 

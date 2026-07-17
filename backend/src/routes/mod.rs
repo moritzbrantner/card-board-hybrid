@@ -56,6 +56,7 @@ pub fn create_app(store: SqliteMatchStore) -> Router {
         .route("/api/auth/logout", post(logout_account))
         .route("/api/auth/me", get(current_account))
         .route("/api/profile", get(load_profile).patch(update_profile))
+        .route("/api/profile/preferred-hero", patch(update_preferred_hero))
         .route("/api/profile/matches", get(list_profile_matches))
         .route(
             "/api/preferences",
@@ -475,6 +476,28 @@ async fn update_profile(
     Json(AuthUserResponse::from(updated)).into_response()
 }
 
+async fn update_preferred_hero(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(request): Json<UpdatePreferredHeroRequest>,
+) -> impl IntoResponse {
+    let profile = match required_profile_from_headers(&state, &headers) {
+        Ok(profile) => profile,
+        Err(response) => return response,
+    };
+    let updated = {
+        let mut store = state.store.lock().expect("store lock should not be poisoned");
+        let mut identity = IdentityModule::new(store.connection_mut());
+        match identity.update_preferred_hero(profile.id, request.hero_type) {
+            Ok(Some(profile)) => profile,
+            Ok(None) => return unauthorized_response(),
+            Err(error) => return identity_error_response(error),
+        }
+    };
+
+    Json(AuthUserResponse::from(updated)).into_response()
+}
+
 async fn list_profile_matches(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -489,13 +512,24 @@ async fn list_profile_matches(
             .lock()
             .expect("store lock should not be poisoned");
         match MatchAccess::new(&store).list_profile_matches(profile.id) {
-            Ok(matches) => matches,
+            Ok(matches) => {
+                let mut summaries = Vec::with_capacity(matches.len());
+                for summary in matches {
+                    let context = match store.viewer_context_for_user(&summary.id, profile.id) {
+                        Ok(context) => context,
+                        Err(error) => return store_error_response(error),
+                    };
+                    let (team, deck_name) = context.unwrap_or((crate::match_session::Team::Player, summary.player_deck_name.clone()));
+                    summaries.push(MatchSummary::for_viewer(summary, team, deck_name));
+                }
+                summaries
+            }
             Err(error) => return store_error_response(error),
         }
     };
 
     Json(MatchArchiveResponse {
-        matches: matches.into_iter().map(MatchSummary::from).collect(),
+        matches,
     })
     .into_response()
 }
@@ -660,15 +694,26 @@ async fn list_matches(State(state): State<SharedState>, headers: HeaderMap) -> i
             .lock()
             .expect("store lock should not be poisoned");
         match store.list_replayable_matches_for_user(profile.id) {
-            Ok(matches) => matches,
+            Ok(matches) => {
+                let mut summaries = Vec::with_capacity(matches.len());
+                for summary in matches {
+                    let context = match store.viewer_context_for_user(&summary.id, profile.id) {
+                        Ok(context) => context,
+                        Err(error) => return store_error_response(error),
+                    };
+                    let (team, deck_name) = context.unwrap_or((
+                        crate::match_session::Team::Player,
+                        summary.player_deck_name.clone(),
+                    ));
+                    summaries.push(MatchSummary::for_viewer(summary, team, deck_name));
+                }
+                summaries
+            }
             Err(error) => return store_error_response(error),
         }
     };
 
-    Json(MatchArchiveResponse {
-        matches: matches.into_iter().map(MatchSummary::from).collect(),
-    })
-    .into_response()
+    Json(MatchArchiveResponse { matches }).into_response()
 }
 
 async fn create_match(
@@ -734,6 +779,7 @@ async fn create_match(
             loadouts.opponent.cards,
             loadouts.player.progression,
             loadouts.opponent.progression,
+            loadouts.player.deck_recipe.name,
             profile.as_ref().map(|profile| profile.id),
         );
         match result {
@@ -1261,7 +1307,7 @@ async fn load_match_summary(
     let match_id = summary.id.clone();
     Json(MatchSummaryResponse {
         match_id,
-        summary: MatchSummary::from(summary),
+        summary: MatchSummary::for_viewer(summary.clone(), viewer_side.map(|side| side.team()).unwrap_or(crate::match_session::Team::Player), summary.player_deck_name.clone()),
         viewer,
         reward,
     })
@@ -1272,7 +1318,7 @@ async fn load_shared_match_summary(
     State(state): State<SharedState>,
     Path((match_id, seat_token)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    let (summary, viewer_side, reward) = {
+    let (summary, viewer_side, viewer_deck_name, reward) = {
         let mut store = state
             .store
             .lock()
@@ -1303,7 +1349,7 @@ async fn load_shared_match_summary(
         } else {
             None
         };
-        (replay.summary, viewer_side, reward)
+        (replay.summary, viewer_side, shared.viewer_seat.deck_recipe_name.clone(), reward)
     };
 
     let viewer = MatchSummaryViewer {
@@ -1313,7 +1359,7 @@ async fn load_shared_match_summary(
     let match_id = summary.id.clone();
     Json(MatchSummaryResponse {
         match_id,
-        summary: MatchSummary::from(summary),
+        summary: MatchSummary::for_viewer(summary.clone(), viewer_side.team(), viewer_deck_name),
         viewer,
         reward,
     })
@@ -1358,7 +1404,7 @@ fn replay_response(replay: crate::match_store::StoredReplay) -> axum::response::
         ReplayVisibility::Public
     };
     let match_id = replay.summary.id.clone();
-    let summary = MatchSummary::from(replay.summary);
+    let summary = MatchSummary::for_viewer(replay.summary.clone(), crate::match_session::Team::Player, replay.summary.player_deck_name.clone());
     let frames = replay
         .frames
         .into_iter()

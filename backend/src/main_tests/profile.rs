@@ -50,6 +50,29 @@ async fn profile_can_update_display_name_and_generated_avatar() {
 }
 
 #[tokio::test]
+async fn profile_can_update_preferred_hero_without_resubmitting_identity() {
+    let path = test_db_path("profile-preferred-hero");
+    let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
+    let token = register_test_account(app.clone(), "hero@example.com").await;
+
+    let (status, updated) = json_request(
+        app,
+        Request::builder()
+            .method("PATCH")
+            .uri("/api/profile/preferred-hero")
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"heroType":"pyromancer"}"#))
+            .expect("request should build"),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated["preferredHeroType"], "pyromancer");
+    let _ = fs::remove_file(path);
+}
+
+#[tokio::test]
 async fn profile_rejects_invalid_or_duplicate_public_handles() {
     let path = test_db_path("profile-handle-validation");
     let app = create_app(SqliteMatchStore::new(&path).expect("store should open"));
@@ -555,6 +578,9 @@ async fn profile_matches_list_owned_solo_matches_only() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(profile_matches["matches"].as_array().unwrap().len(), 1);
     assert_eq!(profile_matches["matches"][0]["matchId"], first_match_id);
+    assert_eq!(profile_matches["matches"][0]["viewerHeroTypes"][0], "runekeeper");
+    assert_eq!(profile_matches["matches"][0]["opposingHeroTypes"][0], "runekeeper");
+    assert_eq!(profile_matches["matches"][0]["viewerDeckName"], "Balanced Starter");
 
     let _ = fs::remove_file(path);
 }

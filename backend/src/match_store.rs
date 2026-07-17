@@ -11,7 +11,7 @@ use crate::deck_library::{self, DeckLibraryError, DeckRecipeSnapshot};
 use crate::identity;
 use crate::match_session::{
     Card, HeroType, MatchActionRequest, MatchProgressionLoadout, MatchState, RecordedReplayFrame,
-    ReplayEvent, Side,
+    ReplayEvent, Side, Team,
 };
 use crate::progression;
 
@@ -48,6 +48,7 @@ pub struct StoredMatchSummary {
     pub created_at: i64,
     pub updated_at: i64,
     pub frame_count: usize,
+    pub player_deck_name: Option<String>,
     pub state: MatchState,
 }
 
@@ -223,6 +224,7 @@ impl SqliteMatchStore {
             opponent_deck,
             MatchProgressionLoadout::default(),
             MatchProgressionLoadout::default(),
+            starter.name,
             owner_user_id,
         )
     }
@@ -239,6 +241,7 @@ impl SqliteMatchStore {
         opponent_deck: Vec<Card>,
         player_progression: MatchProgressionLoadout,
         opponent_progression: MatchProgressionLoadout,
+        player_deck_name: String,
         owner_user_id: Option<i64>,
     ) -> Result<StoredMatch, MatchStoreError> {
         for attempt in 0..8 {
@@ -264,12 +267,13 @@ impl SqliteMatchStore {
                     initial_snapshot_json,
                     mode,
                     owner_user_id,
+                    player_deck_name,
                     created_at,
                     updated_at
                 )
-                VALUES (?1, ?2, ?2, 'solo', ?3, unixepoch(), unixepoch())
+                VALUES (?1, ?2, ?2, 'solo', ?3, ?4, unixepoch(), unixepoch())
                 ",
-                params![id, snapshot, owner_user_id],
+                params![id, snapshot, owner_user_id, player_deck_name],
             )?;
 
             if inserted == 1 {
@@ -301,18 +305,20 @@ impl SqliteMatchStore {
                 initial_snapshot_json,
                 mode,
                 owner_user_id,
+                player_deck_name,
                 created_at,
                 updated_at
             )
-            VALUES (?1, ?2, ?2, 'solo', ?3, unixepoch(), unixepoch())
+            VALUES (?1, ?2, ?2, 'solo', ?3, ?4, unixepoch(), unixepoch())
             ON CONFLICT(id) DO UPDATE SET
                 snapshot_json = excluded.snapshot_json,
                 initial_snapshot_json = excluded.initial_snapshot_json,
                 mode = excluded.mode,
                 owner_user_id = excluded.owner_user_id,
+                player_deck_name = excluded.player_deck_name,
                 updated_at = unixepoch()
             ",
-            params![id, snapshot, owner_user_id],
+            params![id, snapshot, owner_user_id, player_deck_name],
         )?;
         insert_replay_frame(&transaction, &id, 0, &initial_frame, &event_json)?;
         transaction.commit()?;
@@ -917,6 +923,7 @@ impl SqliteMatchStore {
                 matches.snapshot_json,
                 matches.created_at,
                 matches.updated_at,
+                matches.player_deck_name,
                 COUNT(match_replay_frames.frame_index) AS frame_count
             FROM matches
             JOIN match_replay_frames ON match_replay_frames.match_id = matches.id
@@ -952,13 +959,15 @@ impl SqliteMatchStore {
             let snapshot = row.get::<_, String>(1)?;
             let created_at = row.get::<_, i64>(2)?;
             let updated_at = row.get::<_, i64>(3)?;
-            let frame_count = row.get::<_, i64>(4)?;
+            let player_deck_name = row.get::<_, Option<String>>(4)?;
+            let frame_count = row.get::<_, i64>(5)?;
             let state = MatchState::from_snapshot_json(&snapshot)?;
             summaries.push(StoredMatchSummary {
                 id,
                 created_at,
                 updated_at,
                 frame_count: frame_count as usize,
+                player_deck_name,
                 state,
             });
         }
@@ -977,6 +986,7 @@ impl SqliteMatchStore {
                 matches.snapshot_json,
                 matches.created_at,
                 matches.updated_at,
+                matches.player_deck_name,
                 COUNT(match_replay_frames.frame_index) AS frame_count
             FROM matches
             JOIN match_replay_frames ON match_replay_frames.match_id = matches.id
@@ -1008,18 +1018,33 @@ impl SqliteMatchStore {
             let snapshot = row.get::<_, String>(1)?;
             let created_at = row.get::<_, i64>(2)?;
             let updated_at = row.get::<_, i64>(3)?;
-            let frame_count = row.get::<_, i64>(4)?;
+            let player_deck_name = row.get::<_, Option<String>>(4)?;
+            let frame_count = row.get::<_, i64>(5)?;
             let state = MatchState::from_snapshot_json(&snapshot)?;
             summaries.push(StoredMatchSummary {
                 id,
                 created_at,
                 updated_at,
                 frame_count: frame_count as usize,
+                player_deck_name,
                 state,
             });
         }
 
         Ok(summaries)
+    }
+
+    pub fn viewer_context_for_user(
+        &self,
+        match_id: &str,
+        user_id: i64,
+    ) -> Result<Option<(Team, Option<String>)>, MatchStoreError> {
+        let seat: Option<(String, Option<String>)> = self.connection.query_row(
+            "SELECT side, deck_recipe_name FROM match_seats WHERE match_id = ?1 AND participant_user_id = ?2",
+            params![match_id, user_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        Ok(seat.and_then(|(side, deck_name)| side_from_db(&side).map(|side| (side.team(), deck_name))))
     }
 
     pub fn load_replay(&self, id: &str) -> Result<Option<StoredReplay>, MatchStoreError> {
@@ -1066,7 +1091,7 @@ impl SqliteMatchStore {
     }
 
     fn load_replay_summary(&self, id: &str) -> Result<Option<StoredMatchSummary>, MatchStoreError> {
-        let row: Option<(String, String, i64, i64, i64)> = self
+        let row: Option<(String, String, i64, i64, Option<String>, i64)> = self
             .connection
             .query_row(
                 "
@@ -1075,6 +1100,7 @@ impl SqliteMatchStore {
                     matches.snapshot_json,
                     matches.created_at,
                     matches.updated_at,
+                    matches.player_deck_name,
                     COUNT(match_replay_frames.frame_index) AS frame_count
                 FROM matches
                 LEFT JOIN match_replay_frames ON match_replay_frames.match_id = matches.id
@@ -1090,18 +1116,20 @@ impl SqliteMatchStore {
                         row.get::<_, String>(1)?,
                         row.get::<_, i64>(2)?,
                         row.get::<_, i64>(3)?,
-                        row.get::<_, i64>(4)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, i64>(5)?,
                     ))
                 },
             )
             .optional()?;
 
-        row.map(|(id, snapshot, created_at, updated_at, frame_count)| {
+        row.map(|(id, snapshot, created_at, updated_at, player_deck_name, frame_count)| {
             MatchState::from_snapshot_json(&snapshot).map(|state| StoredMatchSummary {
                 id,
                 created_at,
                 updated_at,
                 frame_count: frame_count as usize,
+                player_deck_name,
                 state,
             })
         })

@@ -25,6 +25,7 @@ import {
 import { AuthPage } from "./pages/AuthPage";
 import { CatalogPage } from "./pages/CatalogPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { HeroesPage } from "./pages/HeroesPage";
 import { DecksPage } from "./pages/DecksPage";
 import { MatchArchivePage } from "./pages/MatchArchivePage";
 import { MatchPage } from "./pages/MatchPage";
@@ -32,6 +33,7 @@ import { MatchSummaryPage } from "./pages/MatchSummaryPage";
 import { PlayPage } from "./pages/MatchPicker";
 import { MatchScenariosPage } from "./pages/MatchScenariosPage";
 import { PublicDeckPage } from "./pages/PublicDeckPage";
+import { ProgressionPage } from "./pages/ProgressionPage";
 import { ReplayPage } from "./pages/ReplayPage";
 import { RouteRedirect } from "./pages/RouteRedirect";
 import { SharedMatchPage } from "./pages/SharedMatchPage";
@@ -181,6 +183,20 @@ export function App() {
         onSignOut={handleSignOut}
       />
     );
+  }
+
+  if (normalizedPath === "/heroes") {
+    if (!currentUser) {
+      return <RouteRedirect to={protectedLoginRoute("/heroes")} onNavigate={replaceRoute} />;
+    }
+    return <HeroesPage currentUser={currentUser} onNavigate={navigate} onSignOut={handleSignOut} onProfileUpdated={(profile) => setAuthState({ status: "signedIn", user: profile })} />;
+  }
+
+  if (normalizedPath === "/progression") {
+    if (!currentUser) {
+      return <RouteRedirect to={protectedLoginRoute("/progression")} onNavigate={replaceRoute} />;
+    }
+    return <ProgressionPage currentUser={currentUser} onNavigate={navigate} onSignOut={handleSignOut} />;
   }
 
   if (normalizedPath === "/settings") {

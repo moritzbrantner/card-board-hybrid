@@ -93,11 +93,17 @@ export function updateProfile(
   displayName: string,
   handle: string,
   avatar: GeneratedAvatar,
-  preferredHeroType: HeroType,
 ) {
   return request<AccountProfile>("/api/profile", {
     method: "PATCH",
-    body: JSON.stringify({ displayName, handle, avatar, preferredHeroType }),
+    body: JSON.stringify({ displayName, handle, avatar }),
+  });
+}
+
+export function updatePreferredHero(heroType: HeroType) {
+  return request<AccountProfile>("/api/profile/preferred-hero", {
+    method: "PATCH",
+    body: JSON.stringify({ heroType }),
   });
 }
 

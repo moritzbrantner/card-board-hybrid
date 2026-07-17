@@ -1,4 +1,4 @@
-import { BookOpen, Gauge, House, Layers, LibraryBig, LogIn, LogOut, History, Settings as SettingsIcon, User, WandSparkles } from "lucide-react";
+import { BookOpen, Gauge, Layers, LibraryBig, LogIn, LogOut, History, Menu, Play, Settings as SettingsIcon, User, UsersRound, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { AccountProps } from "../appTypes";
 import { avatarSymbolLabel } from "../labels";
@@ -99,6 +99,18 @@ export function AccountActions({
             className="account-menu-item"
             type="button"
             role="menuitem"
+            onClick={() => {
+              setMenuOpen(false);
+              onNavigate("/progression");
+            }}
+          >
+            <Gauge size={17} />
+            Progression
+          </button>
+          <button
+            className="account-menu-item"
+            type="button"
+            role="menuitem"
             disabled={activeAccountRoute === "settings"}
             onClick={() => {
               setMenuOpen(false);
@@ -128,42 +140,51 @@ export function AccountActions({
   );
 }
 
-export function TopNav({ currentUser, onNavigate, onSignOut, ...accountActionProps }: AccountProps) {
+export function TopNav({ currentUser, onNavigate, onSignOut, activePath = "", ...accountActionProps }: AccountProps & { activePath?: string }) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [learnOpen, setLearnOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const wasDrawerOpen = useRef(false);
+  useEffect(() => {
+    if (wasDrawerOpen.current && !drawerOpen) {
+      triggerRef.current?.focus();
+    }
+    wasDrawerOpen.current = drawerOpen;
+  }, [drawerOpen]);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDrawerOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [drawerOpen]);
+  const navigate = (to: string) => {
+    setDrawerOpen(false);
+    setLearnOpen(false);
+    onNavigate(to);
+  };
+  const coreLinks = [
+    { to: "/", label: "Dashboard", icon: Gauge, signedIn: false },
+    { to: "/play", label: "Play", icon: Play, signedIn: false },
+    { to: "/decks", label: "Decks", icon: Layers, signedIn: true },
+    { to: "/heroes", label: "Heroes", icon: UsersRound, signedIn: true },
+    { to: "/matches", label: "Matches", icon: History, signedIn: true },
+  ];
+  const learnLinks = [
+    { to: "/catalog/", label: "Catalog", icon: LibraryBig },
+    { to: "/wiki", label: "Rules", icon: BookOpen },
+    { to: "/tutorial", label: "Tutorial", icon: BookOpen },
+    { to: "/settings", label: "Settings", icon: SettingsIcon },
+  ];
   return (
     <nav className="top-nav" aria-label="Primary navigation">
-      <button className="brand-button" type="button" onClick={() => onNavigate("/")}>
-        <WandSparkles size={19} />
-        Rune Lanes
-      </button>
       <div className="top-nav-links">
-        <button className="secondary-link" type="button" onClick={() => onNavigate("/")}>
-          <Gauge size={18} />
-          Dashboard
-        </button>
-        <button className="secondary-link" type="button" onClick={() => onNavigate("/play")}>
-          <House size={18} />
-          Play
-        </button>
-        <button className="secondary-link" type="button" onClick={() => onNavigate("/catalog/")}>
-          <LibraryBig size={18} />
-          Catalog
-        </button>
-        <button className="secondary-link" type="button" onClick={() => onNavigate("/wiki")}>
-          <BookOpen size={18} />
-          Rules
-        </button>
-        {currentUser ? (
-          <>
-            <button className="secondary-link" type="button" onClick={() => onNavigate("/decks")}>
-              <Layers size={18} />
-              Decks
-            </button>
-            <button className="secondary-link" type="button" onClick={() => onNavigate("/matches")}>
-              <History size={18} />
-              Matches
-            </button>
-          </>
-        ) : null}
+        {coreLinks.filter((link) => !link.signedIn || currentUser).map(({ to, label, icon: Icon }) => <button key={to} className={`secondary-link ${activePath === to ? "active" : ""}`} type="button" onClick={() => navigate(to)} aria-current={activePath === to ? "page" : undefined}><Icon size={18}/>{label}</button>)}
+        <div className="learn-menu-root">
+          <button className="secondary-link" type="button" onClick={() => setLearnOpen((open) => !open)} aria-expanded={learnOpen} aria-haspopup="menu">Learn & settings</button>
+          {learnOpen ? <div className="learn-menu" role="menu">{learnLinks.map(({ to, label, icon: Icon }) => <button key={to} type="button" role="menuitem" onClick={() => navigate(to)}><Icon size={17}/>{label}</button>)}</div> : null}
+        </div>
       </div>
       <AccountActions
         currentUser={currentUser}
@@ -171,6 +192,8 @@ export function TopNav({ currentUser, onNavigate, onSignOut, ...accountActionPro
         onSignOut={onSignOut}
         {...accountActionProps}
       />
+      <button ref={triggerRef} className="icon-button nav-drawer-trigger" type="button" aria-label="Open navigation menu" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}><Menu size={20}/></button>
+      {drawerOpen ? <div className="nav-drawer-backdrop" onMouseDown={() => setDrawerOpen(false)}><div className="nav-drawer" role="dialog" aria-modal="true" aria-label="Navigation menu" onMouseDown={(event) => event.stopPropagation()}><div className="nav-drawer-heading"><strong>Navigation</strong><button className="icon-button" type="button" aria-label="Close navigation menu" onClick={() => setDrawerOpen(false)}><X size={18}/></button></div>{coreLinks.filter((link) => !link.signedIn || currentUser).map(({ to, label, icon: Icon }) => <button key={to} className={activePath === to ? "active" : ""} type="button" onClick={() => navigate(to)}><Icon size={18}/>{label}</button>)}<hr/>{learnLinks.map(({to,label,icon:Icon}) => <button key={to} type="button" onClick={() => navigate(to)}><Icon size={18}/>{label}</button>)}</div></div> : null}
     </nav>
   );
 }

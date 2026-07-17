@@ -310,6 +310,18 @@ impl<'a> IdentityModule<'a> {
         self.load_profile_by_id(user_id)
     }
 
+    pub fn update_preferred_hero(
+        &mut self,
+        user_id: i64,
+        hero_type: HeroType,
+    ) -> Result<Option<AccountProfile>, IdentityError> {
+        self.connection.execute(
+            "UPDATE users SET preferred_hero_type = ?2 WHERE id = ?1",
+            params![user_id, hero_type_to_db(hero_type)],
+        )?;
+        self.load_profile_by_id(user_id)
+    }
+
     pub fn public_profile_by_handle(
         &self,
         public_handle: &str,

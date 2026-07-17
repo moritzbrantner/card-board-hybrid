@@ -86,6 +86,12 @@ pub(crate) struct UpdateProfileRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct UpdatePreferredHeroRequest {
+    pub(crate) hero_type: HeroType,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct GeneratedAvatarRequest {
     pub(crate) symbol: String,
     pub(crate) color: String,
@@ -225,6 +231,11 @@ pub(crate) struct MatchSummary {
     pub(crate) phase: match_session::Phase,
     pub(crate) winner: Option<match_session::Side>,
     pub(crate) frame_count: usize,
+    pub(crate) viewer_team: match_session::Team,
+    pub(crate) viewer_hero_types: Vec<HeroType>,
+    pub(crate) opposing_hero_types: Vec<HeroType>,
+    pub(crate) viewer_deck_name: Option<String>,
+    pub(crate) viewer_result: Option<ViewerResult>,
 }
 
 #[derive(Serialize)]
@@ -567,8 +578,20 @@ impl From<StoredSharedMatch> for SharedMatchResponse {
     }
 }
 
-impl From<StoredMatchSummary> for MatchSummary {
-    fn from(summary: StoredMatchSummary) -> Self {
+impl MatchSummary {
+    pub(crate) fn for_viewer(
+        summary: StoredMatchSummary,
+        viewer_team: match_session::Team,
+        viewer_deck_name: Option<String>,
+    ) -> Self {
+        let (viewer_hero_types, opposing_hero_types) = hero_types_for_teams(&summary.state, viewer_team);
+        let viewer_result = summary.state.winner.map(|winner| {
+            if winner.team() == viewer_team {
+                ViewerResult::Victory
+            } else {
+                ViewerResult::Defeat
+            }
+        });
         Self {
             match_id: summary.id,
             mode: summary.state.mode,
@@ -578,8 +601,37 @@ impl From<StoredMatchSummary> for MatchSummary {
             phase: summary.state.phase,
             winner: summary.state.winner,
             frame_count: summary.frame_count,
+            viewer_team,
+            viewer_hero_types,
+            opposing_hero_types,
+            viewer_deck_name,
+            viewer_result,
         }
     }
+}
+
+fn hero_types_for_teams(
+    state: &MatchState,
+    viewer_team: match_session::Team,
+) -> (Vec<HeroType>, Vec<HeroType>) {
+    let mut viewer = Vec::new();
+    let mut opposing = Vec::new();
+    for player in [
+        Some(&state.player),
+        Some(&state.opponent),
+        state.player_two.as_ref(),
+        state.opponent_two.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if player.side.team() == viewer_team {
+            viewer.push(player.hero.hero_type);
+        } else {
+            opposing.push(player.hero.hero_type);
+        }
+    }
+    (viewer, opposing)
 }
 
 impl ReplayFrameResponse {

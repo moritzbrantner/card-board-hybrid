@@ -213,7 +213,7 @@ export function PlayPage({
 
   return (
     <main className="app-shell home-shell">
-      <TopNav currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />
+      <TopNav currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} activePath="/play" />
       <section className="home-layout play-layout" aria-label="Play setup">
         <header className="home-heading">
           <p className="eyebrow">Rune Lanes</p>
