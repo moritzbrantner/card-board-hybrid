@@ -197,9 +197,9 @@ fn public_match_state_hides_opponent_hand_and_private_piles() {
     assert!(value["opponent"].get("hand").is_none());
     assert!(value["opponent"].get("deck").is_none());
     assert!(value["opponent"].get("discard").is_none());
-    assert_eq!(value["player"]["handCount"], 4);
-    assert_eq!(value["opponent"]["handCount"], 4);
-    assert_eq!(value["opponent"]["deckCount"], 56);
+    assert_eq!(value["player"]["handCount"], 7);
+    assert_eq!(value["opponent"]["handCount"], 7);
+    assert_eq!(value["opponent"]["deckCount"], 53);
 }
 
 #[test]

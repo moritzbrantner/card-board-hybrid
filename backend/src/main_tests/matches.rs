@@ -82,7 +82,7 @@ async fn create_match_persists_and_can_be_loaded_by_id() {
             .as_array()
             .unwrap()
             .len(),
-        4
+        7
     );
     assert!(loaded["matchState"]["opponent"].get("hand").is_none());
     assert!(path.exists());
@@ -258,7 +258,7 @@ async fn match_actions_persist_and_reload_by_match_id() {
             .as_array()
             .unwrap()
             .len(),
-        5
+        8
     );
     assert!(acted["matchState"]["player"].get("deck").is_none());
     assert!(acted["matchState"]["player"].get("discard").is_none());

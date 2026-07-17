@@ -26,7 +26,7 @@ fn advancing_ai_eventually_advances_round() {
     assert_eq!(game.round, 2);
     assert_eq!(game.active_side, Side::Player);
     assert_eq!(game.player.max_mana, 3);
-    assert_eq!(game.player.hand.len(), 5);
+    assert_eq!(game.player.hand.len(), 8);
 }
 
 #[test]

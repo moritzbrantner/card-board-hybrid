@@ -63,7 +63,7 @@ fn shared_turns_pass_between_humans_without_running_ai() {
 
     assert_eq!(game.active_side, Side::Player);
     assert_eq!(game.round, 2);
-    assert_eq!(game.player.hand.len(), 5);
+    assert_eq!(game.player.hand.len(), 8);
 }
 
 #[test]

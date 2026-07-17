@@ -33,8 +33,8 @@ fn starter_deck_has_the_expected_rarity_counts() {
         1
     );
     assert_eq!(starter_card_templates().len(), 79);
-    assert_eq!(game.player.hand.len(), 4);
-    assert_eq!(game.player.deck_count, 56);
+    assert_eq!(game.player.hand.len(), 7);
+    assert_eq!(game.player.deck_count, 53);
 }
 
 #[test]

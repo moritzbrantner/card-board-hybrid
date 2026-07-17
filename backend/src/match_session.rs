@@ -33,7 +33,7 @@ use solo_ai_policy::{SoloAiActionIntent, SoloAiCarriedItem, SoloAiDecision, Solo
 const BOARD_RADIUS: i32 = 3;
 const TWO_V_TWO_BOARD_RADIUS: i32 = 4;
 const HERO_MANA: u8 = 3;
-const OPENING_HAND_SIZE: usize = 4;
+const OPENING_HAND_SIZE: usize = 7;
 
 enum AiDecisionApplication {
     Applied,
