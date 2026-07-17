@@ -9,7 +9,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   CSSProperties,
   DragEvent as ReactDragEvent,
@@ -18,9 +18,8 @@ import type {
 } from "react";
 import { Board3DRenderer } from "../../Board3D";
 import type { BoardAnimationCue, PieceAnimation } from "../../boardAnimations";
-import { buildBoardSurface } from "../../boardSurface";
+import { deriveBoardSurface } from "../../boardSurface";
 import { useBoardRendererDegradation } from "../../boardRendererDegradation";
-import { TargetingIndicatorLayer, useDomTargetingProjection } from "../../targetingOverlay";
 import { createMatchVisualCatalog, type CardVisualIdentity, type MatchVisualCatalog, type UnitVisualIdentity, type HeroVisualIdentity } from "../../matchVisualIdentity";
 import type { BoardPiece, BoardUnit, UnitContextMenu } from "../../appTypes";
 import type {
@@ -31,12 +30,13 @@ import type {
   HexTile,
   MatchParticipantState,
   MatchState,
-  HeroAppearanceAssignment,
   Side,
   StackItem,
 } from "../../types";
 import type { BoardTutorialHighlight } from "../../tutorial/tutorialHighlights";
+import { TargetingOverlay } from "../../targetingOverlay";
 import { DetailStat } from "../common";
+import { useDomBoardProjection } from "./domBoardProjection";
 import {
   coordKey,
   pieceAnimationFeedback,
@@ -66,7 +66,7 @@ export function UnitContextMenuView({
   onActivateBuilding,
 }: {
   menu: Exclude<UnitContextMenu, null>;
-  unit: BoardPiece;
+  unit: BoardUnit;
   onClose: () => void;
   onOpenCardInfo: () => void;
   canActivateItems: boolean;
@@ -75,7 +75,6 @@ export function UnitContextMenuView({
   canActivateBuilding?: boolean;
   onActivateBuilding?: (buildingId: string) => void;
 }) {
-  const carriedItems = unit.items ?? [];
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -103,11 +102,11 @@ export function UnitContextMenuView({
       style={{ left: menu.x, top: menu.y }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <button type="button" role="menuitem" disabled={unit.pieceType !== "unit"} onClick={onOpenCardInfo}>
+      <button type="button" role="menuitem" onClick={onOpenCardInfo}>
         <LibraryBig size={15} />
         Card info
       </button>
-      {carriedItems
+      {unit.items
         .filter((item) => item.active)
         .map((item) => (
           <button
@@ -153,8 +152,6 @@ export function UnitCardModal({
   unitVisualIdentity: UnitVisualIdentity;
   onClose: () => void;
 }) {
-  const carriedItems = unit.items ?? [];
-  const statMarkers = unit.statMarkers ?? [];
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -220,13 +217,12 @@ export function UnitCardModal({
             <DetailStat label="Armor" value={`${unit.armor}/${unit.maxArmor}`} />
             <DetailStat label="AP" value={`${unit.apRemaining}/${unit.maxAp}`} />
             <DetailStat label="Attacked" value={unit.hasAttacked ? "Yes" : "No"} />
-            <DetailStat label="Items" value={carriedItems.length} />
-            <DetailStat label="Markers" value={statMarkers.length} />
+            <DetailStat label="Items" value={unit.items.length} />
           </div>
 
-          {carriedItems.length > 0 ? (
+          {unit.items.length > 0 ? (
             <div className="unit-item-list" aria-label="Carried items">
-              {carriedItems.map((item) => (
+              {unit.items.map((item) => (
                 <p key={item.id}>
                   <strong>{item.name}</strong>
                   <span>{itemPassiveLabel(item.passive)}</span>
@@ -298,7 +294,7 @@ export function StackDisplay({
   );
 }
 
-export function TargetingStackOverlay({
+function TargetingStackOverlay({
   stack,
   prioritySide,
   activeStackItemId,
@@ -403,7 +399,6 @@ export function Board({
   selectedCard,
   selectedPiece,
   focusedCoord,
-  heroAppearances = [],
   disabled,
   readOnly = false,
   onTileClick,
@@ -420,47 +415,53 @@ export function Board({
   selectedCard: Card | null;
   selectedPiece: BoardPiece | null;
   focusedCoord?: HexCoord | null;
-  heroAppearances?: HeroAppearanceAssignment[];
   disabled: boolean;
   readOnly?: boolean;
   onTileClick?: (tile: HexTile) => void;
   onTileDrop?: (tile: HexTile, cardId: string) => void;
-  onUnitContextMenu?: (unit: BoardPiece, position: { x: number; y: number }) => void;
+  onUnitContextMenu?: (unit: BoardUnit, position: { x: number; y: number }) => void;
   onFocusedUnitChange?: (pieceId: string | null) => void;
   tutorialHighlights?: BoardTutorialHighlight[];
 }) {
-  const [hoveredCoord, setHoveredCoord] = useState<HexCoord | null>(null);
-  const [activeStackItemId, setActiveStackItemId] = useState<string | null>(null);
-  const boardFieldRef = useRef<HTMLDivElement | null>(null);
-  const rendererPolicy = useBoardRendererDegradation({
+  const rendererDegradation = useBoardRendererDegradation({
     requestedMode: boardVisualMode,
     readOnly,
-    disabled,
   });
+  const [hoveredCoord, setHoveredCoord] = useState<HexCoord | null>(null);
+  const [activeStackItemId, setActiveStackItemId] = useState<string | null>(null);
+  const { renderer } = rendererDegradation;
+  const boardCoords = useMemo(
+    () => match.board.tiles.map((tile) => tile.coord),
+    [match.board.tiles],
+  );
+  const domProjection = useDomBoardProjection(boardCoords, renderer === "2d");
   const [visibleAnimation, setVisibleAnimation] = useState<BoardAnimationCue | null>(animation ?? null);
-  const boardCoords = useMemo(() => match.board.tiles.map((tile) => tile.coord), [match.board.tiles]);
-  const { positionsByCoordKey: tilePositions, registerTargetElement } =
-    useDomTargetingProjection(boardFieldRef, boardCoords);
-  const boardSurface = useMemo(
+  const animationByPieceId = useMemo(
+    () => new Map((visibleAnimation?.pieces ?? []).map((pieceAnimation) => [pieceAnimation.pieceId, pieceAnimation])),
+    [visibleAnimation],
+  );
+  const surface = useMemo(
     () =>
-      buildBoardSurface({
+      deriveBoardSurface({
         match,
         viewerSide,
         selectedCard,
         selectedPiece,
         focusedCoord: focusedCoord ?? null,
         hoveredCoord,
-        isInteractive: rendererPolicy.isInteractive,
+        readOnly,
+        disabled,
         tutorialHighlights,
         animation: visibleAnimation,
         activeStackItemId,
       }),
     [
       activeStackItemId,
+      disabled,
       focusedCoord,
       hoveredCoord,
       match,
-      rendererPolicy.isInteractive,
+      readOnly,
       selectedCard,
       selectedPiece,
       tutorialHighlights,
@@ -495,18 +496,18 @@ export function Board({
     setHoveredCoord(null);
   }, [selectedCard?.id, selectedPiece?.id]);
 
-  if (rendererPolicy.renderer === "3d") {
+  if (renderer === "3d") {
     return (
       <section
         className={`board board-visual-mode-${boardVisualMode} ${readOnly ? "read-only" : ""}`}
         data-board-visual-mode={boardVisualMode}
         data-board-renderer="3d"
-        data-board-asset-failures={rendererPolicy.assetFailureCount}
+        data-board-asset-failures={rendererDegradation.assetFailureCount}
         aria-label="Hex board"
       >
-        {rendererPolicy.assetFailureCount > 0 ? (
+        {rendererDegradation.notice ? (
           <div className="board-renderer-notice" role="status">
-            Some 3D models are unavailable, so procedural miniatures are shown.
+            {rendererDegradation.notice}
           </div>
         ) : null}
         <TargetingStackOverlay
@@ -516,28 +517,24 @@ export function Board({
           onActiveStackItemChange={setActiveStackItemId}
         />
         <Board3DRenderer
-          tiles={boardSurface.tiles}
-          pieces={boardSurface.pieces}
+          surface={surface}
           animation={visibleAnimation}
           visualCatalog={visualCatalog}
-          readOnly={readOnly}
-          disabled={disabled}
-          tileInteractions={boardSurface.tileInteractions}
-          targetingIndicators={boardSurface.targetingIndicators}
-          heroAppearances={heroAppearances}
           onTileClick={onTileClick}
           onTileDrop={onTileDrop}
           onTileContextMenu={(tile, event) => {
-            const piece = boardSurface.tileByKey.get(coordKey(tile.coord))?.piece ?? null;
-            if (!piece || !onUnitContextMenu) {
+            const piece = surface.tiles.find(
+              (surfaceTile) => coordKey(surfaceTile.coord) === coordKey(tile.coord),
+            )?.piece;
+            if (piece?.pieceType !== "unit" || !onUnitContextMenu) {
               return;
             }
 
             onUnitContextMenu(piece, { x: event.clientX, y: event.clientY });
           }}
           onTileHoverChange={setHoveredCoord}
-          onFatalRenderError={rendererPolicy.reportFatalRenderError}
-          onAssetFailure={rendererPolicy.reportAssetFailure}
+          onFatalRenderError={rendererDegradation.reportFatalRenderFailure}
+          onAssetFailure={rendererDegradation.reportAssetFailure}
         />
       </section>
     );
@@ -550,9 +547,9 @@ export function Board({
       data-board-renderer="2d"
       aria-label="Hex board"
     >
-      {rendererPolicy.fallbackMessage ? (
+      {rendererDegradation.notice ? (
         <div className="board-renderer-notice" role="status">
-          {rendererPolicy.fallbackMessage}
+          {rendererDegradation.notice}
         </div>
       ) : null}
       <TargetingStackOverlay
@@ -561,52 +558,54 @@ export function Board({
         activeStackItemId={activeStackItemId}
         onActiveStackItemChange={setActiveStackItemId}
       />
-      <div className="hex-board-field" ref={boardFieldRef}>
-        <TargetingIndicatorLayer
-          indicators={boardSurface.targetingIndicators}
-          positionsByCoordKey={tilePositions}
+      <div className="hex-board-field" ref={domProjection.containerRef}>
+        <TargetingOverlay
+          indicators={surface.targetingIndicators}
+          projection={domProjection.projection}
         />
         <div className="hex-board">
-          {boardSurface.columns.map((column) => (
+          {surface.columns.map((column) => (
             <div className="hex-column" key={column.q}>
               {column.tiles.map((surfaceTile) => {
-                const buildingDecor = surfaceTile.buildingDecor;
-                const buildingClasses = buildingDecor
-                  ? [
-                      buildingDecor.className,
-                      `building-accent-${buildingDecor.accent}`,
-                      buildingDecor.occupiedSide
-                        ? `building-occupied-${buildingDecor.occupiedSide}`
-                        : "",
-                      buildingDecor.activatedThisTurn ? "building-exhausted" : "building-ready",
-                      buildingDecor.effectType === "auraStatBonus" ? "building-aura" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")
-                  : "";
+                const {
+                  tile,
+                  piece,
+                  displayPiece,
+                  droppedItemCount,
+                  hasManaSource,
+                  hasBuilding,
+                  building,
+                  isLegal,
+                  isSelected,
+                  isFocused,
+                  tutorialHighlightTone,
+                  title,
+                } = surfaceTile;
+                const tileKey = coordKey(surfaceTile.coord);
+                const occupantClass = displayPiece ? `occupied occupied-${displayPiece.side}` : "";
 
                 return (
                   <button
-                    key={surfaceTile.key}
-                    ref={(element) => {
-                      registerTargetElement(surfaceTile.coord, element);
-                    }}
-                    className={`hex-tile ${hexDecorClass(surfaceTile.coord)} ${surfaceTile.hasManaSource ? "mana-source" : ""} ${surfaceTile.hasBuilding ? "building" : ""} ${surfaceTile.building ? `building-${surfaceTile.building.effect.type}` : ""} ${buildingClasses} ${surfaceTile.occupantClass} ${surfaceTile.isLegal ? "legal" : ""} ${surfaceTile.isSelected ? "selected-piece" : ""} ${surfaceTile.isFocused ? "keyboard-focused" : ""} ${surfaceTile.tutorialHighlightTone ? `tutorial-highlight tutorial-highlight-${surfaceTile.tutorialHighlightTone}` : ""}`}
+                    key={tileKey}
+                    ref={(element) => domProjection.registerElement(surfaceTile.coord, element)}
+                    className={`hex-tile ${hasManaSource ? "mana-source" : ""} ${hasBuilding ? "building" : ""} ${building ? `building-${building.effect.type}` : ""} ${occupantClass} ${isLegal ? "legal" : ""} ${isSelected ? "selected-piece" : ""} ${isFocused ? "keyboard-focused" : ""} ${tutorialHighlightTone ? `tutorial-highlight tutorial-highlight-${tutorialHighlightTone}` : ""}`}
                     type="button"
-                    disabled={disabled && !readOnly}
-                    tabIndex={readOnly ? -1 : undefined}
-                    onPointerEnter={() => setHoveredCoord(surfaceTile.coord)}
+                    disabled={surface.disabled && !surface.readOnly}
+                    tabIndex={surface.readOnly ? -1 : undefined}
+                    onPointerEnter={() => setHoveredCoord(tile.coord)}
                     onPointerLeave={() => setHoveredCoord(null)}
                     onFocus={() => {
-                      setHoveredCoord(surfaceTile.coord);
-                      onFocusedUnitChange?.(
-                        surfaceTile.piece?.pieceType === "unit" ? surfaceTile.piece.id : null,
-                      );
+                      setHoveredCoord(tile.coord);
+                      onFocusedUnitChange?.(piece?.pieceType === "unit" ? piece.id : null);
                     }}
                     onBlur={() => setHoveredCoord(null)}
-                    onClick={() => onTileClick?.(surfaceTile.tile)}
+                    onClick={() => {
+                      if (surface.isInteractive) {
+                        onTileClick?.(tile);
+                      }
+                    }}
                     onDragOver={(event: ReactDragEvent<HTMLButtonElement>) => {
-                      if (readOnly || disabled || !selectedCard || !surfaceTile.isLegal) {
+                      if (readOnly || disabled || !selectedCard || !isLegal) {
                         return;
                       }
 
@@ -621,50 +620,50 @@ export function Board({
                       event.preventDefault();
                       const cardId = event.dataTransfer.getData("text/plain");
                       if (cardId) {
-                        onTileDrop(surfaceTile.tile, cardId);
+                        onTileDrop(tile, cardId);
                       }
                     }}
                     onContextMenu={(event: ReactMouseEvent<HTMLButtonElement>) => {
-                      if (readOnly || !surfaceTile.piece || !onUnitContextMenu) {
+                      if (readOnly || piece?.pieceType !== "unit" || !onUnitContextMenu) {
                         return;
                       }
 
                       event.preventDefault();
-                      onUnitContextMenu(surfaceTile.piece, { x: event.clientX, y: event.clientY });
+                      onUnitContextMenu(piece, { x: event.clientX, y: event.clientY });
                     }}
-                    title={surfaceTile.title}
-                    aria-label={surfaceTile.title}
+                    title={title}
+                    aria-label={title}
                   >
-                    {buildingDecor ? (
-                      <span
-                        className={`building-marker ${buildingDecor.className} building-accent-${buildingDecor.accent}`}
-                        aria-hidden="true"
-                        data-building-kind={buildingDecor.visualKind}
-                      >
-                        <span className="building-marker-base" />
-                        <span className="building-marker-glyph">{buildingDecor.glyph}</span>
+                    {hasManaSource ? (
+                      <span className="mana-source-marker" aria-hidden="true">
+                        M
                       </span>
                     ) : null}
-                    {surfaceTile.displayPiece ? (
+                    {building && !hasManaSource ? (
+                      <span className="building-marker" aria-hidden="true">
+                        B
+                      </span>
+                    ) : null}
+                    {displayPiece ? (
                       <>
                         <span
-                          className={`hex-occupant-marker ${surfaceTile.displayPiece.side}`}
+                          className={`hex-occupant-marker ${displayPiece.side}`}
                           aria-hidden="true"
                         >
-                          {surfaceTile.pieceLabel}
+                          {viewerSideShortLabel(displayPiece.side, viewerSide)}
                         </span>
                         <PieceToken
-                          key={`${surfaceTile.displayPiece.id}-${visibleAnimation?.sequence ?? 0}`}
-                          piece={surfaceTile.displayPiece}
-                          animation={boardSurface.animationByPieceId.get(surfaceTile.displayPiece.id)}
+                          key={`${displayPiece.id}-${visibleAnimation?.sequence ?? 0}`}
+                          piece={displayPiece}
+                          animation={animationByPieceId.get(displayPiece.id)}
                           viewerSide={viewerSide}
                           visualCatalog={visualCatalog}
                         />
                       </>
                     ) : null}
-                    {surfaceTile.droppedItems.length > 0 ? (
+                    {droppedItemCount > 0 ? (
                       <span className="dropped-item-count" aria-hidden="true">
-                        {surfaceTile.droppedItems.length}
+                        {droppedItemCount}
                       </span>
                     ) : null}
                   </button>
@@ -676,15 +675,6 @@ export function Board({
       </div>
     </section>
   );
-}
-
-function hexDecorClass(coord: HexCoord) {
-  const ring = Math.max(Math.abs(coord.q), Math.abs(coord.r), Math.abs(-coord.q - coord.r));
-  const axisClass = coord.q === 0 || coord.r === 0 || coord.q + coord.r === 0 ? "hex-sigil-axis" : "";
-  const centerClass = ring === 0 ? "hex-sigil-center" : "";
-  const edgeClass = ring === 3 ? "hex-sigil-edge" : "";
-
-  return [`hex-ring-${ring}`, axisClass, centerClass, edgeClass].filter(Boolean).join(" ");
 }
 
 export function PieceToken({
@@ -750,10 +740,10 @@ export function PieceToken({
         <Footprints size={11} />
         {piece.apRemaining}
       </span>
-      {(piece.items ?? []).length > 0 ? (
+      {piece.pieceType === "unit" && piece.items.length > 0 ? (
         <span>
           <Sparkles size={11} />
-          {(piece.items ?? []).length}
+          {piece.items.length}
         </span>
       ) : null}
       </span>
@@ -770,10 +760,7 @@ export function CardButton({
   played = false,
   style,
   disabled,
-  unavailable = false,
-  availabilityReason = null,
   onClick,
-  onFocus,
   onDragStart,
   onDragEnd,
   tutorialTargetId,
@@ -786,10 +773,7 @@ export function CardButton({
   played?: boolean;
   style?: CSSProperties;
   disabled: boolean;
-  unavailable?: boolean;
-  availabilityReason?: string | null;
   onClick: () => void;
-  onFocus?: () => void;
   onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
   onDragEnd?: () => void;
   tutorialTargetId?: string;
@@ -797,23 +781,14 @@ export function CardButton({
 }) {
   return (
     <button
-      className={`card-button ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${played ? "played" : ""} ${unavailable ? "unavailable" : ""} ${tutorialHighlighted ? "tutorial-highlight tutorial-highlight-primary" : ""} ${card.rarity}`}
+      className={`card-button ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${played ? "played" : ""} ${tutorialHighlighted ? "tutorial-highlight tutorial-highlight-primary" : ""} ${card.rarity}`}
       type="button"
       disabled={disabled}
-      aria-disabled={disabled || unavailable}
-      draggable={!disabled && !unavailable}
+      draggable={!disabled}
       style={style}
       data-tutorial-target={tutorialTargetId}
-      title={availabilityReason ?? card.text}
       onClick={onClick}
-      onFocus={onFocus}
-      onDragStart={(event) => {
-        if (disabled || unavailable || !onDragStart) {
-          event.preventDefault();
-          return;
-        }
-        onDragStart(event);
-      }}
+      onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
       {visualIdentity.artPath ? (

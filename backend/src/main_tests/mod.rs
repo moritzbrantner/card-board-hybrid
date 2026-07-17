@@ -133,6 +133,7 @@ fn custom_preferences_payload() -> &'static str {
 
 mod auth;
 mod decks;
+mod loadout_resolution;
 mod matches;
 mod preferences;
 mod profile;

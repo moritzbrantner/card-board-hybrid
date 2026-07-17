@@ -1,16 +1,19 @@
-import type { BoardAnimationCue, PieceAnimation } from "./boardAnimations";
+import type { BoardAnimationCue } from "./boardAnimations";
 import type { BoardPiece } from "./appTypes";
-import { buildingDecorForTile, type BoardSurfaceBuildingDecor } from "./buildingVisuals";
-import type { BoardTutorialHighlight, TutorialHighlightTone } from "./tutorial/tutorialHighlights";
-import { sameTutorialCoord } from "./tutorial/tutorialHighlights";
 import type {
   Building,
   Card,
+  DroppedItem,
   HexCoord,
   HexTile,
   MatchState,
   Side,
 } from "./types";
+import type {
+  BoardTutorialHighlight,
+  TutorialHighlightTone,
+} from "./tutorial/tutorialHighlights";
+import { sameTutorialCoord } from "./tutorial/tutorialHighlights";
 import {
   buildingAt,
   coordKey,
@@ -28,39 +31,33 @@ import {
   tileTitle,
 } from "./matchBoardHelpers";
 import { viewerSideShortLabel } from "./labels";
-import type { TargetingIndicator } from "./targetingIndicators";
 import {
   selectedTargetingIndicators,
   stackTargetingIndicators,
+  type TargetingIndicator,
 } from "./targetingIndicators";
 
-export type BoardSurfaceTileInteraction = {
+export type BoardSurfaceTile = {
+  tile: HexTile;
   coord: HexCoord;
   title: string;
   disabled: boolean;
   isLegal: boolean;
   isSelected: boolean;
-  isFocused?: boolean;
+  isFocused: boolean;
   tutorialHighlightTone?: TutorialHighlightTone;
-  hasManaSource?: boolean;
-  hasBuilding?: boolean;
-  buildingDecor?: BoardSurfaceBuildingDecor;
+  hasManaSource: boolean;
+  hasBuilding: boolean;
+  building: Building | null;
   hasPiece: boolean;
+  piece: BoardPiece | null;
+  displayPiece: BoardPiece | null;
   pieceSide?: Side;
   pieceType?: BoardPiece["pieceType"];
   pieceLabel?: string;
   pieceStatLabel?: string;
-  droppedItemCount?: number;
-};
-
-export type BoardSurfaceTile = BoardSurfaceTileInteraction & {
-  key: string;
-  tile: HexTile;
-  piece: BoardPiece | null;
-  displayPiece: BoardPiece | null;
-  droppedItems: NonNullable<MatchState["board"]["droppedItems"]>;
-  building: Building | null;
-  occupantClass: string;
+  droppedItems: DroppedItem[];
+  droppedItemCount: number;
 };
 
 export type BoardSurfaceColumn = {
@@ -69,50 +66,102 @@ export type BoardSurfaceColumn = {
 };
 
 export type BoardSurface = {
-  tiles: HexTile[];
+  readOnly: boolean;
+  disabled: boolean;
+  isInteractive: boolean;
+  tiles: BoardSurfaceTile[];
   columns: BoardSurfaceColumn[];
   pieces: BoardPiece[];
-  animationByPieceId: Map<string, PieceAnimation>;
-  tileByKey: Map<string, BoardSurfaceTile>;
-  tileInteractions: BoardSurfaceTileInteraction[];
-  selectedIndicators: TargetingIndicator[];
-  stackIndicators: TargetingIndicator[];
   targetingIndicators: TargetingIndicator[];
 };
 
-export type BoardSurfaceOptions = {
+export type DeriveBoardSurfaceInput = {
   match: MatchState;
   viewerSide: Side;
   selectedCard: Card | null;
   selectedPiece: BoardPiece | null;
   focusedCoord: HexCoord | null;
   hoveredCoord: HexCoord | null;
-  isInteractive: boolean;
-  tutorialHighlights?: BoardTutorialHighlight[];
-  animation?: BoardAnimationCue | null;
-  activeStackItemId?: string | null;
+  readOnly: boolean;
+  disabled: boolean;
+  tutorialHighlights: BoardTutorialHighlight[];
+  animation: BoardAnimationCue | null;
+  activeStackItemId: string | null;
 };
 
-export function buildBoardSurface({
+export function deriveBoardSurface({
   match,
   viewerSide,
   selectedCard,
   selectedPiece,
   focusedCoord,
   hoveredCoord,
-  isInteractive,
-  tutorialHighlights = [],
-  animation = null,
-  activeStackItemId = null,
-}: BoardSurfaceOptions): BoardSurface {
+  readOnly,
+  disabled,
+  tutorialHighlights,
+  animation,
+  activeStackItemId,
+}: DeriveBoardSurfaceInput): BoardSurface {
+  const isInteractive = !readOnly && !disabled;
   const pieces = piecesForAnimation(piecesInMatch(match), animation);
-  const displayPieceByCoord = new Map(pieces.map((piece) => [coordKey(piece.position), piece]));
-  const animationByPieceId = new Map(
-    (animation?.pieces ?? []).map((pieceAnimation) => [
-      pieceAnimation.pieceId,
-      pieceAnimation,
-    ]),
+  const displayPieceByCoord = new Map(
+    pieces.map((piece) => [coordKey(piece.position), piece]),
   );
+  const tiles = match.board.tiles.map((tile): BoardSurfaceTile => {
+    const piece = pieceAt(match, tile.coord);
+    const displayPiece = displayPieceByCoord.get(coordKey(tile.coord)) ?? piece;
+    const droppedItems = droppedItemsAt(match, tile.coord);
+    const hasManaSource = isManaSourceAt(match, tile.coord);
+    const building = buildingAt(match, tile.coord);
+    const isLegal =
+      isInteractive &&
+      Boolean(
+        (selectedCard &&
+          isLegalCardTarget(match, viewerSide, selectedCard, tile.coord, piece)) ||
+          (selectedPiece &&
+            ((!piece && isLegalMove(match, viewerSide, selectedPiece, tile.coord)) ||
+              (piece && isLegalAttack(match, viewerSide, selectedPiece, piece)))),
+      );
+    const baseTitle = tileTitle(
+      tile,
+      piece,
+      viewerSide,
+      droppedItems.length,
+      hasManaSource,
+    );
+
+    return {
+      tile,
+      coord: tile.coord,
+      title: building ? `${baseTitle}, building ${building.name}` : baseTitle,
+      disabled: !isInteractive,
+      isLegal,
+      isSelected: Boolean(piece && selectedPiece && piece.id === selectedPiece.id),
+      isFocused: focusedCoord ? sameCoord(tile.coord, focusedCoord) : false,
+      tutorialHighlightTone: tutorialHighlightForTile(
+        tile.coord,
+        piece?.id ?? null,
+        tutorialHighlights,
+      ),
+      hasManaSource,
+      hasBuilding: Boolean(building),
+      building,
+      hasPiece: Boolean(piece),
+      piece,
+      displayPiece,
+      pieceSide: piece?.side,
+      pieceType: piece?.pieceType,
+      pieceLabel: piece ? viewerSideShortLabel(piece.side, viewerSide) : undefined,
+      pieceStatLabel: piece ? pieceStatLabel(piece) : undefined,
+      droppedItems,
+      droppedItemCount: droppedItems.length,
+    };
+  });
+  const tileByKey = new Map(tiles.map((tile) => [coordKey(tile.coord), tile]));
+  const columns = groupTilesByColumn(match.board.tiles).map((column) => ({
+    q: column.q,
+    tiles: column.tiles.map((tile) => tileByKey.get(coordKey(tile.coord))!),
+  }));
   const selectedIndicators = selectedTargetingIndicators({
     match,
     viewerSide,
@@ -130,75 +179,13 @@ export function buildBoardSurface({
       )
     : [...stackIndicators, ...selectedIndicators];
 
-  const surfaceTiles = match.board.tiles.map((tile): BoardSurfaceTile => {
-    const key = coordKey(tile.coord);
-    const piece = pieceAt(match, tile.coord);
-    const displayPiece = displayPieceByCoord.get(key) ?? piece;
-    const droppedItems = droppedItemsAt(match, tile.coord);
-    const hasManaSource = isManaSourceAt(match, tile.coord);
-    const building = buildingAt(match, tile.coord);
-    const hasBuilding = !!building;
-    const buildingDecor = building
-      ? buildingDecorForTile(building, displayPiece?.side ?? piece?.side)
-      : undefined;
-    const isLegal =
-      isInteractive &&
-      ((selectedCard && isLegalCardTarget(match, viewerSide, selectedCard, tile.coord, piece)) ||
-        (selectedPiece &&
-          ((!piece && isLegalMove(match, viewerSide, selectedPiece, tile.coord)) ||
-            (piece && isLegalAttack(match, viewerSide, selectedPiece, piece)))));
-    const isSelected = Boolean(piece && selectedPiece && piece.id === selectedPiece.id);
-    const isFocused = focusedCoord ? sameCoord(tile.coord, focusedCoord) : false;
-    const tutorialHighlightTone = tutorialHighlightForTile(
-      tile.coord,
-      piece?.id ?? null,
-      tutorialHighlights,
-    );
-    const occupantClass = displayPiece ? `occupied occupied-${displayPiece.side}` : "";
-    const baseTitle = tileTitle(tile, piece, viewerSide, droppedItems.length, hasManaSource);
-    const title = building ? `${baseTitle}, building ${building.name}` : baseTitle;
-
-    return {
-      key,
-      tile,
-      coord: tile.coord,
-      title,
-      disabled: !isInteractive,
-      isLegal: Boolean(isLegal),
-      isSelected,
-      isFocused,
-      tutorialHighlightTone,
-      hasManaSource,
-      hasBuilding,
-      buildingDecor,
-      hasPiece: Boolean(displayPiece),
-      pieceSide: displayPiece?.side,
-      pieceType: displayPiece?.pieceType,
-      pieceLabel: displayPiece ? viewerSideShortLabel(displayPiece.side, viewerSide) : undefined,
-      pieceStatLabel: displayPiece ? pieceStatLabel(displayPiece) : undefined,
-      droppedItemCount: droppedItems.length || undefined,
-      piece,
-      displayPiece,
-      droppedItems,
-      building,
-      occupantClass,
-    };
-  });
-  const tileByKey = new Map(surfaceTiles.map((tile) => [tile.key, tile]));
-  const columns = groupTilesByColumn(match.board.tiles).map((column) => ({
-    q: column.q,
-    tiles: column.tiles.map((tile) => tileByKey.get(coordKey(tile.coord))!),
-  }));
-
   return {
-    tiles: match.board.tiles,
+    readOnly,
+    disabled,
+    isInteractive,
+    tiles,
     columns,
     pieces,
-    animationByPieceId,
-    tileByKey,
-    tileInteractions: surfaceTiles,
-    selectedIndicators,
-    stackIndicators,
     targetingIndicators,
   };
 }

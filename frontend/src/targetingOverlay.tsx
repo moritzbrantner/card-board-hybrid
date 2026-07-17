@@ -1,142 +1,22 @@
-import { useLayoutEffect, useRef, useState } from "react";
-import type { RefObject } from "react";
-import type { ProjectedBoardPosition } from "./boardRenderer";
+import type { BoardProjectedPosition, BoardProjection } from "./boardProjection";
 import type { TargetingIndicator } from "./targetingIndicators";
-import type { HexCoord } from "./types";
-import { coordKey } from "./matchBoardHelpers";
 
-export type TargetingProjectionPosition = ProjectedBoardPosition;
-
-export type VisibleTargetingIndicator = {
-  indicator: TargetingIndicator;
-  sourcePosition: TargetingProjectionPosition;
-  targetPosition: TargetingProjectionPosition;
-  footprintPositions: TargetingProjectionPosition[];
-};
-
-export type TargetingIndicatorLayerProps = {
+export type TargetingOverlayProps = {
   indicators: TargetingIndicator[];
-  positionsByCoordKey: Map<string, TargetingProjectionPosition>;
+  projection: BoardProjection;
 };
 
-export function useDomTargetingProjection(
-  boardFieldRef: RefObject<HTMLDivElement | null>,
-  coords: HexCoord[],
-) {
-  const elementByKeyRef = useRef(new Map<string, HTMLButtonElement>());
-  const [positions, setPositions] = useState<Map<string, TargetingProjectionPosition>>(
-    () => new Map(),
-  );
-  const coordKeys = coords.map(coordKey).join("|");
-
-  useLayoutEffect(() => {
-    let frameId = 0;
-
-    function measure() {
-      window.cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(() => {
-        const boardField = boardFieldRef.current;
-        if (!boardField) {
-          setPositions(new Map());
-          return;
-        }
-
-        const fieldRect = boardField.getBoundingClientRect();
-        const nextPositions = new Map<string, TargetingProjectionPosition>();
-        for (const key of coordKeys.split("|").filter(Boolean)) {
-          const element = elementByKeyRef.current.get(key);
-          if (!element) {
-            continue;
-          }
-
-          const rect = element.getBoundingClientRect();
-          nextPositions.set(key, {
-            x: rect.left - fieldRect.left + rect.width / 2,
-            y: rect.top - fieldRect.top + rect.height / 2,
-            visible: true,
-          });
-        }
-
-        setPositions((current) =>
-          targetingProjectionPositionsEqual(current, nextPositions) ? current : nextPositions,
-        );
-      });
-    }
-
-    measure();
-    const resizeObserver =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
-    if (boardFieldRef.current && resizeObserver) {
-      resizeObserver.observe(boardFieldRef.current);
-    }
-
-    window.addEventListener("resize", measure);
-    window.addEventListener("scroll", measure, true);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", measure);
-      window.removeEventListener("scroll", measure, true);
-    };
-  }, [boardFieldRef, coordKeys]);
-
-  function registerTargetElement(coord: HexCoord, element: HTMLButtonElement | null) {
-    const key = coordKey(coord);
-    if (element) {
-      elementByKeyRef.current.set(key, element);
-    } else {
-      elementByKeyRef.current.delete(key);
-    }
-  }
-
-  return { positionsByCoordKey: positions, registerTargetElement };
-}
-
-export function targetingProjectionPositionsEqual(
-  left: Map<string, TargetingProjectionPosition>,
-  right: Map<string, TargetingProjectionPosition>,
-) {
-  if (left.size !== right.size) {
-    return false;
-  }
-
-  for (const [key, nextPosition] of right) {
-    const currentPosition = left.get(key);
-    if (
-      !currentPosition ||
-      currentPosition.visible !== nextPosition.visible ||
-      Math.abs(currentPosition.x - nextPosition.x) > 0.25 ||
-      Math.abs(currentPosition.y - nextPosition.y) > 0.25
-    ) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-export function visibleTargetingIndicators(
-  indicators: TargetingIndicator[],
-  positionsByCoordKey: Map<string, TargetingProjectionPosition>,
-): VisibleTargetingIndicator[] {
-  return indicators
+export function TargetingOverlay({ indicators, projection }: TargetingOverlayProps) {
+  const visibleIndicators = indicators
     .map((indicator) => ({
       indicator,
-      sourcePosition: positionsByCoordKey.get(coordKey(indicator.sourceCoord)),
-      targetPosition: positionsByCoordKey.get(coordKey(indicator.primaryTargetCoord)),
+      sourcePosition: projection.positionAt(indicator.sourceCoord),
+      targetPosition: projection.positionAt(indicator.primaryTargetCoord),
       footprintPositions: indicator.secondaryFootprintCoords
-        .map((coord) => positionsByCoordKey.get(coordKey(coord)))
-        .filter((position): position is TargetingProjectionPosition => Boolean(position?.visible)),
+        .map((coord) => projection.positionAt(coord))
+        .filter((position): position is BoardProjectedPosition => Boolean(position?.visible)),
     }))
     .filter(hasVisibleTargetingEndpoints);
-}
-
-export function TargetingIndicatorLayer({
-  indicators,
-  positionsByCoordKey,
-}: TargetingIndicatorLayerProps) {
-  const visibleIndicators = visibleTargetingIndicators(indicators, positionsByCoordKey);
 
   if (visibleIndicators.length === 0) {
     return null;
@@ -171,7 +51,9 @@ export function TargetingIndicatorLayer({
             data-targeting-indicator={indicator.id}
             data-targeting-action={indicator.actionType}
             data-targeting-tone={indicator.tone}
-            data-stack-item-id={indicator.source.type === "stack" ? indicator.source.stackItemId : undefined}
+            data-stack-item-id={
+              indicator.source.type === "stack" ? indicator.source.stackItemId : undefined
+            }
           >
             <line
               className="targeting-indicator-line"
@@ -211,9 +93,14 @@ export function TargetingIndicatorLayer({
 
 function hasVisibleTargetingEndpoints(entry: {
   indicator: TargetingIndicator;
-  sourcePosition?: TargetingProjectionPosition;
-  targetPosition?: TargetingProjectionPosition;
-  footprintPositions: TargetingProjectionPosition[];
-}): entry is VisibleTargetingIndicator {
+  sourcePosition?: BoardProjectedPosition;
+  targetPosition?: BoardProjectedPosition;
+  footprintPositions: BoardProjectedPosition[];
+}): entry is {
+  indicator: TargetingIndicator;
+  sourcePosition: BoardProjectedPosition;
+  targetPosition: BoardProjectedPosition;
+  footprintPositions: BoardProjectedPosition[];
+} {
   return Boolean(entry.sourcePosition?.visible && entry.targetPosition?.visible);
 }

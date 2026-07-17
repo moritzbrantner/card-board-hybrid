@@ -4,7 +4,64 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_ACCOUNT_PREFERENCES } from "../preferences";
 import { TUTORIAL_COMPLETION_STORAGE_KEY } from "../tutorial/tutorialReducer";
+import type { BoardTutorialHighlight } from "../tutorial/tutorialHighlights";
+import type { Card, HexTile, MatchParticipantState, MatchState } from "../types";
 import { TutorialPage } from "./TutorialPage";
+
+vi.mock("../components/board", () => ({
+  Board: ({
+    match,
+    disabled,
+    tutorialHighlights = [],
+    onTileClick,
+  }: {
+    match: MatchState;
+    disabled: boolean;
+    tutorialHighlights?: BoardTutorialHighlight[];
+    onTileClick?: (tile: HexTile) => void;
+  }) => (
+    <section aria-label="Hex board">
+      {match.board.tiles
+        .filter((tile) => isHighlightedTutorialTile(match, tile, tutorialHighlights))
+        .map((tile) => (
+          <button
+            key={`${tile.coord.q}:${tile.coord.r}`}
+            aria-label={`Tutorial Hex q ${tile.coord.q}, r ${tile.coord.r}`}
+            className="tutorial-highlight"
+            type="button"
+            disabled={disabled}
+            onClick={() => onTileClick?.(tile)}
+          />
+        ))}
+    </section>
+  ),
+  CardButton: ({
+    card,
+    disabled,
+    tutorialTargetId,
+    tutorialHighlighted,
+    onClick,
+  }: {
+    card: Card;
+    disabled: boolean;
+    tutorialTargetId?: string;
+    tutorialHighlighted?: boolean;
+    onClick: () => void;
+  }) => (
+    <button
+      className={tutorialHighlighted ? "tutorial-highlight" : undefined}
+      type="button"
+      disabled={disabled}
+      data-tutorial-target={tutorialTargetId}
+      onClick={onClick}
+    >
+      {card.name}
+    </button>
+  ),
+  PileDisplay: ({ label }: { label: string }) => <div>{label}</div>,
+  PlayerBadge: ({ player }: { player: MatchParticipantState }) => <div>{player.side}</div>,
+  StackDisplay: () => <div>Stack</div>,
+}));
 
 afterEach(() => cleanup());
 
@@ -17,42 +74,42 @@ describe("TutorialPage", () => {
     renderTutorial();
 
     expect(screen.getByRole("dialog", { name: "Board and Goal" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /q 0, r 1, occupied by your hero/i })).toHaveClass(
-      "tutorial-highlight",
-    );
+    expect(screen.getByLabelText("Tutorial Hex q 0, r 1")).toHaveClass("tutorial-highlight");
   });
 
   it("runs the happy path and stores local completion", () => {
     renderTutorial();
 
     continueIntro();
-    fireEvent.click(screen.getByRole("button", { name: /q 0, r 1, occupied by your hero/i }));
+    clickTile(0, 1);
 
     continueIntro();
-    fireEvent.click(screen.getByRole("button", { name: /Ember Squire/i }));
+    clickTutorialTarget("tutorial-card-ember-squire");
 
     continueIntro();
-    fireEvent.click(screen.getByRole("button", { name: /Ember Squire/i }));
-    fireEvent.click(screen.getByRole("button", { name: /q 0, r 0, empty hex/i }));
+    clickTutorialTarget("tutorial-card-ember-squire");
+    clickTile(0, 0);
 
     continueIntro();
-    fireEvent.click(screen.getByRole("button", { name: /q 0, r 0, occupied by your unit/i }));
-    fireEvent.click(screen.getByRole("button", { name: /q 1, r 0, empty hex/i }));
+    clickTile(0, 0);
+    clickTile(1, 0);
 
     continueIntro();
-    fireEvent.click(screen.getByRole("button", { name: /q 1, r 0, occupied by your unit/i }));
-    fireEvent.click(screen.getByRole("button", { name: /q 1, r -1, occupied by the opponent's unit/i }));
+    clickTile(1, 0);
+    clickTile(1, -1);
 
     continueIntro();
-    fireEvent.click(screen.getByRole("button", { name: "End Turn" }));
+    fireEvent.click(screen.getByText("End Turn", { selector: "button" }));
 
     continueIntro();
-    fireEvent.click(screen.getByRole("button", { name: /Spark Jolt/i }));
-    fireEvent.click(screen.getByRole("button", { name: /q 1, r -1, occupied by the opponent's unit/i }));
+    clickTutorialTarget("tutorial-card-spark-jolt");
+    clickTile(1, -1);
+
+    continueIntro();
+    fireEvent.click(screen.getByText("Pass Priority", { selector: "button" }));
 
     expect(window.localStorage.getItem(TUTORIAL_COMPLETION_STORAGE_KEY)).toBe("true");
-    expect(screen.getByRole("button", { name: "Start Playing" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Pass Priority" })).not.toBeInTheDocument();
+    expect(screen.getByText("Start Playing", { selector: "button" })).toBeInTheDocument();
   });
 });
 
@@ -77,5 +134,44 @@ function renderTutorial() {
 }
 
 function continueIntro() {
-  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(screen.getByText("Continue", { selector: "button" }));
+}
+
+function clickTile(q: number, r: number) {
+  fireEvent.click(screen.getByLabelText(`Tutorial Hex q ${q}, r ${r}`));
+}
+
+function clickTutorialTarget(targetId: string) {
+  const target = document.querySelector<HTMLElement>(`[data-tutorial-target="${targetId}"]`);
+  if (!target) {
+    throw new Error(`Expected tutorial target ${targetId} to render`);
+  }
+  fireEvent.click(target);
+}
+
+function tutorialPieceIdAt(match: MatchState, tile: HexTile) {
+  if (sameCoord(match.player.hero.position, tile.coord)) {
+    return match.player.hero.id;
+  }
+  if (sameCoord(match.opponent.hero.position, tile.coord)) {
+    return match.opponent.hero.id;
+  }
+  return match.board.units.find((unit) => sameCoord(unit.position, tile.coord))?.id ?? null;
+}
+
+function isHighlightedTutorialTile(
+  match: MatchState,
+  tile: HexTile,
+  highlights: BoardTutorialHighlight[],
+) {
+  const pieceId = tutorialPieceIdAt(match, tile);
+  return highlights.some((highlight) =>
+    highlight.kind === "coord"
+      ? sameCoord(highlight.coord, tile.coord)
+      : highlight.pieceId === pieceId,
+  );
+}
+
+function sameCoord(left: HexTile["coord"], right: HexTile["coord"]) {
+  return left.q === right.q && left.r === right.r;
 }

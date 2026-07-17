@@ -36,7 +36,7 @@ describe("DashboardPage", () => {
   it("shows the default legal deck's Hero preview on the signed-in dashboard", async () => {
     renderDashboard();
 
-    const featuredDeck = await screen.findByRole("region", { name: "Featured configured deck recipe" });
+    const featuredDeck = await findFeaturedDeck();
 
     expect(within(featuredDeck).getByText("Default Legal")).toBeInTheDocument();
     expect(within(featuredDeck).getByText("Runekeeper 3D preview")).toBeInTheDocument();
@@ -53,7 +53,7 @@ describe("DashboardPage", () => {
 
     renderDashboard();
 
-    const featuredDeck = await screen.findByRole("region", { name: "Featured configured deck recipe" });
+    const featuredDeck = await findFeaturedDeck();
 
     expect(within(featuredDeck).getByText("Tournament Legal")).toBeInTheDocument();
     expect(within(featuredDeck).getByText("Pyromancer 3D preview")).toBeInTheDocument();
@@ -68,7 +68,7 @@ describe("DashboardPage", () => {
 
     renderDashboard({ onNavigate });
 
-    const featuredDeck = await screen.findByRole("region", { name: "Featured configured deck recipe" });
+    const featuredDeck = await findFeaturedDeck();
     fireEvent.click(within(featuredDeck).getByRole("button", { name: "Open Decks" }));
 
     expect(within(featuredDeck).getByText("No legal configured deck recipe")).toBeInTheDocument();
@@ -79,7 +79,7 @@ describe("DashboardPage", () => {
     const onNavigate = vi.fn();
     const { container } = renderDashboard({ onNavigate });
 
-    await screen.findByRole("region", { name: "Featured configured deck recipe" });
+    await findFeaturedDeck();
     const featuredDashboard = container.querySelector(".dashboard-featured");
     if (!featuredDashboard) {
       throw new Error("Expected featured dashboard section to render");
@@ -119,6 +119,13 @@ function renderDashboard({
   return render(
     <DashboardPage currentUser={currentUser} onNavigate={onNavigate} onSignOut={onSignOut} />,
   );
+}
+
+async function findFeaturedDeck() {
+  const featuredDeck = await screen.findByLabelText("Featured configured deck recipe");
+  expect(featuredDeck).toHaveRole("region");
+  expect(featuredDeck).toHaveAccessibleName("Featured configured deck recipe");
+  return featuredDeck;
 }
 
 function authUser(): AuthUser {

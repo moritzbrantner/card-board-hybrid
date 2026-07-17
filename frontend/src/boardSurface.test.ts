@@ -1,216 +1,191 @@
 import { describe, expect, it } from "vitest";
-import type { Board3DTileInteraction } from "./Board3D";
-import { buildBoardSurface } from "./boardSurface";
 import {
-  emberSquireCard,
+  cinderRingCard,
   pendingAttackStack,
-  pendingMoveStack,
   pendingSpellStack,
-  sparkJoltCard,
   storyMatch,
   storyUnit,
 } from "./components/board.fixtures";
-import { coordKey } from "./matchBoardHelpers";
-import type { Building, DroppedItem } from "./types";
+import { pieceById } from "./matchBoardHelpers";
+import { deriveBoardSurface } from "./boardSurface";
 
 describe("board surface", () => {
-  it("marks selected card hex targets once for both renderers", () => {
-    const match = storyMatch({ hand: [emberSquireCard], phase: "cardPlay" });
-    const surface = buildBoardSurface({
+  it("exposes selected Card targets and their targeting indicators", () => {
+    const match = storyMatch({ hand: [cinderRingCard] });
+
+    const surface = deriveBoardSurface({
       match,
       viewerSide: "player",
-      selectedCard: emberSquireCard,
+      selectedCard: cinderRingCard,
       selectedPiece: null,
-      focusedCoord: null,
+      focusedCoord: { q: 1, r: 1 },
       hoveredCoord: null,
-      isInteractive: true,
+      readOnly: false,
+      disabled: false,
+      tutorialHighlights: [],
+      animation: null,
+      activeStackItemId: null,
     });
 
-    expect(surface.tileByKey.get("0:0")?.isLegal).toBe(true);
-    expect(surface.tileByKey.get("1:1")?.isLegal).toBe(false);
-
-    const interactionFor3d: Board3DTileInteraction = surface.tileByKey.get("0:0")!;
-    expect(interactionFor3d.isLegal).toBe(true);
-    expect(surface.columns.flatMap((column) => column.tiles).map((tile) => tile.key).sort()).toEqual(
-      surface.tileInteractions.map((interaction) => coordKey(interaction.coord)).sort(),
-    );
-  });
-
-  it("marks selected piece movement and selected states", () => {
-    const match = storyMatch({ phase: "movement" });
-    const selectedPiece = {
-      ...match.player.hero,
-      pieceType: "hero" as const,
-      name: "Runekeeper",
-    };
-    const surface = buildBoardSurface({
-      match,
-      viewerSide: "player",
-      selectedCard: null,
-      selectedPiece,
-      focusedCoord: { q: 0, r: 0 },
-      hoveredCoord: null,
-      isInteractive: true,
+    expect(tileAt(surface, 1, 1)).toMatchObject({
+      isLegal: true,
+      isFocused: true,
+      piece: { id: "opponent-hero" },
     });
-
-    expect(surface.tileByKey.get("0:1")?.isSelected).toBe(true);
-    expect(surface.tileByKey.get("0:0")?.isLegal).toBe(true);
-    expect(surface.tileByKey.get("1:1")?.isLegal).toBe(false);
-    expect(surface.tileByKey.get("0:0")?.isFocused).toBe(true);
-  });
-
-  it("marks selected piece attack states", () => {
-    const match = storyMatch({ phase: "attack" });
-    const selectedPiece = {
-      ...match.player.hero,
-      pieceType: "hero" as const,
-      name: "Runekeeper",
-    };
-    const surface = buildBoardSurface({
-      match,
-      viewerSide: "player",
-      selectedCard: null,
-      selectedPiece,
-      focusedCoord: { q: 0, r: 0 },
-      hoveredCoord: null,
-      isInteractive: true,
-    });
-
-    expect(surface.tileByKey.get("0:1")?.isSelected).toBe(true);
-    expect(surface.tileByKey.get("0:0")?.isLegal).toBe(false);
-    expect(surface.tileByKey.get("1:1")?.isLegal).toBe(true);
-    expect(surface.tileByKey.get("0:0")?.isFocused).toBe(true);
-  });
-
-  it("filters stack targeting indicators by active stack row", () => {
-    const surface = buildBoardSurface({
-      match: storyMatch({
-        actionStack: [pendingAttackStack, pendingSpellStack, pendingMoveStack],
-        prioritySide: "player",
+    expect(tileAt(surface, 0, 0)?.isLegal).toBe(false);
+    expect(surface.targetingIndicators).toEqual([
+      expect.objectContaining({
+        actionType: "spell",
+        primaryTargetPieceId: "opponent-hero",
+        secondaryFootprintCoords: expect.not.arrayContaining([{ q: 1, r: 1 }]),
       }),
-      viewerSide: "player",
-      selectedCard: null,
-      selectedPiece: null,
-      focusedCoord: null,
-      hoveredCoord: null,
-      isInteractive: true,
-      activeStackItemId: "story-stack-2",
-    });
-
-    expect(surface.stackIndicators.length).toBeGreaterThan(1);
-    expect(surface.targetingIndicators).toHaveLength(1);
-    expect(surface.targetingIndicators[0]?.source).toMatchObject({
-      type: "stack",
-      stackItemId: "story-stack-2",
-    });
+    ]);
+    expect(surface.targetingIndicators[0]?.secondaryFootprintCoords.length).toBeGreaterThan(0);
   });
 
-  it("applies tutorial highlights by coord and piece", () => {
-    const surface = buildBoardSurface({
-      match: storyMatch(),
-      viewerSide: "player",
-      selectedCard: null,
-      selectedPiece: null,
-      focusedCoord: null,
-      hoveredCoord: null,
-      isInteractive: true,
-      tutorialHighlights: [
-        { kind: "coord", coord: { q: 0, r: 1 }, tone: "primary" },
-        { kind: "piece", pieceId: "opponent-hero", tone: "danger" },
-      ],
-    });
-
-    expect(surface.tileByKey.get("0:1")?.tutorialHighlightTone).toBe("primary");
-    expect(surface.tileByKey.get("1:1")?.tutorialHighlightTone).toBe("danger");
-  });
-
-  it("includes dropped items, mana sources, and buildings in tile affordances", () => {
+  it("exposes selected Piece move and attack targets", () => {
     const match = storyMatch({
-      hand: [sparkJoltCard],
-      units: [storyUnit({ q: -1, r: 1 })],
+      units: [storyUnit({ q: 0, r: 0 }, { id: "friendly-unit" })],
+      opponentHero: { q: 1, r: 0 },
     });
-    const droppedItem = droppedItemAt({ q: 0, r: 0 });
-    const building = buildingAt({ q: 0, r: 0 });
-    match.board.droppedItems = [droppedItem];
-    match.board.manaSources = [{ q: 0, r: 0 }];
-    match.board.buildings = [building];
+    const selectedPiece = pieceById(match, "friendly-unit");
 
-    const surface = buildBoardSurface({
+    const surface = deriveBoardSurface({
+      match,
+      viewerSide: "player",
+      selectedCard: null,
+      selectedPiece,
+      focusedCoord: null,
+      hoveredCoord: null,
+      readOnly: false,
+      disabled: false,
+      tutorialHighlights: [],
+      animation: null,
+      activeStackItemId: null,
+    });
+
+    expect(tileAt(surface, 0, 0)).toMatchObject({ isSelected: true, isLegal: false });
+    expect(tileAt(surface, -1, 0)).toMatchObject({ isLegal: true, piece: null });
+    expect(tileAt(surface, 1, 0)).toMatchObject({
+      isLegal: true,
+      piece: { id: "opponent-hero" },
+    });
+    expect(surface.targetingIndicators).toEqual([
+      expect.objectContaining({
+        actionType: "attack",
+        sourcePieceId: "friendly-unit",
+        primaryTargetPieceId: "opponent-hero",
+      }),
+    ]);
+  });
+
+  it("exposes stack targeting and filters it through the same surface", () => {
+    const match = storyMatch({
+      actionStack: [pendingAttackStack, pendingSpellStack],
+      prioritySide: "player",
+    });
+
+    const allIndicators = deriveBoardSurface({
       match,
       viewerSide: "player",
       selectedCard: null,
       selectedPiece: null,
       focusedCoord: null,
       hoveredCoord: null,
-      isInteractive: true,
-    });
-    const tile = surface.tileByKey.get("0:0");
+      readOnly: false,
+      disabled: false,
+      tutorialHighlights: [],
+      animation: null,
+      activeStackItemId: null,
+    }).targetingIndicators;
+    const filteredIndicators = deriveBoardSurface({
+      match,
+      viewerSide: "player",
+      selectedCard: null,
+      selectedPiece: null,
+      focusedCoord: null,
+      hoveredCoord: null,
+      readOnly: false,
+      disabled: false,
+      tutorialHighlights: [],
+      animation: null,
+      activeStackItemId: pendingSpellStack.id,
+    }).targetingIndicators;
 
-    expect(tile?.hasManaSource).toBe(true);
-    expect(tile?.hasBuilding).toBe(true);
-    expect(tile?.buildingDecor).toMatchObject({
-      visualKind: "watchtower",
-      glyph: "W",
-      effectType: "activatedDamageLine",
-      activatedThisTurn: false,
-    });
-    expect(tile?.droppedItemCount).toBe(1);
-    expect(tile?.title).toContain("1 dropped item");
-    expect(tile?.title).toContain("building Watchtower");
+    expect(allIndicators.map((indicator) => indicator.source)).toEqual([
+      expect.objectContaining({ stackItemId: pendingAttackStack.id }),
+      expect.objectContaining({ stackItemId: pendingSpellStack.id }),
+    ]);
+    expect(filteredIndicators).toEqual([
+      expect.objectContaining({
+        source: expect.objectContaining({ stackItemId: pendingSpellStack.id }),
+      }),
+    ]);
   });
 
-  it("includes occupied side and unknown fallback in Building decor", () => {
-    const match = storyMatch({
-      playerHero: { q: 0, r: 0 },
-    });
+  it("shares tutorial, feature, label, and disabled records across 2D and 3D adapters", () => {
+    const match = storyMatch({ units: [storyUnit({ q: 0, r: 0 })] });
     match.board.buildings = [
       {
-        ...buildingAt({ q: 0, r: 0 }),
-        templateId: "future-building",
-        activatedThisTurn: true,
+        id: "mana-well",
+        templateId: "mana-well",
+        name: "Mana Well",
+        position: { q: 0, r: 0 },
+        effect: { type: "turnStartMana", amount: 1 },
+        activatedThisTurn: false,
+      },
+    ];
+    match.board.droppedItems = [
+      {
+        id: "dropped-flask",
+        position: { q: 0, r: 0 },
+        item: {
+          id: "flask",
+          templateId: "ember-flask",
+          name: "Ember Flask",
+          passive: { type: "statBonus", attack: 1, armor: 0, maxAp: 0 },
+          activeUsedThisTurn: false,
+        },
       },
     ];
 
-    const surface = buildBoardSurface({
+    const surface = deriveBoardSurface({
       match,
       viewerSide: "player",
       selectedCard: null,
       selectedPiece: null,
       focusedCoord: null,
       hoveredCoord: null,
-      isInteractive: true,
+      readOnly: true,
+      disabled: false,
+      tutorialHighlights: [
+        { kind: "piece", pieceId: "story-player-unit", tone: "primary" },
+        { kind: "coord", coord: { q: -1, r: 0 }, tone: "danger" },
+      ],
+      animation: null,
+      activeStackItemId: null,
     });
 
-    expect(surface.tileByKey.get("0:0")?.buildingDecor).toMatchObject({
-      visualKind: "unknownBuilding",
-      glyph: "B",
-      occupiedSide: "player",
-      activatedThisTurn: true,
+    expect(surface.isInteractive).toBe(false);
+    expect(tileAt(surface, 0, 0)).toMatchObject({
+      disabled: true,
+      tutorialHighlightTone: "primary",
+      hasManaSource: true,
+      hasBuilding: true,
+      droppedItemCount: 1,
+      pieceLabel: "YOU",
     });
+    expect(tileAt(surface, 0, 0)?.title).toContain("1 dropped item");
+    expect(tileAt(surface, 0, 0)?.title).toContain("building Mana Well");
+    expect(tileAt(surface, -1, 0)?.tutorialHighlightTone).toBe("danger");
+    const twoDimensionalTiles = surface.columns.flatMap((column) => column.tiles);
+    expect(twoDimensionalTiles).toHaveLength(surface.tiles.length);
+    for (const tile of twoDimensionalTiles) {
+      expect(surface.tiles).toContain(tile);
+    }
   });
 });
 
-function droppedItemAt(position: { q: number; r: number }): DroppedItem {
-  return {
-    id: "drop-1",
-    position,
-    item: {
-      id: "item-1",
-      templateId: "ember-flask",
-      name: "Ember Flask",
-      passive: { type: "statBonus", attack: 1, armor: 0, maxAp: 0 },
-      activeUsedThisTurn: false,
-    },
-  };
-}
-
-function buildingAt(position: { q: number; r: number }): Building {
-  return {
-    id: "building-1",
-    templateId: "watchtower",
-    name: "Watchtower",
-    position,
-    effect: { type: "activatedDamageLine", range: 2, amount: 2 },
-    activatedThisTurn: false,
-  };
+function tileAt(surface: ReturnType<typeof deriveBoardSurface>, q: number, r: number) {
+  return surface.tiles.find((tile) => tile.coord.q === q && tile.coord.r === r);
 }
