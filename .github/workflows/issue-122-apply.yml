@@ -1,0 +1,229 @@
+name: Apply issue 122 movement card rules
+
+on:
+  push:
+    branches:
+      - agent/issue-122-movement-card-rules
+    paths:
+      - .github/workflows/issue-122-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/issue-122-movement-card-rules
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply focused rules and test patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected exactly one match in {path}, got {count}: {old[:80]!r}")
+              file.write_text(text.replace(old, new, 1))
+
+          match_session = "backend/src/match_session.rs"
+          replace_once(
+              match_session,
+              '''    fn start_card_play_for_side(
+                  &mut self,
+                  side: Side,
+                  frames: &mut Vec<RecordedReplayFrame>,
+                  action_index: Option<u32>,
+              ) -> Result<(), MatchError> {
+                  if self.phase != Phase::Movement && self.phase != Phase::Attack {
+                      return Err(MatchError::WrongPhase);
+                  }
+                  self.transition_to_phase(side, Phase::CardPlay, frames, action_index);
+                  Ok(())
+              }
+          ''',
+              '''    fn start_card_play_for_side(
+                  &mut self,
+                  side: Side,
+                  frames: &mut Vec<RecordedReplayFrame>,
+                  action_index: Option<u32>,
+              ) -> Result<(), MatchError> {
+                  self.require_phase(Phase::Attack)?;
+                  self.transition_to_phase(side, Phase::CardPlay, frames, action_index);
+                  Ok(())
+              }
+          ''',
+          )
+          replace_once(
+              match_session,
+              '''        if stack_was_empty {
+                  if side != self.active_side {
+                      return Err(MatchError::NotActiveSide);
+                  }
+                  self.require_phase(Phase::CardPlay)?;
+              } else {
+          ''',
+              '''        if stack_was_empty {
+                  if side != self.active_side {
+                      return Err(MatchError::NotActiveSide);
+                  }
+                  if self.phase != Phase::Movement && self.phase != Phase::CardPlay {
+                      return Err(MatchError::WrongPhase);
+                  }
+              } else {
+          ''',
+          )
+
+          turn_flow = "backend/src/match_session/tests/turn_flow.rs"
+          replace_once(
+              turn_flow,
+              '''    assert_eq!(
+                  game.apply_action(MatchActionRequest::PlayCard {
+                      card_id: card_id.clone(),
+                      target: ActionTarget::Hex { coord: hex(0, 2) },
+                  }),
+                  Err(MatchError::WrongPhase)
+              );
+          ''',
+              '''    assert_eq!(
+                  game.apply_action(MatchActionRequest::StartCardPlay),
+                  Err(MatchError::WrongPhase)
+              );
+          ''',
+          )
+          replace_once(
+              turn_flow,
+              '''    game.apply_action(MatchActionRequest::StartCardPlay)
+                  .expect("attack phase can finish into card play");
+          ''',
+              '''    assert_eq!(
+                  game.apply_action(MatchActionRequest::PlayCard {
+                      card_id: card_id.clone(),
+                      target: ActionTarget::Hex { coord: hex(0, 2) },
+                  }),
+                  Err(MatchError::WrongPhase)
+              );
+
+              game.apply_action(MatchActionRequest::StartCardPlay)
+                  .expect("attack phase can finish into card play");
+          ''',
+          )
+          replace_once(
+              turn_flow,
+              '''#[test]
+          fn movement_phase_can_skip_attacks_and_start_card_play() {
+              let mut game = MatchState::new_with_seed(7);
+
+              game.apply_action(MatchActionRequest::StartCardPlay)
+                  .expect("movement phase can skip directly to cards");
+
+              assert_eq!(game.phase, Phase::CardPlay);
+          }
+          ''',
+              '''#[test]
+          fn movement_phase_cannot_skip_attack_phase() {
+              let mut game = MatchState::new_with_seed(7);
+
+              assert_eq!(
+                  game.apply_action(MatchActionRequest::StartCardPlay),
+                  Err(MatchError::WrongPhase)
+              );
+              assert_eq!(game.phase, Phase::Movement);
+          }
+          ''',
+          )
+
+          Path(turn_flow).write_text(Path(turn_flow).read_text() + r'''
+
+          #[test]
+          fn movement_phase_card_play_spends_only_mana_and_resumes_movement() {
+              let mut game = MatchState::new_with_seed(7);
+              let card = player_unit_card(&game, "ember-squire");
+              let card_cost = card.cost;
+              let card_id = put_card_in_hand(&mut game, card);
+              game.phase = Phase::Movement;
+              let hero_ap_before = game.player.hero.ap_remaining;
+              let mana_before = game.player.mana;
+
+              let frames = game
+                  .apply_action_recording(
+                      MatchActionRequest::PlayCard {
+                          card_id,
+                          target: ActionTarget::Hex { coord: hex(0, 2) },
+                      },
+                      20,
+                  )
+                  .expect("movement phase can initiate a proactive card");
+
+              assert_eq!(game.phase, Phase::Movement);
+              assert_eq!(game.player.hero.ap_remaining, hero_ap_before);
+              assert_eq!(game.player.mana, mana_before - card_cost);
+              assert!(game.action_stack.is_empty());
+              assert!(game.board.units.iter().any(|unit| unit.template_id.as_deref() == Some("ember-squire")));
+              assert!(!frames.iter().any(|frame| matches!(
+                  frame.event,
+                  ReplayEvent::PhaseChanged { phase: Phase::CardPlay, .. }
+              )));
+          }
+
+          #[test]
+          fn shared_movement_card_resolves_without_changing_the_underlying_phase() {
+              let mut game = MatchState::new_with_seed_hero_types_and_mode(
+                  7,
+                  HeroType::Runekeeper,
+                  HeroType::Pyromancer,
+                  MatchMode::Shared,
+              );
+              let card = player_unit_card(&game, "ember-squire");
+              let card_id = put_card_in_side_hand(&mut game, Side::Player, card);
+              game.phase = Phase::Movement;
+
+              game.apply_action_recording_for_side(
+                  Side::Player,
+                  MatchActionRequest::PlayCard {
+                      card_id,
+                      target: ActionTarget::Hex { coord: hex(0, 2) },
+                  },
+                  21,
+              )
+              .expect("shared active side can initiate a movement-phase card");
+
+              assert_eq!(game.phase, Phase::Movement);
+              assert_eq!(game.action_stack.len(), 1);
+              assert_eq!(game.priority_side, Some(Side::Opponent));
+
+              game.apply_action_recording_for_side(
+                  Side::Opponent,
+                  MatchActionRequest::PassPriority,
+                  22,
+              )
+              .expect("opponent can pass priority to resolve the movement-phase card");
+
+              assert_eq!(game.phase, Phase::Movement);
+              assert!(game.action_stack.is_empty());
+              assert!(game.board.units.iter().any(|unit| unit.template_id.as_deref() == Some("ember-squire")));
+          }
+          ''')
+          PY
+      - name: Format
+        run: cargo fmt --all
+      - name: Verify focused backend rules
+        run: cargo test -p backend match_session
+      - name: Check diff hygiene
+        run: git diff --check
+      - name: Commit verified implementation
+        run: |
+          rm .github/workflows/issue-122-apply.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add backend/src/match_session.rs backend/src/match_session/tests/turn_flow.rs .github/workflows/issue-122-apply.yml
+          git commit -m "feat: allow movement-phase card play"
+          git push origin HEAD:agent/issue-122-movement-card-rules
