@@ -224,9 +224,17 @@ mod tests {
             .apply_solo_action(
                 Actor::Anonymous,
                 &created.id,
+                MatchActionRequest::StartAttackPhase,
+            )
+            .expect("ownerless attack phase action should apply");
+
+        MatchCommands::new(&mut store)
+            .apply_solo_action(
+                Actor::Anonymous,
+                &created.id,
                 MatchActionRequest::StartCardPlay,
             )
-            .expect("ownerless phase action should apply");
+            .expect("ownerless card play phase action should apply");
 
         let applied = MatchCommands::new(&mut store)
             .apply_solo_action(Actor::Anonymous, &created.id, MatchActionRequest::EndTurn)
@@ -238,7 +246,7 @@ mod tests {
             store
                 .next_action_index(&created.id)
                 .expect("action index should load"),
-            2
+            3
         );
         let replay = store
             .load_replay(&created.id)

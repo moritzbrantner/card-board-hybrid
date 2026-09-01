@@ -87,10 +87,7 @@ fn turn_phase_actions_gate_movement_attack_card_play_and_end_turn() {
         Err(MatchError::WrongPhase)
     );
     assert_eq!(
-        game.apply_action(MatchActionRequest::PlayCard {
-            card_id: card_id.clone(),
-            target: ActionTarget::Hex { coord: hex(0, 2) },
-        }),
+        game.apply_action(MatchActionRequest::StartCardPlay),
         Err(MatchError::WrongPhase)
     );
     assert_eq!(
@@ -108,6 +105,13 @@ fn turn_phase_actions_gate_movement_attack_card_play_and_end_turn() {
         }),
         Err(MatchError::WrongPhase)
     );
+    assert_eq!(
+        game.apply_action(MatchActionRequest::PlayCard {
+            card_id: card_id.clone(),
+            target: ActionTarget::Hex { coord: hex(0, 2) },
+        }),
+        Err(MatchError::WrongPhase)
+    );
 
     game.apply_action(MatchActionRequest::StartCardPlay)
         .expect("attack phase can finish into card play");
@@ -120,13 +124,92 @@ fn turn_phase_actions_gate_movement_attack_card_play_and_end_turn() {
 }
 
 #[test]
-fn movement_phase_can_skip_attacks_and_start_card_play() {
+fn movement_phase_cannot_skip_attack_phase() {
     let mut game = MatchState::new_with_seed(7);
 
-    game.apply_action(MatchActionRequest::StartCardPlay)
-        .expect("movement phase can skip directly to cards");
+    assert_eq!(
+        game.apply_action(MatchActionRequest::StartCardPlay),
+        Err(MatchError::WrongPhase)
+    );
+    assert_eq!(game.phase, Phase::Movement);
+}
 
-    assert_eq!(game.phase, Phase::CardPlay);
+#[test]
+fn movement_phase_card_play_spends_only_mana_and_resumes_movement() {
+    let mut game = MatchState::new_with_seed(7);
+    let card = player_unit_card(&game, "ember-squire");
+    let card_cost = card.cost;
+    let card_id = put_card_in_hand(&mut game, card);
+    game.phase = Phase::Movement;
+    let hero_ap_before = game.player.hero.ap_remaining;
+    let mana_before = game.player.mana;
+
+    let frames = game
+        .apply_action_recording(
+            MatchActionRequest::PlayCard {
+                card_id,
+                target: ActionTarget::Hex { coord: hex(0, 2) },
+            },
+            20,
+        )
+        .expect("movement phase can initiate a proactive card");
+
+    assert_eq!(game.phase, Phase::Movement);
+    assert_eq!(game.player.hero.ap_remaining, hero_ap_before);
+    assert_eq!(game.player.mana, mana_before - card_cost);
+    assert!(game.action_stack.is_empty());
+    assert!(
+        game.board
+            .units
+            .iter()
+            .any(|unit| unit.template_id.as_deref() == Some("ember-squire"))
+    );
+    assert!(!frames.iter().any(|frame| matches!(
+        frame.event,
+        ReplayEvent::PhaseChanged {
+            phase: Phase::CardPlay,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn shared_movement_card_resolves_without_changing_the_underlying_phase() {
+    let mut game = MatchState::new_with_seed_hero_types_and_mode(
+        7,
+        HeroType::Runekeeper,
+        HeroType::Pyromancer,
+        MatchMode::Shared,
+    );
+    let card = player_unit_card(&game, "ember-squire");
+    let card_id = put_card_in_side_hand(&mut game, Side::Player, card);
+    game.phase = Phase::Movement;
+
+    game.apply_action_recording_for_side(
+        Side::Player,
+        MatchActionRequest::PlayCard {
+            card_id,
+            target: ActionTarget::Hex { coord: hex(0, 2) },
+        },
+        21,
+    )
+    .expect("shared active side can initiate a movement-phase card");
+
+    assert_eq!(game.phase, Phase::Movement);
+    assert_eq!(game.action_stack.len(), 1);
+    assert_eq!(game.priority_side, Some(Side::Opponent));
+
+    game.apply_action_recording_for_side(Side::Opponent, MatchActionRequest::PassPriority, 22)
+        .expect("opponent can pass priority to resolve the movement-phase card");
+
+    assert_eq!(game.phase, Phase::Movement);
+    assert!(game.action_stack.is_empty());
+    assert!(
+        game.board
+            .units
+            .iter()
+            .any(|unit| unit.template_id.as_deref() == Some("ember-squire"))
+    );
 }
 
 #[test]

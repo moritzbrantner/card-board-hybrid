@@ -747,9 +747,7 @@ impl MatchState {
         frames: &mut Vec<RecordedReplayFrame>,
         action_index: Option<u32>,
     ) -> Result<(), MatchError> {
-        if self.phase != Phase::Movement && self.phase != Phase::Attack {
-            return Err(MatchError::WrongPhase);
-        }
+        self.require_phase(Phase::Attack)?;
         self.transition_to_phase(side, Phase::CardPlay, frames, action_index);
         Ok(())
     }
@@ -916,7 +914,9 @@ impl MatchState {
             if side != self.active_side {
                 return Err(MatchError::NotActiveSide);
             }
-            self.require_phase(Phase::CardPlay)?;
+            if self.phase != Phase::Movement && self.phase != Phase::CardPlay {
+                return Err(MatchError::WrongPhase);
+            }
         } else {
             if self.priority_side != Some(side) {
                 return Err(MatchError::NotPrioritySide);
