@@ -124,7 +124,11 @@ pub(crate) enum RuleId {
     TargetLegal,
     PieceExists,
     PieceOwnedByActor,
-    TargetAdjacent,
+    MovementDestinationOnBoard,
+    MovementDestinationEmpty,
+    MovementDestinationAdjacent,
+    AttackEnemyTarget,
+    AttackTargetInRange,
     AttackUnused,
     ItemExists,
     ItemReady,
@@ -151,7 +155,11 @@ impl RuleId {
             Self::TargetLegal => "action.target-legal",
             Self::PieceExists => "piece.exists",
             Self::PieceOwnedByActor => "piece.owned-by-actor",
-            Self::TargetAdjacent => "board.target-adjacent",
+            Self::MovementDestinationOnBoard => "movement.destination-on-board",
+            Self::MovementDestinationEmpty => "movement.destination-empty",
+            Self::MovementDestinationAdjacent => "movement.destination-adjacent",
+            Self::AttackEnemyTarget => "combat.enemy-target",
+            Self::AttackTargetInRange => "combat.target-in-range",
             Self::AttackUnused => "combat.attack-unused",
             Self::ItemExists => "item.exists",
             Self::ItemReady => "item.ready",
@@ -173,6 +181,25 @@ pub(crate) struct RuleViolation {
 }
 
 impl RuleViolation {
+    pub(crate) fn for_command(command: &GameCommand, source: MatchError) -> Self {
+        let rule_id = match (command, &source) {
+            (GameCommand::MovePiece { .. }, MatchError::InvalidHex) => {
+                RuleId::MovementDestinationOnBoard
+            }
+            (GameCommand::MovePiece { .. }, MatchError::OccupiedHex) => {
+                RuleId::MovementDestinationEmpty
+            }
+            (GameCommand::MovePiece { .. }, MatchError::NotAdjacent) => {
+                RuleId::MovementDestinationAdjacent
+            }
+            (GameCommand::Attack { .. }, MatchError::InvalidTarget) => RuleId::AttackEnemyTarget,
+            (GameCommand::Attack { .. }, MatchError::NotAdjacent) => RuleId::AttackTargetInRange,
+            _ => generic_rule_id(&source),
+        };
+
+        Self { rule_id, source }
+    }
+
     pub(crate) fn rule_id(&self) -> RuleId {
         self.rule_id
     }
@@ -182,34 +209,30 @@ impl RuleViolation {
     }
 }
 
-impl From<MatchError> for RuleViolation {
-    fn from(source: MatchError) -> Self {
-        let rule_id = match source {
-            MatchError::MatchOver => RuleId::MatchActive,
-            MatchError::NotActiveSide => RuleId::ActiveParticipant,
-            MatchError::NotPrioritySide => RuleId::PriorityParticipant,
-            MatchError::CardNotFound => RuleId::CardInHand,
-            MatchError::NotEnoughMana => RuleId::ManaAvailable,
-            MatchError::NoActionPoints => RuleId::ActionPointsAvailable,
-            MatchError::InvalidHex => RuleId::HexOnBoard,
-            MatchError::OccupiedHex => RuleId::HexUnoccupied,
-            MatchError::InvalidTarget => RuleId::TargetLegal,
-            MatchError::PieceNotFound => RuleId::PieceExists,
-            MatchError::NotYourPiece => RuleId::PieceOwnedByActor,
-            MatchError::NotAdjacent => RuleId::TargetAdjacent,
-            MatchError::AlreadyAttacked => RuleId::AttackUnused,
-            MatchError::ItemNotFound => RuleId::ItemExists,
-            MatchError::ItemExhausted => RuleId::ItemReady,
-            MatchError::BuildingNotFound => RuleId::BuildingExists,
-            MatchError::BuildingExhausted => RuleId::BuildingReady,
-            MatchError::StackPending => RuleId::StackResolved,
-            MatchError::EmptyStack => RuleId::StackPendingAction,
-            MatchError::PriorityTooLow => RuleId::PriorityHigherThanPending,
-            MatchError::WrongPhase => RuleId::PhaseAllowsCommand,
-            MatchError::AiUnavailable => RuleId::AiAvailable,
-        };
-
-        Self { rule_id, source }
+fn generic_rule_id(source: &MatchError) -> RuleId {
+    match source {
+        MatchError::MatchOver => RuleId::MatchActive,
+        MatchError::NotActiveSide => RuleId::ActiveParticipant,
+        MatchError::NotPrioritySide => RuleId::PriorityParticipant,
+        MatchError::CardNotFound => RuleId::CardInHand,
+        MatchError::NotEnoughMana => RuleId::ManaAvailable,
+        MatchError::NoActionPoints => RuleId::ActionPointsAvailable,
+        MatchError::InvalidHex => RuleId::HexOnBoard,
+        MatchError::OccupiedHex => RuleId::HexUnoccupied,
+        MatchError::InvalidTarget => RuleId::TargetLegal,
+        MatchError::PieceNotFound => RuleId::PieceExists,
+        MatchError::NotYourPiece => RuleId::PieceOwnedByActor,
+        MatchError::NotAdjacent => RuleId::TargetLegal,
+        MatchError::AlreadyAttacked => RuleId::AttackUnused,
+        MatchError::ItemNotFound => RuleId::ItemExists,
+        MatchError::ItemExhausted => RuleId::ItemReady,
+        MatchError::BuildingNotFound => RuleId::BuildingExists,
+        MatchError::BuildingExhausted => RuleId::BuildingReady,
+        MatchError::StackPending => RuleId::StackResolved,
+        MatchError::EmptyStack => RuleId::StackPendingAction,
+        MatchError::PriorityTooLow => RuleId::PriorityHigherThanPending,
+        MatchError::WrongPhase => RuleId::PhaseAllowsCommand,
+        MatchError::AiUnavailable => RuleId::AiAvailable,
     }
 }
 
@@ -244,9 +267,10 @@ pub(crate) mod actions {
         action_index: u32,
     ) -> Result<GameDecision, RuleViolation> {
         let mut next_state = state.clone();
+        let attempted_command = command.clone();
         let replay_frames = next_state
             .apply_game_command_recording_for_side(side, command, action_index)
-            .map_err(RuleViolation::from)?;
+            .map_err(|error| RuleViolation::for_command(&attempted_command, error))?;
 
         Ok(GameDecision {
             next_state,
@@ -308,6 +332,27 @@ mod tests {
     }
 
     #[test]
+    fn legacy_not_adjacent_error_maps_to_command_specific_rules() {
+        let movement = GameCommand::MovePiece {
+            piece_id: "piece".to_string(),
+            to: HexCoord { q: 1, r: 0 },
+        };
+        let attack = GameCommand::Attack {
+            attacker_id: "attacker".to_string(),
+            target_id: "target".to_string(),
+        };
+
+        assert_eq!(
+            RuleViolation::for_command(&movement, MatchError::NotAdjacent).rule_id(),
+            RuleId::MovementDestinationAdjacent
+        );
+        assert_eq!(
+            RuleViolation::for_command(&attack, MatchError::NotAdjacent).rule_id(),
+            RuleId::AttackTargetInRange
+        );
+    }
+
+    #[test]
     fn rejected_movement_command_has_stable_rule_id_and_does_not_mutate_state() {
         let game = MatchState::new();
         let before = game
@@ -331,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn finish_movement_and_finish_attacks_use_tabletop_commands() {
+    fn finish_phases_and_end_turn_use_tabletop_commands() {
         let mut game = MatchState::new();
 
         let decision = actions::decide(&game, Side::Player, GameCommand::FinishMovement, 1)
@@ -344,6 +389,30 @@ mod tests {
             .expect("finishing attacks should be legal");
         actions::evolve(&mut game, decision);
         assert_eq!(game.phase, Phase::CardPlay);
+
+        let decision = actions::decide(&game, Side::Player, GameCommand::EndTurn, 3)
+            .expect("ending card play should be legal");
+        assert_eq!(game.active_side, Side::Player);
+        actions::evolve(&mut game, decision);
+        assert_eq!(game.active_side, Side::Opponent);
+    }
+
+    #[test]
+    fn end_turn_in_wrong_phase_is_rejected_without_mutation() {
+        let game = MatchState::new();
+        let before = game
+            .to_snapshot_json()
+            .expect("initial state should serialize");
+
+        let violation = queries::validate_command(&game, Side::Player, &GameCommand::EndTurn)
+            .expect_err("ending the turn during movement should be illegal");
+
+        assert_eq!(violation.rule_id(), RuleId::PhaseAllowsCommand);
+        assert_eq!(
+            game.to_snapshot_json()
+                .expect("unchanged state should serialize"),
+            before
+        );
     }
 
     #[test]
