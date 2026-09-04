@@ -215,7 +215,7 @@ impl From<MatchError> for RuleViolation {
 
 impl fmt::Display for RuleViolation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} [{}]", self.source, self.rule_id.as_str())
+        write!(f, "{} [{}]", self.source, self.rule_id().as_str())
     }
 }
 
@@ -245,7 +245,7 @@ pub(crate) mod actions {
     ) -> Result<GameDecision, RuleViolation> {
         let mut next_state = state.clone();
         let replay_frames = next_state
-            .apply_action_recording_for_side(side, command.into(), action_index)
+            .apply_game_command_recording_for_side(side, command, action_index)
             .map_err(RuleViolation::from)?;
 
         Ok(GameDecision {
@@ -281,12 +281,16 @@ pub(crate) mod queries {
     /// During the staged migration this delegates to the existing deterministic
     /// rules implementation on a cloned state, guaranteeing one source of truth
     /// instead of reimplementing legality in a second query path.
+    #[allow(
+        dead_code,
+        reason = "query boundary is introduced before UI and AI consumers migrate"
+    )]
     pub(crate) fn validate_command(
         state: &MatchState,
         side: Side,
         command: &GameCommand,
     ) -> Result<(), RuleViolation> {
-        super::actions::decide(state, side, command.clone(), 0).map(|_| ())
+        state.validate_game_command(side, command)
     }
 }
 
