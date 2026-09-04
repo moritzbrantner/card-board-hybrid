@@ -4,7 +4,7 @@ Rune Lanes has one authoritative game: the tabletop rules and the software rules
 
 Player intent is expressed as typed `GameCommand` values. Application orchestration, including advancing the Solo AI, is not a game command; AI chooses and submits the same player commands that human actors use.
 
-Rule evaluation is split into a non-mutating decision step and an explicit state commit/evolution step. A rejected command therefore cannot mutate authoritative match state. Read-only legality queries reuse the same decision path on cloned state instead of reimplementing rules separately.
+Rule evaluation is split into a non-mutating decision step and an explicit state commit/evolution step. A rejected command therefore cannot mutate authoritative match state or reach persistence. Read-only legality queries reuse the same decision path on cloned state instead of reimplementing rules separately.
 
 Stable `RuleId` values identify rule failures across engine tests, future UI explanations, and the physical rulebook. Existing `MatchActionRequest`, `MatchError`, replay frames, snapshots, persistence, and HTTP contracts remain compatibility boundaries during the staged migration.
 
