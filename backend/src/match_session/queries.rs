@@ -20,6 +20,6 @@ impl MatchState {
         candidate
             .apply_game_command_recording_for_side(side, command.clone(), 0)
             .map(|_| ())
-            .map_err(RuleViolation::from)
+            .map_err(|error| RuleViolation::for_command(command, error))
     }
 }
