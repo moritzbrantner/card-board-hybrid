@@ -4,6 +4,16 @@ Rune Lanes is a small vertical slice for a card game / board game hybrid.
 
 Players control heroes on a radius-3 hex arena. Cards cost mana and hero action points to summon units or cast spells; units then spend their own action points to move across adjacent hexes and attack enemies within their attack range.
 
+## GitHub Pages
+
+The Pages workflow publishes the frontend as a static preview at
+`https://moritzbrantner.github.io/card-board-hybrid/`.
+
+The public dashboard, rules/wiki, and fully local tutorial work without the Rust
+backend. Account authentication, the backend-driven catalog, persisted matches,
+and shared multiplayer still require the backend and are intentionally not
+reimplemented in the Pages build.
+
 ## Stack
 
 - Rust backend with Axum
@@ -34,9 +44,10 @@ The frontend proxies `/api` to `http://localhost:4000`.
 
 ## Routes
 
-- `/` opens the public match picker. Signed-out players can create anonymous
+- `/` opens the public dashboard.
+- `/play` opens the public match picker. Signed-out players can create anonymous
   solo matches, open a match by ID, create private shared-match seat links, or
-  link to `/catalog/`.
+  link to `/catalog/` when the backend is available.
 - `/login` opens the public sign-in route. `/login/` is treated equivalently,
   and successful sign-in returns to a safe same-origin `next` path or `/profile`.
 - `/register` opens the public account creation route. `/register/` is treated
