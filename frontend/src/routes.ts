@@ -22,14 +22,32 @@ export function routePathFromBrowserLocation(
 }
 
 export function browserRoutePath(path: string, baseUrl = import.meta.env.BASE_URL) {
-  const url = new URL(path, window.location.origin);
-  const routePath = `${url.pathname}${url.search}${url.hash}`;
   const basePath = deploymentBasePath(baseUrl);
-  if (!basePath) {
-    return routePath;
+  if (!basePath || !path.startsWith("/") || path.startsWith("//")) {
+    return path;
+  }
+  if (path === basePath || path.startsWith(`${basePath}/`)) {
+    return path;
   }
 
-  return routePath === "/" ? `${basePath}/` : `${basePath}${routePath}`;
+  return path === "/" ? `${basePath}/` : `${basePath}${path}`;
+}
+
+export function installDeploymentBaseHistory(baseUrl = import.meta.env.BASE_URL) {
+  const basePath = deploymentBasePath(baseUrl);
+  if (!basePath) {
+    return;
+  }
+
+  const originalPushState = window.history.pushState.bind(window.history);
+  const originalReplaceState = window.history.replaceState.bind(window.history);
+  const rewrite = (url: string | URL | null | undefined) =>
+    typeof url === "string" ? browserRoutePath(url, baseUrl) : url;
+
+  window.history.pushState = ((data, unused, url) =>
+    originalPushState(data, unused, rewrite(url))) as History["pushState"];
+  window.history.replaceState = ((data, unused, url) =>
+    originalReplaceState(data, unused, rewrite(url))) as History["replaceState"];
 }
 
 export function currentRoutePath() {
