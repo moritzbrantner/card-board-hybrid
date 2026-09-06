@@ -26,7 +26,9 @@ export function browserRoutePath(path: string, baseUrl = import.meta.env.BASE_UR
   if (!basePath || !path.startsWith("/") || path.startsWith("//")) {
     return path;
   }
-  if (path === basePath || path.startsWith(`${basePath}/`)) {
+
+  const [pathname] = path.split(/[?#]/, 1);
+  if (pathname === basePath || pathname.startsWith(`${basePath}/`)) {
     return path;
   }
 
@@ -43,11 +45,13 @@ export function installDeploymentBaseHistory(baseUrl = import.meta.env.BASE_URL)
   const originalReplaceState = window.history.replaceState.bind(window.history);
   const rewrite = (url: string | URL | null | undefined) =>
     typeof url === "string" ? browserRoutePath(url, baseUrl) : url;
+  const pushState: History["pushState"] = (data, unused, url) =>
+    originalPushState(data, unused, rewrite(url));
+  const replaceState: History["replaceState"] = (data, unused, url) =>
+    originalReplaceState(data, unused, rewrite(url));
 
-  window.history.pushState = ((data, unused, url) =>
-    originalPushState(data, unused, rewrite(url))) as History["pushState"];
-  window.history.replaceState = ((data, unused, url) =>
-    originalReplaceState(data, unused, rewrite(url))) as History["replaceState"];
+  window.history.pushState = pushState;
+  window.history.replaceState = replaceState;
 }
 
 export function currentRoutePath() {
