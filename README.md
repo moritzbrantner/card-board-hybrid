@@ -6,7 +6,7 @@ Players control heroes on a radius-3 hex arena. Cards cost mana and hero action 
 
 ## GitHub Pages
 
-The frontend is published as a static GitHub Pages preview at
+The Pages workflow publishes the frontend as a static preview at
 `https://moritzbrantner.github.io/card-board-hybrid/`.
 
 The public dashboard, rules/wiki, and fully local tutorial work without the Rust
